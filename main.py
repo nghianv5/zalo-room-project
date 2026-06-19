@@ -12,19 +12,31 @@ import logging
 app = FastAPI(title="Hệ thống Zalo Bot Phòng Trọ Big Data")
 
 UTF8_HEADERS = {"Content-Type": "application/json; charset=utf-8"}
-try:
-    # Kết nối tới Elasticsearch cluster
-    es = Elasticsearch([Config.ELASTICSEARCH_URL])
+    
+# Kết nối tới Elasticsearch cluster 
+# 1. Tự động đọc thông tin từ Render (nếu không có thì mặc định chạy localhost để bạn vẫn test được ở máy nhà)
+elastic_url = Config.ELASTICSEARCH_URL
+elastic_password = Config.ELASTICSEARCH_PASSWORD
 
-    # Thử ping kiểm tra kết nối
+# 2. Khởi tạo kết nối linh hoạt
+if elastic_password:
+    # Nếu chạy trên Render (có mật khẩu đám mây)
+    es = Elasticsearch(
+        elastic_url,
+        basic_auth=("elastic", elastic_password)
+    )
+else:
+    # Nếu chạy dưới máy tính của bạn (dùng localhost)
+    es = Elasticsearch(elastic_url)
+
+# 3. Test thử kết nối để tránh sập Server nếu điền sai thông tin
+try:
     if es.ping():
-        print("Kết nối Elasticsearch thành công!") 
-    else: 
-        print("Không thể ping tới Elasticsearch, tạm thời bỏ qua.") 
-        es = None 
+        print(" Đã kết nối thành công tới Elasticsearch vĩnh viễn!")
+    else:
+        print("⚠ Không thể ping tới Elasticsearch.")
 except Exception as e:
-    logging.warning(f"Không thể kết nối Elasticsearch: {e}. Hệ thống sẽ chạy không có DB.")
-    es = None  # Gán bằng None để các hàm sau kiểm tra nếu es is not None thì mới chạy
+    print(f"⚠ Lỗi kết nối database: {e}")
 
 INDEX_NAME = Config.ROOM_INDEX
 
