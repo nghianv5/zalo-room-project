@@ -332,27 +332,6 @@ from fastapi import FastAPI, Request
 
 app = FastAPI()
 
-# 1. Đảm bảo dùng @app.post và đường dẫn khớp 100% với link dán trên Zalo
-@app.post("/webhook/zalo")
-async def zalo_webhook(request: Request):
-    data = await request.json()
-    
-    # Kiểm tra xem có đúng là sự kiện người dùng nhắn tin tới không
-    if data.get("event_name") == "user_send_text_to_oa":
-        user_id = data["sender"]["id"]
-        user_message = data["message"]["text"]
-        
-        # BƯỚC A: Dùng Gemini bóc tách nhu cầu (ví dụ: khách muốn tìm quận mấy, giá bao nhiêu)
-        # BƯỚC B: Tìm kiếm phòng trọ phù hợp trong Elasticsearch đám mây
-        # BƯỚC C: Đưa kết quả phòng trọ cho Gemini tổng hợp thành câu trả lời hay
-        
-        # Đoạn này tạm thời làm mẫu câu trả lời, bạn sẽ thay bằng logic AI sau:
-        ai_reply = f"Cảm ơn bạn đã nhắn tin. Hệ thống đang tìm phòng trọ với yêu cầu: '{user_message}'"
-        
-        # BƯỚC D: Bắn tin nhắn trả lời về Zalo của khách
-        send_zalo_message(user_id, ai_reply)
-        
-    return {"status": "200", "message": "OK"}
     
 import requests
 import os
@@ -375,3 +354,26 @@ def send_zalo_message(user_id: str, text: str):
     
     response = requests.post(url, headers=headers, json=payload)
     return response.json()
+    
+    
+# 1. Đảm bảo dùng @app.post và đường dẫn khớp 100% với link dán trên Zalo
+@app.post("/webhook/zalo")
+async def zalo_webhook(request: Request):
+    data = await request.json()
+    
+    # Kiểm tra xem có đúng là sự kiện người dùng nhắn tin tới không
+    if data.get("event_name") == "user_send_text_to_oa":
+        user_id = data["sender"]["id"]
+        user_message = data["message"]["text"]
+        
+        # BƯỚC A: Dùng Gemini bóc tách nhu cầu (ví dụ: khách muốn tìm quận mấy, giá bao nhiêu)
+        # BƯỚC B: Tìm kiếm phòng trọ phù hợp trong Elasticsearch đám mây
+        # BƯỚC C: Đưa kết quả phòng trọ cho Gemini tổng hợp thành câu trả lời hay
+        
+        # Đoạn này tạm thời làm mẫu câu trả lời, bạn sẽ thay bằng logic AI sau:
+        ai_reply = f"Cảm ơn bạn đã nhắn tin. Hệ thống đang tìm phòng trọ với yêu cầu: '{user_message}'"
+        
+        # BƯỚC D: Bắn tin nhắn trả lời về Zalo của khách
+        send_zalo_message(user_id, ai_reply)
+        
+    return {"status": "200", "message": "OK"}
