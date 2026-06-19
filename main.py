@@ -16,14 +16,14 @@ UTF8_HEADERS = {"Content-Type": "application/json; charset=utf-8"}
 # Kết nối tới Elasticsearch cluster 
 # 1. Tự động đọc thông tin từ Render (nếu không có thì mặc định chạy localhost để bạn vẫn test được ở máy nhà)
 elastic_url = Config.ELASTICSEARCH_URL
-elastic_password = Config.ELASTICSEARCH_PASSWORD
+elastic_api_key = Config.ELASTIC_API_KEY
 
 # 2. Khởi tạo kết nối linh hoạt
 if elastic_password:
     # Nếu chạy trên Render (có mật khẩu đám mây)
     es = Elasticsearch(
         elastic_url,
-        basic_auth=("elastic", elastic_password)
+        api_key=elastic_api_key # Khởi tạo bằng API Key thay vì basic_auth
     )
 else:
     # Nếu chạy dưới máy tính của bạn (dùng localhost)
