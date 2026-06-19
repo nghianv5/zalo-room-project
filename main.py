@@ -325,3 +325,21 @@ async def verify_zalo():
     </html>
     """
     return HTMLResponse(content=html_content, status_code=200)
+    
+    
+    
+from fastapi import FastAPI, Request
+
+app = FastAPI()
+
+# 1. Đảm bảo dùng @app.post và đường dẫn khớp 100% với link dán trên Zalo
+@app.post("/webhook/zalo")
+async def zalo_webhook(request: Request):
+    try:
+        data = await request.json()
+        print("Dữ liệu Zalo gửi tới:", data)
+    except Exception as e:
+        print("Không đọc được dữ liệu JSON:", e)
+        
+    # BẮT BUỘC: Trả về HTTP Code 200 (Success) để Zalo chấp nhận kích hoạt
+    return {"status": "success", "message": "Webhook kết nối thành công"}
