@@ -19,7 +19,7 @@ elastic_url = Config.ELASTICSEARCH_URL
 elastic_api_key = Config.ELASTIC_API_KEY
 
 # 2. Khởi tạo kết nối linh hoạt
-if elastic_password:
+if elastic_api_key:
     # Nếu chạy trên Render (có mật khẩu đám mây)
     es = Elasticsearch(
         elastic_url,
