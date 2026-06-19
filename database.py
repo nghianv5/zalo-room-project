@@ -1,8 +1,32 @@
 from elasticsearch import Elasticsearch
 from config import Config
 
-es = Elasticsearch(Config.ELASTICSEARCH_URL)
 
+elastic_url = Config.ELASTICSEARCH_URL
+elastic_api_key = Config.ELASTIC_API_KEY
+
+# Khởi tạo biến es chuẩn cho toàn bộ hệ thống xài chung
+if elastic_api_key:
+    es = Elasticsearch(
+        elastic_url,
+        api_key=elastic_api_key
+    )
+else:
+    es = Elasticsearch(elastic_url)
+
+def init_db():
+    # Kiểm tra an toàn trước khi chạy lệnh gọi đến database
+    if es is None:
+        print("⚠ Không có kết nối Database hợp lệ. Bỏ qua init_db.")
+        return
+        
+    try:
+        # Giữ nguyên đoạn code cũ của bạn ở đây
+        # Ví dụ: if not es.indices.exists(index=Config.ROOM_INDEX):
+        pass 
+    except Exception as e:
+        print(f"⚠ Lỗi khi khởi tạo index: {e}")
+        
 def init_db():
     if not es.indices.exists(index=Config.ROOM_INDEX):
         # Định nghĩa kiểu dữ liệu (Mapping) tối ưu cho Elasticsearch
