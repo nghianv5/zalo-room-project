@@ -18,25 +18,27 @@ UTF8_HEADERS = {"Content-Type": "application/json; charset=utf-8"}
 elastic_url = Config.ELASTICSEARCH_URL
 elastic_api_key = Config.ELASTIC_API_KEY
 
-# 2. Khởi tạo kết nối linh hoạt
-if elastic_api_key:
-    # Nếu chạy trên Render (có mật khẩu đám mây)
-    es = Elasticsearch(
-        elastic_url,
-        api_key=elastic_api_key # Khởi tạo bằng API Key thay vì basic_auth
-    )
-else:
-    # Nếu chạy dưới máy tính của bạn (dùng localhost)
-    es = Elasticsearch(elastic_url)
+es = None
 
-# 3. Test thử kết nối để tránh sập Server nếu điền sai thông tin
 try:
-    if es.ping():
-        print(" Đã kết nối thành công tới Elasticsearch vĩnh viễn!")
+    if elastic_api_key:
+        # Nếu chạy trên Render sử dụng API Key
+        es = Elasticsearch(
+            elastic_url,
+            api_key=elastic_api_key
+        )
     else:
-        print("⚠ Không thể ping tới Elasticsearch.")
+        # Nếu chạy dưới máy tính cá nhân (localhost)
+        es = Elasticsearch(elastic_url)
+    
+    # Kiểm tra thực tế bằng một lệnh đọc thử thông tin hệ thống (chắc chắn hơn lệnh ping)
+    info = es.info()
+    print(f" Kết nối Elasticsearch trực tuyến thành công! Phiên bản: {info['version']['number']}")
+
 except Exception as e:
-    print(f"⚠ Lỗi kết nối database: {e}")
+    logging.error(f"❌ Thất bại khi kết nối hoặc chứng thực Elasticsearch: {e}")
+    print("⚠ Hệ thống sẽ chạy tạm thời ở chế độ KHÔNG CÓ DATABASE để tránh sập Server.")
+    es = None # Gán lại bằng None để các hàm sau không gọi lỗi
 
 INDEX_NAME = Config.ROOM_INDEX
 
