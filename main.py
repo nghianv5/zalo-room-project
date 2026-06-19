@@ -7,13 +7,25 @@ from ai_service import analyze_zalo_message
 from fastapi.responses import JSONResponse  # <-- THÊM DÒNG NÀY VÀO
 from elasticsearch import Elasticsearch
 from config import Config
+import logging
 
 app = FastAPI(title="Hệ thống Zalo Bot Phòng Trọ Big Data")
 
 UTF8_HEADERS = {"Content-Type": "application/json; charset=utf-8"}
+try:
+    # Kết nối tới Elasticsearch cluster
+    es = Elasticsearch([Config.ELASTICSEARCH_URL])
 
-# Kết nối tới Elasticsearch cluster
-es = Elasticsearch([Config.ELASTICSEARCH_URL])
+    # Thử ping kiểm tra kết nối
+    if es.ping():
+        print("Kết nối Elasticsearch thành công!") 
+    else: 
+        print("Không thể ping tới Elasticsearch, tạm thời bỏ qua.") 
+        es = None 
+except Exception as e:
+    logging.warning(f"Không thể kết nối Elasticsearch: {e}. Hệ thống sẽ chạy không có DB.")
+    es = None  # Gán bằng None để các hàm sau kiểm tra nếu es is not None thì mới chạy
+
 INDEX_NAME = Config.ROOM_INDEX
 
 # Giả lập bộ nhớ đệm tạm thời để chờ chủ nhà bấm "Xác nhận" trên Zalo
