@@ -316,5 +316,13 @@ from fastapi.responses import HTMLResponse
 # Thay 'zalo_verifierXXXXX.html' bằng đúng tên file bạn vừa tải từ Zalo về
 @app.get("/zalo_verifierCjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn.html", response_class=HTMLResponse)
 async def verify_zalo():
-    # Dán toàn bộ nội dung dòng mã xác thực bạn copy ở Bước 1 vào giữa hai dấu ba nháy '''
-    return '''CjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn'''
+async def verify_zalo():
+    html_content = """
+    <html>
+    <head>
+        <meta property="zalo-platform-site-verification" content="CjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn" />
+    </head>
+    <body></body>
+    </html>
+    """
+    return HTMLResponse(content=html_content, status_code=200)
