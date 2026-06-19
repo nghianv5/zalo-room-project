@@ -66,6 +66,8 @@ class SearchRequest(BaseModel):
 
 # ==================== BOT 1: BOT THU THẬP (CHỦ NHÀ) ====================
 
+
+
 @app.post("/webhook/bot1-thu-thap")
 def webhook_bot1(payload: ZaloMessage):
     # 🌟 BƯỚC MỚI: BẮT LỆNH XÁC NHẬN TỪ CHỦ NHÀ
@@ -306,3 +308,13 @@ def webhook_bot2_search(criteria: SearchRequest):
         "message": f"🤖 Tìm thấy {len(results)} phòng phù hợp nhất cho bạn:",
         "rooms": results
     }
+    
+    
+    
+from fastapi.responses import HTMLResponse
+
+# Thay 'zalo_verifierXXXXX.html' bằng đúng tên file bạn vừa tải từ Zalo về
+@app.get("/zalo_verifierCjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn.html", response_class=HTMLResponse)
+async def verify_zalo():
+    # Dán toàn bộ nội dung dòng mã xác thực bạn copy ở Bước 1 vào giữa hai dấu ba nháy '''
+    return '''CjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn'''
