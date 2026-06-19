@@ -18,6 +18,8 @@ UTF8_HEADERS = {"Content-Type": "application/json; charset=utf-8"}
 elastic_url = Config.ELASTICSEARCH_URL
 elastic_api_key = Config.ELASTIC_API_KEY
 
+print(f" elastic_url: {elastic_url}")
+print(f" elastic_api_key: {elastic_api_key}")
 es = None
 
 try:
