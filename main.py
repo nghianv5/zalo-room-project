@@ -359,23 +359,40 @@ def send_zalo_message(user_id: str, text: str):
     
 # Webhook hứng tin nhắn từ khách nhắn tới
 @app.post("/webhook/zalo")
+@app.post("/webhook/zalo")
 async def zalo_webhook(request: Request):
     try:
-        data = await request.json()
-        print("Dữ liệu Zalo gửi tới:", data)
+        # 1. Đọc dữ liệu thô từ Zalo
+        raw_body = await request.body()
+        raw_text = raw_body.decode("utf-8")
+        print("--- DỮ LIỆU THÔ TỪ ZALO GỬI TỚI ---")
+        print(raw_text)
         
-        # Kiểm tra nếu đúng là sự kiện người dùng nhắn tin văn bản tới OA
-        if data.get("event_name") in ["user_send_text", "user_send_text_to_oa"]:
-            user_id = data["sender"]["id"]       # Sẽ lấy đúng số '2118793076448884217'
-            user_message = data["message"]["text"] # Sẽ lấy đúng chữ 'Tìm phòng quận 1'
+        # 2. Ép kiểu dữ liệu chắc chắn thành Dictionary của Python
+        try:
+            data = json.loads(raw_text)
+        except Exception:
+            data = await request.json()
             
-            # Tiến hành xử lý phản hồi
-            ai_reply = f"🤖 Bot đã nhận được yêu cầu: '{user_message}'. Tôi đang tìm kiếm phòng trọ phù hợp nhất cho bạn!"
+        # 3. Lấy event_name ra một biến riêng và xóa khoảng trắng nếu có
+        event_name = str(data.get("event_name", "")).strip()
+        print(f"-> Kiểm tra Event Name thực tế: '{event_name}'")
+        
+        # 4. Kiểm tra điều kiện nới lỏng (Chỉ cần chứa chữ 'user_send_text' là duyệt)
+        if "user_send_text" in event_name:
+            print("=> ĐÃ THỎA MÃN ĐIỀU KIỆN IF! Đang xử lý gửi tin...")
             
-            # Bắn tin nhắn về điện thoại
+            user_id = data["sender"]["id"]
+            user_message = data["message"]["text"]
+            
+            ai_reply = f"🤖 Chào bạn! Tôi đã nhận được yêu cầu: '{user_message}'. Hệ thống đang xử lý..."
+            
+            # Gọi hàm gửi tin nhắn
             send_zalo_message(user_id, ai_reply)
+        else:
+            print(f"=[ Bỏ qua vì event_name '{event_name}' không khớp yêu cầu.")
             
     except Exception as e:
-        print("Lỗi xử lý webhook:", e)
+        print("Lỗi nghiêm trọng tại Webhook:", e)
         
     return {"status": "success"}
