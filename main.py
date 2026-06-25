@@ -339,7 +339,7 @@ import os
 def send_zalo_message(user_id: str, text: str):
     url = "https://openapi.zalo.me/v2.0/oa/message"
     headers = {
-        "access_token": ZALO_ACCESS_TOKEN,
+        "access_token": Config.ZALO_ACCESS_TOKEN,
         "Content-Type": "application/json"
     }
     payload = {
