@@ -366,14 +366,14 @@ async def zalo_webhook(request: Request):
         
         # Kiểm tra nếu đúng là sự kiện người dùng nhắn tin văn bản tới OA
         if data.get("event_name") in ["user_send_text", "user_send_text_to_oa"]:
-        user_id = data["sender"]["id"]       # Sẽ lấy đúng số '2118793076448884217'
-        user_message = data["message"]["text"] # Sẽ lấy đúng chữ 'Tìm phòng quận 1'
-        
-        # Tiến hành xử lý phản hồi
-        ai_reply = f"🤖 Bot đã nhận được yêu cầu: '{user_message}'. Tôi đang tìm kiếm phòng trọ phù hợp nhất cho bạn!"
-        
-        # Bắn tin nhắn về điện thoại
-        send_zalo_message(user_id, ai_reply)
+            user_id = data["sender"]["id"]       # Sẽ lấy đúng số '2118793076448884217'
+            user_message = data["message"]["text"] # Sẽ lấy đúng chữ 'Tìm phòng quận 1'
+            
+            # Tiến hành xử lý phản hồi
+            ai_reply = f"🤖 Bot đã nhận được yêu cầu: '{user_message}'. Tôi đang tìm kiếm phòng trọ phù hợp nhất cho bạn!"
+            
+            # Bắn tin nhắn về điện thoại
+            send_zalo_message(user_id, ai_reply)
             
     except Exception as e:
         print("Lỗi xử lý webhook:", e)
