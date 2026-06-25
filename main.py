@@ -26,7 +26,7 @@ elastic_api_key = Config.ELASTIC_API_KEY
 # --- KHỞI TẠO GEMINI AI ---
 # Đảm bảo 2 dòng này nằm ngoài rìa hoàn toàn (không thụt lề) và ở trên cùng:
 genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-model = genai.GenerativeModel("gemini-1.5-flash")  # Chữ 'model' phải viết thường y chang ở đây
+model = genai.GenerativeModel("gemini-1.5-flash-latest")
 es = None
 
 try:
