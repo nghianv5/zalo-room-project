@@ -339,7 +339,7 @@ import os
 def send_zalo_message(user_id: str, text: str):
     # Zalo yêu cầu Access Token để xác thực quyền gửi tin nhắn
     # (Bạn lấy Access Token này từ trang Zalo Developer nhé)
-    zalo_token = config.ZALO_ACCESS_TOKEN
+    zalo_token = Config.ZALO_ACCESS_TOKEN
     
     url = "https://openapi.zalo.me/v2.0/oa/message"
     headers = {
