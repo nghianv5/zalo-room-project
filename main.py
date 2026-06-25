@@ -336,20 +336,30 @@ app = FastAPI()
 import requests
 import os
 
-def send_zalo_message(user_id: str, text: str):
-    url = "https://openapi.zalo.me/v2.0/oa/message"
+def send_zalo_message(recipient_id: str, text: str):
+    token = os.environ.get("ZALO_ACCESS_TOKEN")
+    
+    # 1. ĐỔI ĐƯỜNG LINK SANG V3.0
+    url = "https://openapi.zalo.me/v3.0/oa/message/cs"
+    
     headers = {
-        "access_token": Config.ZALO_ACCESS_TOKEN,
+        "access_token": token,
         "Content-Type": "application/json"
     }
+    
+    # 2. ĐỔI CẤU TRÚC PAYLOAD THEO CHUẨN V3
     payload = {
-        "recipient": {"user_id": user_id},
-        "message": {"text": text}
+        "recipient": {
+            "user_id": recipient_id  # Điền user_id_by_app vào đây
+        },
+        "message": {
+            "text": text
+        }
     }
+    
     response = requests.post(url, headers=headers, json=payload)
     
-    # THÊM DÒNG NÀY ĐỂ XEM ZALO TRẢ VỀ LỖI GÌ:
-    print("--- KẾT QUẢ TRẢ VỀ TỪ ZALO API ---")
+    print("--- KẾT QUẢ TRẢ VỀ TỪ ZALO API V3 ---")
     print(response.json())
     
     return response.json()
@@ -358,38 +368,25 @@ def send_zalo_message(user_id: str, text: str):
     
 # Webhook hứng tin nhắn từ khách nhắn tới
 @app.post("/webhook/zalo")
-@app.post("/webhook/zalo")
 async def zalo_webhook(request: Request):
     try:
-        # 1. Đọc dữ liệu thô từ Zalo
         raw_body = await request.body()
         raw_text = raw_body.decode("utf-8")
-        print("--- DỮ LIỆU THÔ TỪ ZALO GỬI TỚI ---")
-        print(raw_text)
+        data = json.loads(raw_text)
         
-        # 2. Ép kiểu dữ liệu chắc chắn thành Dictionary của Python
-        try:
-            data = json.loads(raw_text)
-        except Exception:
-            data = await request.json()
-            
-        # 3. Lấy event_name ra một biến riêng và xóa khoảng trắng nếu có
         event_name = str(data.get("event_name", "")).strip()
-        print(f"-> Kiểm tra Event Name thực tế: '{event_name}'")
         
-        # 4. Kiểm tra điều kiện nới lỏng (Chỉ cần chứa chữ 'user_send_text' là duyệt)
         if "user_send_text" in event_name:
-            print("=> ĐÃ THỎA MÃN ĐIỀU KIỆN IF! Đang xử lý gửi tin...")
+            print("=> ĐÃ THỎA MÃN ĐIỀU KIỆN IF! Đang xử lý gửi tin theo chuẩn V3...")
             
-            user_id = data["sender"]["id"]
+            # 3. QUAN TRỌNG: Ưu tiên lấy 'user_id_by_app' theo chuẩn mới, nếu không có mới dùng 'sender.id'
+            recipient_id = data.get("user_id_by_app") or data["sender"]["id"]
             user_message = data["message"]["text"]
             
-            ai_reply = f"🤖 Chào bạn! Tôi đã nhận được yêu cầu: '{user_message}'. Hệ thống đang xử lý..."
+            ai_reply = f"🤖 Bot Phòng Trọ chuẩn V3 xin chào! Tôi đã nhận được yêu cầu: '{user_message}'."
             
-            # Gọi hàm gửi tin nhắn
-            send_zalo_message(user_id, ai_reply)
-        else:
-            print(f"=[ Bỏ qua vì event_name '{event_name}' không khớp yêu cầu.")
+            # Gọi hàm gửi tin nhắn với ID mới
+            send_zalo_message(recipient_id, ai_reply)
             
     except Exception as e:
         print("Lỗi nghiêm trọng tại Webhook:", e)
