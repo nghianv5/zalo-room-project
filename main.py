@@ -10,6 +10,10 @@ from config import Config
 import logging
 import json
 
+    
+import requests
+import os
+
 app = FastAPI(title="Hệ thống Zalo Bot Phòng Trọ Big Data")
 
 UTF8_HEADERS = {"Content-Type": "application/json; charset=utf-8"}
@@ -333,9 +337,37 @@ from fastapi import FastAPI, Request
 
 app = FastAPI()
 
-    
-import requests
-import os
+
+# --- 2. HÀM TÌM PHÒNG TRÊN ELASTICSEARCH ---
+def search_rooms_from_es(user_query: str):
+    try:
+        # Tìm kiếm dựa trên từ khóa người dùng nhập (ví dụ: "quận 1")
+        query_body = {
+            "query": {
+                "multi_match": {
+                    "query": user_query,
+                    "fields": ["title", "description", "address", "district"]
+                }
+            },
+            "size": 3  # Lấy ra tối đa 3 phòng phù hợp nhất để tránh quá tải text cho AI
+        }
+        
+        response = es.search(index=ROOM_INDEX, body=query_body)
+        hits = response['hits']['hits']
+        
+        rooms_list = []
+        for hit in hits:
+            source = hit['_source']
+            rooms_list.append({
+                "Tiêu đề": source.get("title"),
+                "Giá": source.get("price"),
+                "Địa chỉ": source.get("address"),
+                "Mô tả": source.get("description")
+            })
+        return rooms_list
+    except Exception as e:
+        print("Lỗi truy vấn Elasticsearch:", e)
+        return []
 
 def send_zalo_message(recipient_id: str, text: str):
     token = Config.ZALO_ACCESS_TOKEN
