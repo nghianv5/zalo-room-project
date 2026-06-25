@@ -23,8 +23,10 @@ UTF8_HEADERS = {"Content-Type": "application/json; charset=utf-8"}
 elastic_url = Config.ELASTICSEARCH_URL
 elastic_api_key = Config.ELASTIC_API_KEY
 
-print(f" elastic_url: {elastic_url}")
-print(f" elastic_api_key: {elastic_api_key}")
+# --- KHỞI TẠO GEMINI AI ---
+# Đảm bảo 2 dòng này nằm ngoài rìa hoàn toàn (không thụt lề) và ở trên cùng:
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+model = genai.GenerativeModel("gemini-1.5-flash")  # Chữ 'model' phải viết thường y chang ở đây
 es = None
 
 try:
@@ -352,7 +354,7 @@ def search_rooms_from_es(user_query: str):
             "size": 3  # Lấy ra tối đa 3 phòng phù hợp nhất để tránh quá tải text cho AI
         }
         
-        response = es.search(index=ROOM_INDEX, body=query_body)
+        response = es.search(index=INDEX_NAME, body=query_body)
         hits = response['hits']['hits']
         
         rooms_list = []
