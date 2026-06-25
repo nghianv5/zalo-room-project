@@ -436,7 +436,7 @@ async def zalo_webhook(request: Request):
             """
             
             # --- BƯỚC C: GỌI THẲNG API GEMINI KHÔNG QUA SDK ---
-            api_key = os.environ.get("GOOGLE_API_KEY")
+            api_key = "AQ.Ab8RN6KgODYVlRLycHkUsu4byQhC_kjbmcVzrTYwUjb5Vb_VDA"
             # Sử dụng endpoint v1 chuẩn hóa, không dùng v1beta bị lỗi
             gemini_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
             
