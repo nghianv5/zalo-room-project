@@ -9,7 +9,7 @@ from elasticsearch import Elasticsearch
 from config import Config
 import logging
 import json
-
+import google.generativeai as genai
     
 import requests
 import os
