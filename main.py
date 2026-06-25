@@ -365,18 +365,15 @@ async def zalo_webhook(request: Request):
         print("Dữ liệu Zalo gửi tới:", data)
         
         # Kiểm tra nếu đúng là sự kiện người dùng nhắn tin văn bản tới OA
-        if data.get("event_name") == "user_send_text_to_oa":
-            user_id = data["sender"]["id"]       # ID của bạn (khách nhắn)
-            user_message = data["message"]["text"] # Chữ "Alo bot ơi" bạn nhắn
-            
-            # --- KHÚC NÀY LÀ NƠI BẠN XỬ LÝ AI ---
-            # Ví dụ tạm thời: Trả lời tự động để test xem thông luồng gửi chưa
-            ai_reply = f"🤖 Bot Phòng Trọ xin chào! Tôi đã nhận được tin nhắn: '{user_message}'. Hệ thống đang kết nối AI..."
-            
-            # (Sau khi test thành công, bạn sẽ viết code cho Gemini bốc dữ liệu từ Elasticsearch ở đây)
-            
-            # Gửi ngược lại điện thoại cho khách
-            send_zalo_message(user_id, ai_reply)
+        if data.get("event_name") in ["user_send_text", "user_send_text_to_oa"]:
+        user_id = data["sender"]["id"]       # Sẽ lấy đúng số '2118793076448884217'
+        user_message = data["message"]["text"] # Sẽ lấy đúng chữ 'Tìm phòng quận 1'
+        
+        # Tiến hành xử lý phản hồi
+        ai_reply = f"🤖 Bot đã nhận được yêu cầu: '{user_message}'. Tôi đang tìm kiếm phòng trọ phù hợp nhất cho bạn!"
+        
+        # Bắn tin nhắn về điện thoại
+        send_zalo_message(user_id, ai_reply)
             
     except Exception as e:
         print("Lỗi xử lý webhook:", e)
