@@ -337,22 +337,21 @@ import requests
 import os
 
 def send_zalo_message(user_id: str, text: str):
-    # Zalo yêu cầu Access Token để xác thực quyền gửi tin nhắn
-    # (Bạn lấy Access Token này từ trang Zalo Developer nhé)
-    zalo_token = Config.ZALO_ACCESS_TOKEN
-    
     url = "https://openapi.zalo.me/v2.0/oa/message"
     headers = {
-        "access_token": zalo_token,
+        "access_token": ZALO_ACCESS_TOKEN,
         "Content-Type": "application/json"
     }
-    
     payload = {
         "recipient": {"user_id": user_id},
         "message": {"text": text}
     }
-    
     response = requests.post(url, headers=headers, json=payload)
+    
+    # THÊM DÒNG NÀY ĐỂ XEM ZALO TRẢ VỀ LỖI GÌ:
+    print("--- KẾT QUẢ TRẢ VỀ TỪ ZALO API ---")
+    print(response.json())
+    
     return response.json()
     
     
