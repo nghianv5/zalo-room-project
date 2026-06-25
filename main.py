@@ -24,8 +24,8 @@ elastic_url = Config.ELASTICSEARCH_URL
 elastic_api_key = Config.ELASTIC_API_KEY
 
 # --- KHỞI TẠO GEMINI AI ---
-genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
-model = genai.GenerativeModel("gemini-1.5-flash")
+#genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
+#model = genai.GenerativeModel("gemini-1.5-flash")
 es = None
 
 try:
@@ -416,11 +416,11 @@ async def zalo_webhook(request: Request):
             
             print(f"-> Khách hỏi: {user_message}")
             
-            # Bước A: Lên Elasticsearch tìm phòng dựa trên câu hỏi của khách
+            # Bước A: Lên Elasticsearch tìm phòng (giữ nguyên)
             found_rooms = search_rooms_from_es(user_message)
             print(f"-> Tìm thấy {len(found_rooms)} phòng trọ phù hợp.")
             
-            # Bước B: Xây dựng Prompt (bối cảnh) gửi cho Gemini AI soạn văn bản
+            # Bước B: Xây dựng Prompt (giữ nguyên)
             prompt = f"""
             Bạn là một trợ lý ảo tư vấn phòng trọ thông minh, thân thiện của hệ thống Zalo OA.
             Khách hàng nhắn: "{user_message}"
@@ -430,16 +430,35 @@ async def zalo_webhook(request: Request):
             
             Yêu cầu:
             1. Dựa vào danh sách trên, hãy tổng hợp lại và tư vấn cho khách bằng giọng điệu lịch sự, thu hút.
-            2. Nếu có phòng phù hợp, hãy liệt kê các thông tin rõ ràng (Tiêu đề, Giá, Địa chỉ...).
+            2. Nếu có phòng phù hợp, hãy liệt kê các thông tin rõ ràng.
             3. Nếu danh sách phòng trống/không tìm thấy, hãy khéo léo báo rằng hiện tại khu vực này đang hết phòng và gợi ý họ để lại số điện thoại hoặc nhu cầu chi tiết hơn.
             4. Viết ngắn gọn, dễ đọc, phù hợp với giao diện tin nhắn Zalo.
             """
             
-            # Bước C: Gọi Gemini AI sinh câu trả lời
-            ai_response = model.generate_content(prompt)
-            ai_reply = ai_response.text.strip()
+            # --- BƯỚC C: GỌI THẲNG API GEMINI KHÔNG QUA SDK ---
+            api_key = os.environ.get("GOOGLE_API_KEY")
+            # Sử dụng endpoint v1 chuẩn hóa, không dùng v1beta bị lỗi
+            gemini_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
             
-            # Bước D: Bắn câu trả lời của AI về điện thoại khách hàng qua Zalo V3
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "contents": [{
+                    "parts": [{"text": prompt}]
+                }]
+            }
+            
+            # Gọi API bằng requests
+            gemini_response = requests.post(gemini_url, headers=headers, json=payload)
+            gemini_data = gemini_response.json()
+            
+            # Bóc tách văn bản phản hồi từ Google JSON
+            try:
+                ai_reply = gemini_data['candidates'][0]['content']['parts'][0]['text'].strip()
+            except Exception as parse_error:
+                print("Lỗi bóc tách JSON Gemini:", gemini_data)
+                ai_reply = "🤖 Hệ thống đang bận cập nhật dữ liệu phòng trọ, bạn vui lòng thử lại sau vài phút nhé!"
+            
+            # Bước D: Bắn câu trả lời về Zalo (giữ nguyên)
             send_zalo_message(recipient_id, ai_reply)
             
     except Exception as e:
