@@ -338,7 +338,7 @@ import requests
 import os
 
 def send_zalo_message(recipient_id: str, text: str):
-    token = os.environ.get("ZALO_ACCESS_TOKEN")
+    token = Config.ZALO_ACCESS_TOKEN
     
     # 1. ĐỔI ĐƯỜNG LINK SANG V3.0
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
