@@ -4,4 +4,4 @@ pydantic
 google-genai
 requests
 elasticsearch
-google-generativeai
+google-generativeai>=0.8.0
