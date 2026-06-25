@@ -8,6 +8,7 @@ from fastapi.responses import JSONResponse  # <-- THÊM DÒNG NÀY VÀO
 from elasticsearch import Elasticsearch
 from config import Config
 import logging
+import json
 
 app = FastAPI(title="Hệ thống Zalo Bot Phòng Trọ Big Data")
 
