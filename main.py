@@ -367,7 +367,7 @@ def send_zalo_message(recipient_id: str, text: str):
     
     
     
-# Webhook hứng tin nhắn từ khách nhắn tới
+# --- 4. WEBHOOK XỬ LÝ CHÍNH ---
 @app.post("/webhook/zalo")
 async def zalo_webhook(request: Request):
     try:
@@ -378,15 +378,35 @@ async def zalo_webhook(request: Request):
         event_name = str(data.get("event_name", "")).strip()
         
         if "user_send_text" in event_name:
-            print("=> ĐÃ THỎA MÃN ĐIỀU KIỆN IF! Đang xử lý gửi tin theo chuẩn V3...")
-            
-            # 3. QUAN TRỌNG: Ưu tiên lấy 'user_id_by_app' theo chuẩn mới, nếu không có mới dùng 'sender.id'
             recipient_id = data.get("user_id_by_app") or data["sender"]["id"]
             user_message = data["message"]["text"]
             
-            ai_reply = f"🤖 Bot Phòng Trọ chuẩn V3 xin chào! Tôi đã nhận được yêu cầu: '{user_message}'."
+            print(f"-> Khách hỏi: {user_message}")
             
-            # Gọi hàm gửi tin nhắn với ID mới
+            # Bước A: Lên Elasticsearch tìm phòng dựa trên câu hỏi của khách
+            found_rooms = search_rooms_from_es(user_message)
+            print(f"-> Tìm thấy {len(found_rooms)} phòng trọ phù hợp.")
+            
+            # Bước B: Xây dựng Prompt (bối cảnh) gửi cho Gemini AI soạn văn bản
+            prompt = f"""
+            Bạn là một trợ lý ảo tư vấn phòng trọ thông minh, thân thiện của hệ thống Zalo OA.
+            Khách hàng nhắn: "{user_message}"
+            
+            Dưới đây là danh sách dữ liệu phòng trọ thực tế tìm thấy trong cơ sở dữ liệu của chúng ta:
+            {json.dumps(found_rooms, ensure_ascii=False, indent=2)}
+            
+            Yêu cầu:
+            1. Dựa vào danh sách trên, hãy tổng hợp lại và tư vấn cho khách bằng giọng điệu lịch sự, thu hút.
+            2. Nếu có phòng phù hợp, hãy liệt kê các thông tin rõ ràng (Tiêu đề, Giá, Địa chỉ...).
+            3. Nếu danh sách phòng trống/không tìm thấy, hãy khéo léo báo rằng hiện tại khu vực này đang hết phòng và gợi ý họ để lại số điện thoại hoặc nhu cầu chi tiết hơn.
+            4. Viết ngắn gọn, dễ đọc, phù hợp với giao diện tin nhắn Zalo.
+            """
+            
+            # Bước C: Gọi Gemini AI sinh câu trả lời
+            ai_response = model.generate_content(prompt)
+            ai_reply = ai_response.text.strip()
+            
+            # Bước D: Bắn câu trả lời của AI về điện thoại khách hàng qua Zalo V3
             send_zalo_message(recipient_id, ai_reply)
             
     except Exception as e:
