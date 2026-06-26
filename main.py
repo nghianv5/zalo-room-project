@@ -355,7 +355,7 @@ def search_rooms_from_es(user_query: str):
             },
             "size": 3  # Lấy tối đa 3 phòng phù hợp nhất
         }
-        response = es.search(index=ROOM_INDEX, body=query_body)
+        response = es.search(INDEX_NAME, body=query_body)
         hits = response['hits']['hits']
         
         rooms_list = []
