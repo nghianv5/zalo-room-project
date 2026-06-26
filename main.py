@@ -372,76 +372,92 @@ def search_rooms_from_es(user_query: str):
         print("Lỗi truy vấn Elasticsearch:", e)
         return []
 
-
-# --- HÀM BỔ TRỢ 2: GỬI TIN NHẮN ZALO V3 ---
+# --- SỬA LẠI HÀM GỬI TIN NHẮN: ĐÍNH KÈM NÚT CHỨC NĂNG ---
 def send_zalo_message(recipient_id: str, text: str):
     token = os.environ.get("ZALO_ACCESS_TOKEN")
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
-    headers = {
-        "access_token": token,
-        "Content-Type": "application/json"
-    }
+    headers = {"access_token": token, "Content-Type": "application/json"}
+    
+    # Cấu hình Payload chứa tin nhắn văn bản kèm 2 nút bấm ở dưới
     payload = {
         "recipient": {"user_id": recipient_id},
-        "message": {"text": text}
+        "message": {
+            "text": text,
+            "attachment": {
+                "type": "template",
+                "payload": {
+                    "template_type": "media", # Hoặc sử dụng cấu trúc nút bấm tương tác trực tiếp
+                    "elements": [{
+                        "media_type": "image",
+                        "url": "https://images.unsplash.com/photo-1522771739844-6a9f6d5f14af?w=500", # Ảnh minh họa cho đẹp, bạn có thể đổi link ảnh khác
+                        "title": "HỆ THỐNG QUẢN LÝ PHÒNG TRỌ V3",
+                        "subtitle": "Vui lòng chọn chức năng bạn muốn thực hiện bên dưới:",
+                        "buttons": [
+                            {
+                                "title": "➕ Đăng/Thêm Phòng Trọ",
+                                "image_icon": "",
+                                "type": "oa.query.show",
+                                "payload": "Thêm phòng trọ mới tại: [Địa chỉ], giá: [Số tiền], mô tả: [Chi tiết phòng]"
+                            },
+                            {
+                                "title": "🔍 Tìm Kiếm Phòng Trọ",
+                                "image_icon": "",
+                                "type": "oa.query.show",
+                                "payload": "Tìm phòng trọ tại khu vực: "
+                            }
+                        ]
+                    }]
+                }
+            }
+        }
     }
-    response = requests.post(url, headers=headers, json=payload)
-    print("--- KẾT QUẢ TRẢ VỀ TỪ ZALO API V3 ---")
-    print(response.json())
-    return response.json()
-
-
-# --- 3. TOÀN BỘ HÀM WEBHOOK ZALO ĐÃ ĐƯỢC VIẾT LẠI ---
+    
+    # Lưu ý: Nếu muốn nút bấm dạng chữ đơn giản không kèm ảnh (Quick Reply), bạn có thể dùng cấu trúc text dưới đây:
+    payload_text_buttons = {
+        "recipient": {"user_id": recipient_id},
+        "message": {
+            "text": text,
+            "buttons": [
+                {
+                    "title": "➕ Đăng/Thêm Phòng",
+                    "type": "oa.query.show",
+                    "payload": "Thêm phòng trọ mới tại: "
+                },
+                {
+                    "title": "🔍 Tìm Kiếm Phòng",
+                    "type": "oa.query.show",
+                    "payload": "Tìm phòng trọ tại: "
+                }
+            ]
+        }
+    }
+    
+    # Chúng ta sẽ ưu tiên dùng payload_text_buttons cho gọn, nhẹ giao diện chat Zalo
+    response = requests.post(url, headers=headers, json=payload_text_buttons)
+    print("--- KẾT QUẢ TRẢ VỀ TỪ ZALO API V3 ---", response.json())
+    
+    
+    
 @app.post("/webhook/zalo")
 async def zalo_webhook(request: Request):
     try:
         raw_body = await request.body()
-        raw_text = raw_body.decode("utf-8")
-        data = json.loads(raw_text)
-        
+        data = json.loads(raw_body.decode("utf-8"))
         event_name = str(data.get("event_name", "")).strip()
         
-        # Kiểm tra nếu có sự kiện người dùng gửi tin nhắn text
+        # SỰ KIỆN 1: Người dùng nhấn Quan tâm OA -> Gửi ngay Menu nút bấm chào mừng
+        if "user_follow_oa" in event_name:
+            recipient_id = data["sender"]["id"]
+            welcome_text = "👋 Xin chào! Chào mừng bạn đến với Hệ Thống Tư Vấn Phòng Trọ Tự Động.\n\nHãy nhấn vào các nút chức năng bên dưới để bắt đầu trải nghiệm nhé!"
+            send_zalo_message(recipient_id, welcome_text)
+            return {"status": "success"}
+            
+        # SỰ KIỆN 2: Người dùng nhắn tin (Bấm từ nút chức năng hoặc tự gõ)
         if "user_send_text" in event_name:
             recipient_id = data.get("user_id_by_app") or data["sender"]["id"]
             user_message = data["message"]["text"]
             
-            print(f"-> Khách hỏi: {user_message}")
-            
-            # Bước A: Lên Elasticsearch lục tìm phòng
-            found_rooms = search_rooms_from_es(user_message)
-            print(f"-> Tìm thấy {len(found_rooms)} phòng trọ phù hợp.")
-            
-            # Bước B: Xây dựng Prompt bối cảnh gửi cho Gemini
-            prompt = f"""
-            Bạn là một trợ lý ảo tư vấn phòng trọ thông minh, thân thiện của hệ thống Zalo OA.
-            Khách hàng nhắn: "{user_message}"
-            
-            Dưới đây là danh sách dữ liệu phòng trọ thực tế tìm thấy trong cơ sở dữ liệu của chúng ta:
-            {json.dumps(found_rooms, ensure_ascii=False, indent=2)}
-            
-            Yêu cầu:
-            1. Dựa vào danh sách trên, hãy tổng hợp lại và tư vấn cho khách bằng giọng điệu lịch sự, thu hút.
-            2. Nếu có phòng phù hợp, hãy liệt kê các thông tin rõ ràng (Tiêu đề, Giá, Địa chỉ...).
-            3. Nếu danh sách phòng trống/không tìm thấy (0 phòng), hãy khéo léo báo rằng hiện tại khu vực này đang hết phòng và gợi ý họ để lại số điện thoại hoặc nhu cầu chi tiết hơn để khi có phòng mới hệ thống sẽ báo ngay.
-            4. Viết ngắn gọn, dễ đọc, phù hợp với giao diện tin nhắn Zalo.
-            """
-            
-            # Bước C: Gọi Gemini AI bằng cú pháp SDK mới nhất
-            try:
-                response = client.models.generate_content(
-                    model='gemini-1.5-flash',
-                    contents=prompt,
-                )
-                ai_reply = response.text.strip()
-            except Exception as ai_error:
-                print("Lỗi gọi Gemini SDK mới:", ai_error)
-                ai_reply = "🤖 Hệ thống đang bận cập nhật dữ liệu phòng trọ, bạn vui lòng thử lại sau vài phút nhé!"
-            
-            # Bước D: Bắn câu trả lời của AI về điện thoại khách hàng qua Zalo V3
-            send_zalo_message(recipient_id, ai_reply)
-            
-    except Exception as e:
-        print("Lỗi nghiêm trọng tại Webhook:", e)
-        
-    return {"status": "success"}
+            # (Giữ nguyên toàn bộ logic phân loại Router bằng Gemini và gọi Elasticsearch ở code cũ của bạn...)
+            # ...
+            # Cuối cùng hàm send_zalo_message(recipient_id, ai_reply) được gọi, 
+            # nó sẽ tự động đính kèm lại 2 nút chức năng ở dưới câu trả lời của AI để khách thực hiện lượt tương tác tiếp theo.
