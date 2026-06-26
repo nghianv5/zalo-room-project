@@ -28,7 +28,7 @@ elastic_api_key = Config.ELASTIC_API_KEY
 
 # --- KHỞI TẠO GEMINI AI ---
 #genai.configure(api_key=os.environ.get("GOOGLE_API_KEY"))
-#model = genai.GenerativeModel("gemini-1.5-flash")
+MODEL_CONFIG = "gemini-2.5-flash"
 es = None
 
 try:
@@ -343,7 +343,7 @@ app = FastAPI()
     
     
     
-# --- HÀM BỔ TRỢ 1: TÌM PHÒNG TRÊN ELASTICSEARCH ---
+# Chức năng 2: Tìm kiếm phòng trọ
 def search_rooms_from_es(user_query: str):
     try:
         query_body = {
@@ -353,9 +353,10 @@ def search_rooms_from_es(user_query: str):
                     "fields": ["title", "description", "address", "district"]
                 }
             },
-            "size": 3  # Lấy tối đa 3 phòng phù hợp nhất
+            "size": 3
         }
-        response = es.search(INDEX_NAME, body=query_body)
+        # SỬA DÒNG NÀY: Phải ghi rõ index=ROOM_INDEX và body=query_body
+        response = es.search(index=Config.ROOM_INDEX, body=query_body)
         hits = response['hits']['hits']
         
         rooms_list = []
@@ -372,6 +373,18 @@ def search_rooms_from_es(user_query: str):
         print("Lỗi truy vấn Elasticsearch:", e)
         return []
 
+
+# Chức năng 1: Lưu phòng trọ mới vào database
+def insert_room_to_es(room_data: dict):
+    try:
+        # SỬA DÒNG NÀY: Phải ghi rõ index=ROOM_INDEX
+        response = es.index(index=Config.ROOM_INDEX, document=room_data)
+        print("-> Đã lưu phòng vào Elasticsearch:", response.get("result"))
+        return True
+    except Exception as e:
+        print("Lỗi khi thêm phòng vào ES:", e)
+        return False
+        
 # --- SỬA LẠI HÀM GỬI TIN NHẮN: ĐÍNH KÈM NÚT CHỨC NĂNG ---
 def send_zalo_message(recipient_id: str, text: str):
     token = os.environ.get("ZALO_ACCESS_TOKEN")
@@ -483,7 +496,7 @@ async def zalo_webhook(request: Request):
             try:
                 # Gọi Gemini xử lý phân luồng
                 router_response = client.models.generate_content(
-                    model='gemini-2.5-flash',
+                    MODEL_CONFIG,
                     contents=router_prompt,
                     config={'response_mime_type': 'application/json'}
                 )
@@ -514,7 +527,7 @@ async def zalo_webhook(request: Request):
                     Hãy soạn một tin nhắn tư vấn ngắn gọn, lịch sự gửi cho khách dựa trên dữ liệu trên. Nếu có 0 phòng, hãy báo hết phòng khéo léo và xin thông tin liên hệ.
                     """
                     ai_search_response = client.models.generate_content(
-                        model='gemini-1.5-flash',
+                        MODEL_CONFIG,
                         contents=reply_prompt
                     )
                     ai_reply = ai_search_response.text.strip()
