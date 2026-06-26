@@ -9,8 +9,11 @@ from elasticsearch import Elasticsearch
 from config import Config
 import logging
 import json
-import google.generativeai as genai
-    
+# Import thư viện mới tinh của Google
+from google import genai
+
+# Khởi tạo Client (Nó sẽ tự động bốc biến môi trường GOOGLE_API_KEY trên Render)
+client = genai.Client()
 import requests
 import os
 
@@ -337,12 +340,12 @@ async def verify_zalo():
 from fastapi import FastAPI, Request
 
 app = FastAPI()
-
-
-# --- 2. HÀM TÌM PHÒNG TRÊN ELASTICSEARCH ---
+    
+    
+    
+# --- HÀM BỔ TRỢ 1: TÌM PHÒNG TRÊN ELASTICSEARCH ---
 def search_rooms_from_es(user_query: str):
     try:
-        # Tìm kiếm dựa trên từ khóa người dùng nhập (ví dụ: "quận 1")
         query_body = {
             "query": {
                 "multi_match": {
@@ -350,10 +353,9 @@ def search_rooms_from_es(user_query: str):
                     "fields": ["title", "description", "address", "district"]
                 }
             },
-            "size": 3  # Lấy ra tối đa 3 phòng phù hợp nhất để tránh quá tải text cho AI
+            "size": 3  # Lấy tối đa 3 phòng phù hợp nhất
         }
-        
-        response = es.search(index=INDEX_NAME, body=query_body)
+        response = es.search(index=ROOM_INDEX, body=query_body)
         hits = response['hits']['hits']
         
         rooms_list = []
@@ -370,37 +372,26 @@ def search_rooms_from_es(user_query: str):
         print("Lỗi truy vấn Elasticsearch:", e)
         return []
 
+
+# --- HÀM BỔ TRỢ 2: GỬI TIN NHẮN ZALO V3 ---
 def send_zalo_message(recipient_id: str, text: str):
-    token = Config.ZALO_ACCESS_TOKEN
-    
-    # 1. ĐỔI ĐƯỜNG LINK SANG V3.0
+    token = os.environ.get("ZALO_ACCESS_TOKEN")
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
-    
     headers = {
         "access_token": token,
         "Content-Type": "application/json"
     }
-    
-    # 2. ĐỔI CẤU TRÚC PAYLOAD THEO CHUẨN V3
     payload = {
-        "recipient": {
-            "user_id": recipient_id  # Điền user_id_by_app vào đây
-        },
-        "message": {
-            "text": text
-        }
+        "recipient": {"user_id": recipient_id},
+        "message": {"text": text}
     }
-    
     response = requests.post(url, headers=headers, json=payload)
-    
     print("--- KẾT QUẢ TRẢ VỀ TỪ ZALO API V3 ---")
     print(response.json())
-    
     return response.json()
-    
-    
-    
-# --- 4. WEBHOOK XỬ LÝ CHÍNH ---
+
+
+# --- 3. TOÀN BỘ HÀM WEBHOOK ZALO ĐÃ ĐƯỢC VIẾT LẠI ---
 @app.post("/webhook/zalo")
 async def zalo_webhook(request: Request):
     try:
@@ -410,17 +401,18 @@ async def zalo_webhook(request: Request):
         
         event_name = str(data.get("event_name", "")).strip()
         
+        # Kiểm tra nếu có sự kiện người dùng gửi tin nhắn text
         if "user_send_text" in event_name:
             recipient_id = data.get("user_id_by_app") or data["sender"]["id"]
             user_message = data["message"]["text"]
             
             print(f"-> Khách hỏi: {user_message}")
             
-            # Bước A: Lên Elasticsearch tìm phòng (giữ nguyên)
+            # Bước A: Lên Elasticsearch lục tìm phòng
             found_rooms = search_rooms_from_es(user_message)
             print(f"-> Tìm thấy {len(found_rooms)} phòng trọ phù hợp.")
             
-            # Bước B: Xây dựng Prompt (giữ nguyên)
+            # Bước B: Xây dựng Prompt bối cảnh gửi cho Gemini
             prompt = f"""
             Bạn là một trợ lý ảo tư vấn phòng trọ thông minh, thân thiện của hệ thống Zalo OA.
             Khách hàng nhắn: "{user_message}"
@@ -430,34 +422,23 @@ async def zalo_webhook(request: Request):
             
             Yêu cầu:
             1. Dựa vào danh sách trên, hãy tổng hợp lại và tư vấn cho khách bằng giọng điệu lịch sự, thu hút.
-            2. Nếu có phòng phù hợp, hãy liệt kê các thông tin rõ ràng.
-            3. Nếu danh sách phòng trống/không tìm thấy, hãy khéo léo báo rằng hiện tại khu vực này đang hết phòng và gợi ý họ để lại số điện thoại hoặc nhu cầu chi tiết hơn.
+            2. Nếu có phòng phù hợp, hãy liệt kê các thông tin rõ ràng (Tiêu đề, Giá, Địa chỉ...).
+            3. Nếu danh sách phòng trống/không tìm thấy (0 phòng), hãy khéo léo báo rằng hiện tại khu vực này đang hết phòng và gợi ý họ để lại số điện thoại hoặc nhu cầu chi tiết hơn để khi có phòng mới hệ thống sẽ báo ngay.
             4. Viết ngắn gọn, dễ đọc, phù hợp với giao diện tin nhắn Zalo.
             """
             
-            # --- BƯỚC C: GỌI THẲNG API GEMINI KHÔNG QUA SDK ---
-            api_key = "AQ.Ab8RN6KgODYVlRLycHkUsu4byQhC_kjbmcVzrTYwUjb5Vb_VDA"
-            # Sử dụng endpoint v1 chuẩn hóa, không dùng v1beta bị lỗi
-            gemini_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
-            headers = {"Content-Type": "application/json"}
-            payload = {
-                "contents": [{
-                    "parts": [{"text": prompt}]
-                }]
-            }
-            
-            # Gọi API bằng requests
-            gemini_response = requests.post(gemini_url, headers=headers, json=payload)
-            gemini_data = gemini_response.json()
-            
-            # Bóc tách văn bản phản hồi từ Google JSON
+            # Bước C: Gọi Gemini AI bằng cú pháp SDK mới nhất
             try:
-                ai_reply = gemini_data['candidates'][0]['content']['parts'][0]['text'].strip()
-            except Exception as parse_error:
-                print("Lỗi bóc tách JSON Gemini:", gemini_data)
+                response = client.models.generate_content(
+                    model='gemini-1.5-flash',
+                    contents=prompt,
+                )
+                ai_reply = response.text.strip()
+            except Exception as ai_error:
+                print("Lỗi gọi Gemini SDK mới:", ai_error)
                 ai_reply = "🤖 Hệ thống đang bận cập nhật dữ liệu phòng trọ, bạn vui lòng thử lại sau vài phút nhé!"
             
-            # Bước D: Bắn câu trả lời về Zalo (giữ nguyên)
+            # Bước D: Bắn câu trả lời của AI về điện thoại khách hàng qua Zalo V3
             send_zalo_message(recipient_id, ai_reply)
             
     except Exception as e:
