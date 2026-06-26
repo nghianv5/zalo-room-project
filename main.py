@@ -483,7 +483,7 @@ async def zalo_webhook(request: Request):
             try:
                 # Gọi Gemini xử lý phân luồng
                 router_response = client.models.generate_content(
-                    model='gemini-1.5-flash',
+                    model='gemini-2.5-flash',
                     contents=router_prompt,
                     config={'response_mime_type': 'application/json'}
                 )
