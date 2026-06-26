@@ -438,6 +438,7 @@ def send_zalo_message(recipient_id: str, text: str):
     
     
     
+# --- 4. WEBHOOK XỬ LÝ CHÍNH ---
 @app.post("/webhook/zalo")
 async def zalo_webhook(request: Request):
     try:
@@ -445,19 +446,87 @@ async def zalo_webhook(request: Request):
         data = json.loads(raw_body.decode("utf-8"))
         event_name = str(data.get("event_name", "")).strip()
         
-        # SỰ KIỆN 1: Người dùng nhấn Quan tâm OA -> Gửi ngay Menu nút bấm chào mừng
+        # SỰ KIỆN 1: Người dùng nhấn Quan tâm OA -> Gửi ngay lời chào kèm Menu nút bấm
         if "user_follow_oa" in event_name:
             recipient_id = data["sender"]["id"]
             welcome_text = "👋 Xin chào! Chào mừng bạn đến với Hệ Thống Tư Vấn Phòng Trọ Tự Động.\n\nHãy nhấn vào các nút chức năng bên dưới để bắt đầu trải nghiệm nhé!"
             send_zalo_message(recipient_id, welcome_text)
             return {"status": "success"}
             
-        # SỰ KIỆN 2: Người dùng nhắn tin (Bấm từ nút chức năng hoặc tự gõ)
+        # SỰ KIỆN 2: Người dùng nhắn tin văn bản (hoặc bấm từ nút chức năng)
         if "user_send_text" in event_name:
             recipient_id = data.get("user_id_by_app") or data["sender"]["id"]
             user_message = data["message"]["text"]
             
-            # (Giữ nguyên toàn bộ logic phân loại Router bằng Gemini và gọi Elasticsearch ở code cũ của bạn...)
-            # ...
-            # Cuối cùng hàm send_zalo_message(recipient_id, ai_reply) được gọi, 
-            # nó sẽ tự động đính kèm lại 2 nút chức năng ở dưới câu trả lời của AI để khách thực hiện lượt tương tác tiếp theo.
+            print(f"-> Nhận tin nhắn từ khách: {user_message}")
+            ai_reply = "🤖 Hệ thống đang bận xử lý, bạn vui lòng thử lại sau vài phút nhé!"
+            
+            # Xây dựng Prompt phân loại ý định (Intent Routing) cho Gemini
+            router_prompt = f"""
+            Phân tích tin nhắn sau của người dùng: "{user_message}"
+            Hãy xác định xem người dùng muốn thực hiện chức năng nào trong 2 chức năng sau:
+            1. "ADD_ROOM": Người dùng muốn đăng bài, thêm thông tin, nạp dữ liệu một phòng trọ mới (thường đi kèm thông tin giá, địa chỉ, diện tích...).
+            2. "SEARCH_ROOM": Người dùng muốn tìm kiếm, thuê phòng, hỏi xem có phòng nào trống không.
+
+            Trả về kết quả dưới dạng JSON duy nhất theo cấu trúc sau, không kèm bất kỳ văn bản giải thích nào khác:
+            {{
+                "action": "ADD_ROOM" hoặc "SEARCH_ROOM",
+                "extracted_data": {{
+                    "title": "Tiêu đề phòng trọ nếu có (hoặc để trống)",
+                    "price": "Giá phòng nếu có (hoặc để trống)",
+                    "address": "Địa chỉ phòng nếu có (hoặc để trống)",
+                    "description": "Nội dung mô tả hoặc từ khóa tìm kiếm của người dùng"
+                }}
+            }}
+            """
+            
+            try:
+                # Gọi Gemini xử lý phân luồng
+                router_response = client.models.generate_content(
+                    model='gemini-1.5-flash',
+                    contents=router_prompt,
+                    config={'response_mime_type': 'application/json'}
+                )
+                
+                intent_data = json.loads(router_response.text.strip())
+                action = intent_data.get("action")
+                extracted = intent_data.get("extracted_data", {})
+                
+                # LUỒNG CHỨC NĂNG 1: THÊM THÔNG TIN PHÒNG TRỌ
+                if action == "ADD_ROOM":
+                    print("-> Nhận diện: Chức năng THÊM PHÒNG TRỌ.")
+                    success = insert_room_to_es(extracted)
+                    if success:
+                        ai_reply = f"✅ Đã thêm phòng trọ thành công vào hệ thống!\n📍 Địa chỉ: {extracted.get('address', 'Chưa rõ')}\n💰 Giá: {extracted.get('price', 'Chưa rõ')}\n🤖 Cảm ơn bạn đã cập nhật dữ liệu."
+                    else:
+                        ai_reply = "❌ Hệ thống lưu trữ đang bận, không thể thêm phòng trọ lúc này. Vui lòng thử lại!"
+                        
+                # LUỒNG CHỨC NĂNG 2: TÌM KIẾM PHÒNG TRỌ
+                else:
+                    print("-> Nhận diện: Chức năng TÌM KIẾM PHÒNG TRỌ.")
+                    search_keyword = extracted.get("description") or user_message
+                    found_rooms = search_rooms_from_es(search_keyword)
+                    
+                    # Đưa kết quả từ Elasticsearch vào Gemini để viết câu trả lời tự nhiên
+                    reply_prompt = f"""
+                    Bạn là trợ lý ảo tư vấn phòng trọ của Zalo OA. Khách hỏi: "{user_message}"
+                    Dữ liệu phòng tìm thấy từ database: {json.dumps(found_rooms, ensure_ascii=False)}
+                    Hãy soạn một tin nhắn tư vấn ngắn gọn, lịch sự gửi cho khách dựa trên dữ liệu trên. Nếu có 0 phòng, hãy báo hết phòng khéo léo và xin thông tin liên hệ.
+                    """
+                    ai_search_response = client.models.generate_content(
+                        model='gemini-1.5-flash',
+                        contents=reply_prompt
+                    )
+                    ai_reply = ai_search_response.text.strip()
+                    
+            except Exception as ai_error:
+                print("Lỗi trong khối xử lý Gemini/Elasticsearch:", ai_error)
+                ai_reply = "🤖 Đã xảy ra lỗi khi phân tích tin nhắn. Bạn vui lòng thử lại sau!"
+            
+            # Bắn tin nhắn phản hồi về Zalo (Hàm này tự động đính kèm nút bấm chức năng ở cuối)
+            send_zalo_message(recipient_id, ai_reply)
+            
+    except Exception as e:
+        print("Lỗi nghiêm trọng tại Webhook tổng:", e)
+        
+    return {"status": "success"}
