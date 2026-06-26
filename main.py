@@ -3,7 +3,7 @@ from pydantic import BaseModel
 from typing import List, Optional
 import uuid
 from database import init_db, save_room, search_rooms, update_status
-from ai_service import analyze_zalo_message
+#from ai_service import analyze_zalo_message
 from fastapi.responses import JSONResponse  # <-- THÊM DÒNG NÀY VÀO
 from elasticsearch import Elasticsearch
 from config import Config
