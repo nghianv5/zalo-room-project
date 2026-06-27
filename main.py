@@ -4,6 +4,7 @@ import requests
 from fastapi import FastAPI, Request
 from elasticsearch import Elasticsearch
 from google import genai
+from config import Config
 
 app = FastAPI()
 elastic_url = Config.ELASTICSEARCH_URL
