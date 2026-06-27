@@ -11,10 +11,10 @@ elastic_api_key = Config.ELASTIC_API_KEY
 ROOM_INDEX = Config.ROOM_INDEX
 # --- 1. KHỞI TẠO CÁC KẾT NỐI ---
 client = genai.Client()
-    es = Elasticsearch(
-        elastic_url,
-        api_key=elastic_api_key
-    )
+es = Elasticsearch(
+    elastic_url,
+    api_key=elastic_api_key
+)
 
 
 # --- 2. HÀM BỔ TRỢ ELASTICSEARCH ---
