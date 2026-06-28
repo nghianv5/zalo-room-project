@@ -2,7 +2,7 @@ import os
 
 class Config:
     ELASTICSEARCH_URL = "https://zalo-room-db-f3a4ff.es.asia-southeast1.gcp.elastic.cloud:443"
-    ELASTIC_API_KEY = "AQ.Ab8RN6KgODYVlRLycHkUsu4byQhC_kjbmcVzrTYwUjb5Vb_VDA"
+    ELASTIC_API_KEY = "AQ.Ab8RN6JNxVa-cC9gSjjzGonz7tzXZ_TLh5E2xE61mlqfQ_1ozQ"
     
     ROOM_INDEX = "phong_tro_index"
     
