@@ -17,7 +17,7 @@ try:
     if elastic_api_key:
         # Nếu chạy trên Render sử dụng API Key
         es = Elasticsearch(
-            os.environ.get("ELASTICSEARCH_URL",
+            os.environ.get("ELASTICSEARCH_URL"),
             api_key=os.environ.get("ELASTIC_API_KEY")
         )
     else:
