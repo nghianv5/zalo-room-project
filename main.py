@@ -11,7 +11,7 @@ elastic_url = Config.ELASTICSEARCH_URL
 elastic_api_key = Config.ELASTIC_API_KEY
 ROOM_INDEX = Config.ROOM_INDEX
 # --- 1. KHỞI TẠO CÁC KẾT NỐI ---
-client = genai.Client()
+
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
 
