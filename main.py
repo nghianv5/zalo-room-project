@@ -7,8 +7,7 @@ from google import genai
 from config import Config
 
 app = FastAPI()
-elastic_url = Config.ELASTICSEARCH_URL
-elastic_api_key = Config.ELASTIC_API_KEY
+
 ROOM_INDEX = Config.ROOM_INDEX
 # --- 1. KHỞI TẠO CÁC KẾT NỐI ---
 
