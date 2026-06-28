@@ -5,6 +5,7 @@ from fastapi import FastAPI, Request
 from elasticsearch import Elasticsearch
 from google import genai
 from config import Config
+import logging
 
 app = FastAPI()
 
