@@ -5,7 +5,8 @@ class Config:
 #    ELASTIC_API_KEY = "AQ.Ab8RN6JNxVa-cC9gSjjzGonz7tzXZ_TLh5E2xE61mlqfQ_1ozQ"
     
     ROOM_INDEX = "phong_tro_index"
-    
+    APP_ID = "1106710101475608830"
+    SECRET_KEY = "Sdx5BSyB3TPwD5H4m0QI"
     # Hãy đảm bảo CHỈ CÓ chuỗi ký tự Key gốc, KHÔNG CÓ dấu cách ở hai đầu
 #    GEMINI_API_KEY = "AQ.Ab8RN6JItD6PUypL-p2xUWZDUiQWtDB50bNdzFUL5TkX4pDDYQ" # <-- Điền chính xác Key của bạn vào đây (Ví dụ: "AIzaSyAbCdXyZ...")
     

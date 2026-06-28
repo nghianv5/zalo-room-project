@@ -13,6 +13,26 @@ ROOM_INDEX = Config.ROOM_INDEX
 
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
 
+try:
+    if elastic_api_key:
+        # Nếu chạy trên Render sử dụng API Key
+        es = Elasticsearch(
+            os.environ.get("ELASTICSEARCH_URL",
+            api_key=os.environ.get("ELASTIC_API_KEY")
+        )
+    else:
+        # Nếu chạy dưới máy tính cá nhân (localhost)
+        es = Elasticsearch(elastic_url)
+    
+    # Kiểm tra thực tế bằng một lệnh đọc thử thông tin hệ thống (chắc chắn hơn lệnh ping)
+    info = es.info()
+    print(f" Kết nối Elasticsearch trực tuyến thành công! Phiên bản: {info['version']['number']}")
+
+except Exception as e:
+    logging.error(f"❌ Thất bại khi kết nối hoặc chứng thực Elasticsearch: {e}")
+    print("⚠ Hệ thống sẽ chạy tạm thời ở chế độ KHÔNG CÓ DATABASE để tránh sập Server.")
+    es = None # Gán lại bằng None để các hàm sau không gọi lỗi
+    
 
 # --- 2. HÀM BỔ TRỢ ELASTICSEARCH ---
 def insert_room_to_es(room_data: dict):
@@ -54,8 +74,8 @@ def search_rooms_from_es(user_query: str):
 
 # Hàm tự động đổi Refresh Token lấy Access Token mới tinh từ Zalo
 def refresh_zalo_access_token():
-    app_id = "MÃ_APP_ID_CỦA_BẠN"          # Thay bằng ID ứng dụng Zalo của bạn
-    secret_key = "SECRET_KEY_CỦA_BẠN"      # Thay bằng Secret key ứng dụng Zalo của bạn
+    app_id = Config.APP_ID
+    secret_key = Config.SECRET_KEY
     
     # Lấy Refresh Token dài hạn đã cấu hình trên Render
     refresh_token = os.environ.get("ZALO_REFRESH_TOKEN")
