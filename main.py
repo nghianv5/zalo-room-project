@@ -24,6 +24,10 @@ client = genai.Client(
 elastic_url = os.environ.get("ELASTICSEARCH_URL") or getattr(Config, "ELASTICSEARCH_URL", None)
 elastic_api_key = os.environ.get("ELASTIC_API_KEY") or getattr(Config, "ELASTIC_API_KEY", None)
 
+
+print(f" GEMINI_API_KEY: {os.environ.get("GEMINI_API_KEY")}")
+print(f" ELASTICSEARCH_URL: {os.environ.get("ELASTICSEARCH_URL")}")
+print(f" ELASTIC_API_KEY: {os.environ.get("ELASTIC_API_KEY")}")
 try:
     if elastic_api_key and elastic_url:
         # Nếu chạy trên Render sử dụng API Key
