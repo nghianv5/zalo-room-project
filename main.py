@@ -15,9 +15,9 @@ ROOM_INDEX = Config.ROOM_INDEX
 # --- 1. KHỞI TẠO CÁC KẾT NỐI ---
 
 # Cấu hình Client Gemini an toàn qua Header chống lỗi 401 trên môi trường Cloud
-api_key_env = os.environ.get("GEMINI_API_KEY")
 client = genai.Client(
-    http_options={'headers': {'x-goog-api-key': api_key_env}} if api_key_env else None
+    api_key=os.environ.get("GEMINI_API_KEY"),
+    client_options=None  # ÉP KHÔNG DÙNG OAUTH2 / SERVICE ACCOUNT MẶC ĐỊNH TRÊN CLOUD
 )
 
 # Lấy các cấu hình môi trường cho Elasticsearch
@@ -28,6 +28,7 @@ elastic_api_key = os.environ.get("ELASTIC_API_KEY") or getattr(Config, "ELASTIC_
 print(f" GEMINI_API_KEY: {os.environ.get("GEMINI_API_KEY")}")
 print(f" ELASTICSEARCH_URL: {os.environ.get("ELASTICSEARCH_URL")}")
 print(f" ELASTIC_API_KEY: {os.environ.get("ELASTIC_API_KEY")}")
+
 try:
     if elastic_api_key and elastic_url:
         # Nếu chạy trên Render sử dụng API Key
