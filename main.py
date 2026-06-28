@@ -60,6 +60,28 @@ def send_zalo_message(recipient_id: str, text: str):
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
     headers = {"access_token": token, "Content-Type": "application/json"}
     
+    #Lấy refresh access_token
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        res_json = response.json()
+        
+        # NẾU GẶP LỖI HẾT HẠN TOKEN (-216), TỰ ĐỘNG LÀM MỚI VÀ GỬI LẠI
+        if res_json.get("error") == -216:
+            print("⚠️ Phát hiện Token hết hạn! Đang tiến hành tự động gia hạn...")
+            new_token = refresh_zalo_access_token()
+            if new_token:
+                # Gửi lại lần nữa với token mới tinh vừa xin được
+                headers["access_token"] = new_token
+                response = requests.post(url, headers=headers, json=payload)
+                res_json = response.json()
+                
+        print("--- KẾT QUẢ TRẢ VỀ TỪ ZALO API V3 ---", res_json)
+        return res_json
+    except Exception as req_err:
+        print("Lỗi kết nối Zalo API:", req_err)
+        return None
+    
+    
     payload = {
         "recipient": {
             "user_id": recipient_id
