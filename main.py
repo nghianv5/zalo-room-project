@@ -13,7 +13,7 @@ ROOM_INDEX = Config.ROOM_INDEX
 # --- 1. KHỞI TẠO CÁC KẾT NỐI ---
 
 client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-
+model = genai.GenerativeModel('gemini-1.5-flash')
 try:
     if elastic_api_key:
         # Nếu chạy trên Render sử dụng API Key

@@ -4,3 +4,4 @@ pydantic
 google-genai
 requests
 elasticsearch
+google-generativeai
