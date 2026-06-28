@@ -53,6 +53,45 @@ def search_rooms_from_es(user_query: str):
         print("Lỗi truy vấn Elasticsearch:", e)
         return []
 
+# Hàm tự động đổi Refresh Token lấy Access Token mới tinh từ Zalo
+def refresh_zalo_access_token():
+    app_id = "MÃ_APP_ID_CỦA_BẠN"          # Thay bằng ID ứng dụng Zalo của bạn
+    secret_key = "SECRET_KEY_CỦA_BẠN"      # Thay bằng Secret key ứng dụng Zalo của bạn
+    
+    # Lấy Refresh Token dài hạn đã cấu hình trên Render
+    refresh_token = os.environ.get("ZALO_REFRESH_TOKEN")
+    
+    url = "https://oauth.zalo.me/v3.0/oa/access_token"
+    headers = {
+        "Content-Type": "application/x-www-form-urlencoded",
+        "secret_key": secret_key
+    }
+    payload = {
+        "app_id": app_id,
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token
+    }
+    
+    try:
+        response = requests.post(url, headers=headers, data=payload)
+        res_data = response.json()
+        
+        if "access_token" in res_data:
+            new_access_token = res_data["access_token"]
+            new_refresh_token = res_data.get("refresh_token", refresh_token)
+            
+            # Cập nhật lại token mới vào bộ nhớ tạm thời của hệ thống đang chạy
+            os.environ["ZALO_ACCESS_TOKEN"] = new_access_token
+            os.environ["ZALO_REFRESH_TOKEN"] = new_refresh_token
+            
+            print("🔄 Tự động gia hạn Zalo Access Token thành công!")
+            return new_access_token
+        else:
+            print("❌ Lỗi gia hạn Token từ API Zalo:", res_data)
+            return None
+    except Exception as e:
+        print("❌ Lỗi kết nối khi cố gắng gia hạn Token:", e)
+        return None
 
 # --- 3. HÀM GỬI TIN NHẮN ZALO ĐÍNH KÈM NÚT BẤM (CẤU TRÚC CHUẨN V3) ---
 def send_zalo_message(recipient_id: str, text: str):
@@ -60,28 +99,7 @@ def send_zalo_message(recipient_id: str, text: str):
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
     headers = {"access_token": token, "Content-Type": "application/json"}
     
-    #Lấy refresh access_token
-    try:
-        response = requests.post(url, headers=headers, json=payload)
-        res_json = response.json()
-        
-        # NẾU GẶP LỖI HẾT HẠN TOKEN (-216), TỰ ĐỘNG LÀM MỚI VÀ GỬI LẠI
-        if res_json.get("error") == -216:
-            print("⚠️ Phát hiện Token hết hạn! Đang tiến hành tự động gia hạn...")
-            new_token = refresh_zalo_access_token()
-            if new_token:
-                # Gửi lại lần nữa với token mới tinh vừa xin được
-                headers["access_token"] = new_token
-                response = requests.post(url, headers=headers, json=payload)
-                res_json = response.json()
-                
-        print("--- KẾT QUẢ TRẢ VỀ TỪ ZALO API V3 ---", res_json)
-        return res_json
-    except Exception as req_err:
-        print("Lỗi kết nối Zalo API:", req_err)
-        return None
-    
-    
+    # 1. PHẢI TẠO PAYLOAD TRƯỚC Ở ĐÂY để Python ghi nhận biến này tồn tại
     payload = {
         "recipient": {
             "user_id": recipient_id
@@ -113,10 +131,23 @@ def send_zalo_message(recipient_id: str, text: str):
         }
     }
     
+    # 2. SAU ĐÓ MỚI TIẾN HÀNH GỬI VÀ KIỂM TRA MÃ LỖI TOKEN
     try:
         response = requests.post(url, headers=headers, json=payload)
-        print("--- KẾT QUẢ TRẢ VỀ TỪ ZALO API V3 ---", response.json())
-        return response.json()
+        res_json = response.json()
+        
+        # Nếu gặp lỗi hết hạn token (-216), tiến hành tự động gia hạn bằng Refresh Token
+        if res_json.get("error") == -216:
+            print("⚠️ Phát hiện Token hết hạn! Đang tiến hành tự động gia hạn...")
+            new_token = refresh_zalo_access_token()
+            if new_token:
+                # Cập nhật lại token mới vào tiêu đề và gửi lại payload
+                headers["access_token"] = new_token
+                response = requests.post(url, headers=headers, json=payload)
+                res_json = response.json()
+                
+        print("--- KẾT QUẢ TRẢ VỀ TỪ ZALO API V3 ---", res_json)
+        return res_json
     except Exception as req_err:
         print("Lỗi kết nối Zalo API:", req_err)
         return None
