@@ -256,11 +256,13 @@ async def zalo_webhook(request: Request):
                         response_mime_type="application/json"
                     )
                 )
+                print(f"Kết nối gemini thành công")
                 
                 intent_data = json.loads(router_response.text.strip())
                 action = intent_data.get("action")
                 extracted = intent_data.get("extracted_data", {})
                 
+                print(f"Load data thêm o thành công")
                 # CHỨC NĂNG 1: THÊM PHÒNG
                 if action == "ADD_ROOM":
                     print("-> Nhận diện: Chức năng THÊM PHÒNG TRỌ.")
