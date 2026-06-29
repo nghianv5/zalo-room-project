@@ -100,36 +100,34 @@ def search_rooms_from_es(user_query: str):
 
 # Hàm tự động đổi Refresh Token lấy Access Token mới tinh từ Zalo
 def refresh_zalo_access_token():
-    app_id = Config.APP_ID
-    secret_key = Config.SECRET_KEY
-    refresh_token = os.environ.get("ZALO_REFRESH_TOKEN")
-    
     url = "https://oauth.zalo.me/v3.0/oa/access_token"
     headers = {
         "Content-Type": "application/x-www-form-urlencoded",
-        "secret_key": secret_key
+        "secret_key": Config.SECRET_KEY
     }
     payload = {
-        "app_id": app_id,
+        "app_id": Config.APP_ID,
         "grant_type": "refresh_token",
-        "refresh_token": refresh_token
+        "refresh_token": os.environ.get("ZALO_REFRESH_TOKEN")
     }
-    
     try:
         response = requests.post(url, headers=headers, data=payload)
-        res_data = response.json()
         
+        # Kiểm tra nếu phản hồi không phải JSON (Zalo trả về trang lỗi HTML)
+        try:
+            res_data = response.json()
+        except Exception:
+            print(f"❌ Zalo OAuth không trả về JSON. Mã phản hồi: {response.status_code}. Nội dung thô: {response.text[:200]}")
+            return None
+
         if "access_token" in res_data:
-            new_access_token = res_data["access_token"]
-            new_refresh_token = res_data.get("refresh_token", refresh_token)
-            
-            os.environ["ZALO_ACCESS_TOKEN"] = new_access_token
-            os.environ["ZALO_REFRESH_TOKEN"] = new_refresh_token
-            
+            os.environ["ZALO_ACCESS_TOKEN"] = res_data["access_token"]
+            if "refresh_token" in res_data:
+                os.environ["ZALO_REFRESH_TOKEN"] = res_data["refresh_token"]
             print("🔄 Tự động gia hạn Zalo Access Token thành công!")
-            return new_access_token
+            return res_data["access_token"]
         else:
-            print("❌ Lỗi gia hạn Token từ API Zalo:", res_data)
+            print("❌ Lỗi từ Zalo OAuth JSON:", res_data)
             return None
     except Exception as e:
         print("❌ Lỗi kết nối khi cố gắng gia hạn Token:", e)
@@ -219,8 +217,8 @@ async def zalo_webhook(request: Request):
         # SỰ KIỆN 1: Khách nhấn Quan tâm OA
         if "user_follow_oa" in event_name:
             recipient_id = data["sender"]["id"]
-            welcome_text = "👋 Xin chào! Chào mừng bạn đến với Hệ Thống Tư Vấn Phòng Trọ Tự Động.\n\nHãy gõ nội dung phòng trọ bạn muốn tìm (Ví dụ: Tìm phòng quận 1 dưới 5 triệu) để trợ lý AI hỗ trợ bạn nhé!"
-            send_pure_text(recipient_id, welcome_text)  # <--- ĐÃ SỬA THÀNH TEXT THUẦN
+            welcome_text = "Chào mừng bạn đến với Hệ Thống Tư Vấn Phòng Trọ Tự Động. Hãy chọn chức năng bên dưới nhé!"
+            send_zalo_message(recipient_id, welcome_text)
             return {"status": "success"}
             
         # SỰ KIỆN 2: Khách nhắn tin chữ / Bấm nút
