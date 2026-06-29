@@ -135,6 +135,21 @@ def refresh_zalo_access_token():
         print("❌ Lỗi kết nối khi cố gắng gia hạn Token:", e)
         return None
 
+# 1. BỔ SUNG HÀM GỬI TEXT THUẦN TÚY (Dành cho chào mừng, an toàn 100%)
+def send_pure_text(recipient_id: str, text: str):
+    token = os.environ.get("ZALO_ACCESS_TOKEN")
+    url = "https://openapi.zalo.me/v3.0/oa/message/cs"
+    headers = {"access_token": token, "Content-Type": "application/json"}
+    payload = {
+        "recipient": {"user_id": recipient_id},
+        "message": {"text": text}  # Chỉ gửi text, không có bất kỳ cấu trúc nút bấm nào
+    }
+    try:
+        response = requests.post(url, headers=headers, json=payload)
+        return response.json()
+    except Exception as e:
+        print("Lỗi gửi text thuần:", e)
+        return None
 
 # --- 3. HÀM GỬI TIN NHẮN ZALO ĐÍNH KÈM NÚT BẤM (CẤU TRÚC CHUẨN V3) ---
 def send_zalo_message(recipient_id: str, text: str):
@@ -204,8 +219,8 @@ async def zalo_webhook(request: Request):
         # SỰ KIỆN 1: Khách nhấn Quan tâm OA
         if "user_follow_oa" in event_name:
             recipient_id = data["sender"]["id"]
-            welcome_text = "Chào mừng bạn đến với Hệ Thống Tư Vấn Phòng Trọ Tự Động. Hãy chọn chức năng bên dưới nhé!"
-            send_zalo_message(recipient_id, welcome_text)
+            welcome_text = "👋 Xin chào! Chào mừng bạn đến với Hệ Thống Tư Vấn Phòng Trọ Tự Động.\n\nHãy gõ nội dung phòng trọ bạn muốn tìm (Ví dụ: Tìm phòng quận 1 dưới 5 triệu) để trợ lý AI hỗ trợ bạn nhé!"
+            send_pure_text(recipient_id, welcome_text)  # <--- ĐÃ SỬA THÀNH TEXT THUẦN
             return {"status": "success"}
             
         # SỰ KIỆN 2: Khách nhắn tin chữ / Bấm nút
