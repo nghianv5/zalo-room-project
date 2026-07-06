@@ -2,7 +2,7 @@ import os
 import json
 import requests
 import uuid
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, BackgroundTasks
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 from google import genai
@@ -10,7 +10,11 @@ from google.genai import types
 from config import Config
 import logging
 
+
 app = FastAPI()
+@app.get("/")
+async def root():
+    return {"status": "running", "message": "Zalo Room Chatbot AI is active!"}
 
 # Tên bảng lưu trữ phòng trọ trên Qdrant
 ROOM_COLLECTION = "room_collection"
@@ -229,7 +233,7 @@ def send_zalo_message(recipient_id: str, text: str):
 
 # --- 5. WEBHOOK XỬ LÝ CHÍNH ---
 @app.post("/webhook/zalo")
-async def zalo_webhook(request: Request):
+async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
     try:
         raw_body = await request.body()
         data = json.loads(raw_body.decode("utf-8"))
