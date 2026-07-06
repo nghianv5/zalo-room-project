@@ -1,92 +1,118 @@
 import os
 import json
 import requests
+import uuid
 from fastapi import FastAPI, Request
-from elasticsearch import Elasticsearch
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct
 from google import genai
-from google.genai import types  # CẦN THIẾT: Để cấu hình chuẩn MIME Type JSON
+from google.genai import types  
 from config import Config
 import logging
 
 app = FastAPI()
 
-ROOM_INDEX = Config.ROOM_INDEX
+# Tên bảng lưu trữ phòng trọ trên Qdrant
+ROOM_COLLECTION = "room_collection"
 
-# --- 1. KHỞI TẠO CÁC KẾT NỐI ---
+# --- 1. KHỞI TẠO CÁC KẾT NỐI (GEMINI & QDRANT) ---
 
-# Cấu hình Client Gemini an toàn qua Header chống lỗi 401 trên môi trường Cloud
+# Khởi tạo Client Gemini an toàn
 api_key_env = os.environ.get("GEMINI_API_KEY")
-
-# Chỉ khởi tạo khi có API Key, truyền trực tiếp vào tham số api_key
-# Tuyệt đối KHÔNG thêm http_options hay tạo Header Authorization thủ công ở đây nữa
 client = genai.Client(api_key=api_key_env) if api_key_env else None
 
-
-# Lấy các cấu hình môi trường cho Elasticsearch
-elastic_url = os.environ.get("ELASTICSEARCH_URL") or getattr(Config, "ELASTICSEARCH_URL", None)
-elastic_api_key = os.environ.get("ELASTIC_API_KEY") or getattr(Config, "ELASTIC_API_KEY", None)
-
-
-print(f" GEMINI_API_KEY: {os.environ.get("GEMINI_API_KEY")}")
-print(f" ELASTICSEARCH_URL: {os.environ.get("ELASTICSEARCH_URL")}")
-print(f" ELASTIC_API_KEY: {os.environ.get("ELASTIC_API_KEY")}")
+# Lấy cấu hình môi trường cho Qdrant Cloud (Thay thế Elasticsearch)
+qdrant_url = os.environ.get("QDRANT_URL")
+qdrant_api_key = os.environ.get("QDRANT_API_KEY")
 
 try:
-    if elastic_api_key and elastic_url:
-        # Nếu chạy trên Render sử dụng API Key
-        es = Elasticsearch(
-            elastic_url,
-            api_key=elastic_api_key
-        )
-    elif elastic_url:
-        # Nếu chạy dưới máy tính cá nhân (localhost)
-        es = Elasticsearch(elastic_url)
+    if qdrant_url and qdrant_api_key:
+        qd_client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
+        
+        # Tự động tạo Collection nếu chưa có trên Qdrant Cloud
+        # Model 'text-embedding-004' tạo ra vector 768 chiều
+        collections = qd_client.get_collections().collections
+        collection_names = [c.name for c in collections]
+        
+        if ROOM_COLLECTION not in collection_names:
+            qd_client.create_collection(
+                collection_name=ROOM_COLLECTION,
+                vectors_config=VectorParams(size=768, distance=Distance.COSINE),
+            )
+        print(" Connected to Qdrant Cloud & Collection is ready!")
     else:
-        raise ValueError("Chưa cấu hình ELASTICSEARCH_URL trong môi trường hoặc file Config.")
-    
-    # Kiểm tra thực tế bằng một lệnh đọc thử thông tin hệ thống
-    info = es.info()
-    print(f" Kết nối Elasticsearch trực tuyến thành công! Phiên bản: {info['version']['number']}")
-
+        raise ValueError("Chưa cấu hình QDRANT_URL hoặc QDRANT_API_KEY trong môi trường.")
 except Exception as e:
-    logging.error(f"❌ Thất bại khi kết nối hoặc chứng thực Elasticsearch: {e}")
+    logging.error(f"❌ Thất bại khi kết nối Qdrant: {e}")
     print("⚠ Hệ thống sẽ chạy tạm thời ở chế độ KHÔNG CÓ DATABASE để tránh sập Server.")
-    es = None 
+    qd_client = None 
 
 
-# --- 2. HÀM BỔ TRỢ ELASTICSEARCH ---
-def insert_room_to_es(room_data: dict):
-    if not es:
-        print("❌ Elasticsearch chưa được kết nối. Bỏ qua thao tác lưu.")
+# --- 2. HÀM TẠO VECTOR EMBEDDING BẰNG GEMINI ---
+def get_text_embedding(text: str):
+    """Biến đổi câu chữ thành mảng số vector để tìm kiếm ngữ nghĩa"""
+    if not client:
+        return None
+    try:
+        response = client.models.embed_content(
+            model="text-embedding-004",
+            contents=text
+        )
+        return response.embeddings[0].values
+    except Exception as e:
+        print("❌ Lỗi tạo Embedding từ Gemini:", e)
+        return None
+
+
+# --- 3. CÁC HÀM XỬ LÝ DATABASE QDRANT ---
+def insert_room_to_db(room_data: dict):
+    if not qd_client:
+        print("❌ Qdrant chưa được kết nối. Bỏ qua thao tác lưu.")
         return False
     try:
-        response = es.index(index=ROOM_INDEX, document=room_data)
-        print("-> Đã lưu phòng vào Elasticsearch:", response.get("result"))
+        # Gom thông tin phòng trọ làm giàu ngữ nghĩa cho Vector
+        combined_text = f"{room_data.get('title', '')} {room_data.get('address', '')} {room_data.get('description', '')}"
+        vector = get_text_embedding(combined_text)
+        
+        if not vector:
+            return False
+            
+        point_id = str(uuid.uuid4())
+        qd_client.upsert(
+            collection_name=ROOM_COLLECTION,
+            points=[
+                PointStruct(
+                    id=point_id,
+                    vector=vector,
+                    payload=room_data  # Lưu dữ liệu gốc (Tiêu đề, Giá, Địa chỉ, Mô tả)
+                )
+            ]
+        )
+        print("-> Đã lưu phòng vào Qdrant Cloud thành công!")
         return True
     except Exception as e:
-        print("Lỗi khi thêm phòng vào ES:", e)
+        print("Lỗi khi thêm phòng vào Qdrant:", e)
         return False
 
-def search_rooms_from_es(user_query: str):
-    if not es:
-        print("❌ Elasticsearch chưa được kết nối. Không thể tìm kiếm.")
+def search_rooms_from_db(user_query: str):
+    if not qd_client:
+        print("❌ Qdrant chưa được kết nối. Không thể tìm kiếm.")
         return []
     try:
-        query_body = {
-            "query": {
-                "multi_match": {
-                    "query": user_query,
-                    "fields": ["title", "description", "address", "district"]
-                }
-            },
-            "size": 3
-        }
-        response = es.search(index=ROOM_INDEX, body=query_body)
-        hits = response['hits']['hits']
+        query_vector = get_text_embedding(user_query)
+        if not query_vector:
+            return []
+            
+        # Tìm kiếm không gian Vector (Top 3 phòng có nghĩa sát nhất)
+        search_result = qd_client.search(
+            collection_name=ROOM_COLLECTION,
+            query_vector=query_vector,
+            limit=3
+        )
         
         rooms_list = []
-        for hit in hits:
-            source = hit['_source']
+        for hit in search_result:
+            source = hit.payload
             rooms_list.append({
                 "Tiêu đề": source.get("title"),
                 "Giá": source.get("price"),
@@ -95,10 +121,11 @@ def search_rooms_from_es(user_query: str):
             })
         return rooms_list
     except Exception as e:
-        print("Lỗi truy vấn Elasticsearch:", e)
+        print("Lỗi truy vấn Qdrant:", e)
         return []
 
-# Hàm tự động đổi Refresh Token lấy Access Token mới tinh từ Zalo
+
+# --- 4. CÁC HÀM GIA HẠN VÀ GỬI TIN NHẮN ZALO ---
 def refresh_zalo_access_token():
     url = "https://oauth.zalo.me/v3.0/oa/access_token"
     headers = {
@@ -112,12 +139,10 @@ def refresh_zalo_access_token():
     }
     try:
         response = requests.post(url, headers=headers, data=payload)
-        
-        # Kiểm tra nếu phản hồi không phải JSON (Zalo trả về trang lỗi HTML)
         try:
             res_data = response.json()
         except Exception:
-            print(f"❌ Zalo OAuth không trả về JSON. Mã phản hồi: {response.status_code}. Nội dung thô: {response.text[:200]}")
+            print(f"❌ Zalo OAuth không trả về JSON. Mã: {response.status_code}. Thô: {response.text[:200]}")
             return None
 
         if "access_token" in res_data:
@@ -133,14 +158,13 @@ def refresh_zalo_access_token():
         print("❌ Lỗi kết nối khi cố gắng gia hạn Token:", e)
         return None
 
-# 1. BỔ SUNG HÀM GỬI TEXT THUẦN TÚY (Dành cho chào mừng, an toàn 100%)
 def send_pure_text(recipient_id: str, text: str):
     token = os.environ.get("ZALO_ACCESS_TOKEN")
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
     headers = {"access_token": token, "Content-Type": "application/json"}
     payload = {
         "recipient": {"user_id": recipient_id},
-        "message": {"text": text}  # Chỉ gửi text, không có bất kỳ cấu trúc nút bấm nào
+        "message": {"text": text}
     }
     try:
         response = requests.post(url, headers=headers, json=payload)
@@ -149,14 +173,11 @@ def send_pure_text(recipient_id: str, text: str):
         print("Lỗi gửi text thuần:", e)
         return None
 
-# --- 3. HÀM GỬI TIN NHẮN ZALO ĐÍNH KÈM NÚT BẤM (CẤU TRÚC CHUẨN V3) ---
 def send_zalo_message(recipient_id: str, text: str):
     token = os.environ.get("ZALO_ACCESS_TOKEN")
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
     headers = {"access_token": token, "Content-Type": "application/json"}
     
-    # SỬA LỖI PAYLOAD: Tách văn bản biến động (`text`) đưa vào tiêu đề của element 
-    # để tránh xung đột cấu trúc tin nhắn hỗn hợp.
     payload = {
         "recipient": {
             "user_id": recipient_id
@@ -206,7 +227,7 @@ def send_zalo_message(recipient_id: str, text: str):
         return None
 
 
-# --- 4. WEBHOOK XỬ LÝ CHÍNH ---
+# --- 5. WEBHOOK XỬ LÝ CHÍNH ---
 @app.post("/webhook/zalo")
 async def zalo_webhook(request: Request):
     try:
@@ -214,87 +235,75 @@ async def zalo_webhook(request: Request):
         data = json.loads(raw_body.decode("utf-8"))
         event_name = str(data.get("event_name", "")).strip()
         
-        # SỰ KIỆN 1: Khách nhấn Quan tâm OA
+        # SỰ KIỆN 1: Khách nhấn Quan tâm OA -> Gửi tin text thuần an toàn
         if "user_follow_oa" in event_name:
             recipient_id = data["sender"]["id"]
-            welcome_text = "Chào mừng bạn đến với Hệ Thống Tư Vấn Phòng Trọ Tự Động. Hãy chọn chức năng bên dưới nhé!"
-            send_zalo_message(recipient_id, welcome_text)
+            welcome_text = "👋 Chào mừng bạn đến với Hệ Thống Tư Vấn Phòng Trọ Tự Động. Hãy gõ nhu cầu phòng trọ hoặc thông tin phòng cho thuê của bạn để trợ lý AI hỗ trợ nhé!"
+            send_pure_text(recipient_id, welcome_text)
             return {"status": "success"}
             
-        # SỰ KIỆN 2: Khách nhắn tin chữ / Bấm nút
+        # SỰ KIỆN 2: Khách nhắn tin chữ / Bấm nút chức năng
         if "user_send_text" in event_name:
             recipient_id = data.get("user_id_by_app") or data["sender"]["id"]
             user_message = data["message"]["text"]
             
             print(f"-> Nhận tin nhắn từ khách: {user_message}")
-            ai_reply = "🤖 Hệ thống đang bận xử lý, bạn vui lòng thử lại sau vài phút nhé!"
             
-            router_prompt = f"""
-            Phân tích tin nhắn sau của người dùng: "{user_message}"
-            Xác định hành động thuộc 1 trong 2 loại:
-            - "ADD_ROOM": Muốn đăng bài, nạp dữ liệu, thêm phòng trọ mới.
-            - "SEARCH_ROOM": Muốn tìm kiếm, thuê phòng, hỏi phòng trống.
+            # Đọc trước dữ liệu Qdrant để mớm cho Gemini (Tối ưu hóa thành 1 lần gọi duy nhất)
+            found_rooms = search_rooms_from_db(user_message)
+            
+            # Prompt TẤT CẢ TRONG MỘT
+            combined_prompt = f"""
+            Bạn là trợ lý ảo thông minh của Hệ thống Zalo OA Tư vấn phòng trọ. 
+            Nhiệm vụ của bạn là phân tích tin nhắn của khách và chuẩn bị phản hồi.
+
+            Tin nhắn của khách: "{user_message}"
+            Dữ liệu phòng tìm thấy trong Database (nếu có): {json.dumps(found_rooms, ensure_ascii=False)}
+
+            Hãy thực hiện 2 việc:
+            1. Phân loại hành động ("action") thành "ADD_ROOM" (nếu muốn đăng/cho thuê phòng) hoặc "SEARCH_ROOM" (nếu muốn tìm/hỏi phòng).
+            2. Soạn nội dung phản hồi ("ai_reply"):
+               - Nếu là "ADD_ROOM": Xác nhận ghi nhận thành công và hiển thị lại các thông số bạn bóc tách được.
+               - Nếu là "SEARCH_ROOM": Dựa trên danh sách mớm từ database để soạn câu trả lời ngắn gọn, lịch sự, có đầy đủ xuống dòng. Nếu không tìm thấy phòng thích hợp, hãy báo hết phòng khéo léo và xin thông tin liên hệ lại sau.
 
             Trả về định dạng JSON duy nhất, không kèm giải thích:
             {{
                 "action": "ADD_ROOM" hoặc "SEARCH_ROOM",
                 "extracted_data": {{
-                    "title": "Tiêu đề phòng trọ nếu có",
-                    "price": "Giá phòng nếu có",
-                    "address": "Địa chỉ nếu có",
-                    "description": "Nội dung chi tiết hoặc từ khóa tìm kiếm"
-                }}
+                    "title": "Tiêu đề phòng",
+                    "price": "Giá",
+                    "address": "Địa chỉ",
+                    "description": "Mô tả chi tiết"
+                }},
+                "ai_reply": "Nội dung tin nhắn bạn đã soạn để gửi trực tiếp cho khách hàng"
             }}
             """
             
             try:
-                # SỬA LỖI CONFIG: Sử dụng types.GenerateContentConfig để ép định dạng trả về JSON sạch
-                router_response = client.models.generate_content(
+                # Gọi Gemini duy nhất một lần
+                response = client.models.generate_content(
                     model='gemini-2.5-flash',
-                    contents=router_prompt,
+                    contents=combined_prompt,
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json"
                     )
                 )
-                print(f"Kết nối gemini thành công")
                 
-                intent_data = json.loads(router_response.text.strip())
-                action = intent_data.get("action")
-                extracted = intent_data.get("extracted_data", {})
+                result_data = json.loads(response.text.strip())
+                action = result_data.get("action")
+                ai_reply = result_data.get("ai_reply", "🤖 Trợ lý AI đang cập nhật thông tin, bạn vui lòng đợi chút nhé.")
                 
-                print(f"Load data thêm o thành công")
-                # CHỨC NĂNG 1: THÊM PHÒNG
+                # Nếu khách muốn Đăng phòng -> Tiến hành lưu ngầm vào Qdrant
                 if action == "ADD_ROOM":
                     print("-> Nhận diện: Chức năng THÊM PHÒNG TRỌ.")
-                    success = insert_room_to_es(extracted)
-                    if success:
-                        ai_reply = f"✅ Đã thêm phòng trọ thành công vào hệ thống!\n📍 Địa chỉ: {extracted.get('address', 'Chưa rõ')}\n💰 Giá: {extracted.get('price', 'Chưa rõ')}"
-                    else:
-                        ai_reply = "❌ Hệ thống lưu trữ đang bận, không thể thêm phòng trọ lúc này."
-                        
-                # CHỨC NĂNG 2: TÌM PHÒNG
-                else:
-                    print("-> Nhận diện: Chức năng TÌM KIẾM PHÒNG TRỌ.")
-                    search_keyword = extracted.get("description") or user_message
-                    found_rooms = search_rooms_from_es(search_keyword)
-                    
-                    reply_prompt = f"""
-                    Bạn là trợ lý ảo tư vấn phòng trọ của Zalo OA. Khách hỏi: "{user_message}"
-                    Dữ liệu phòng tìm thấy từ database: {json.dumps(found_rooms, ensure_ascii=False)}
-                    Hãy soạn một tin nhắn tư vấn ngắn gọn, lịch sự gửi cho khách dựa trên dữ liệu trên. Nếu có 0 phòng, hãy báo hết phòng khéo léo và xin thông tin liên hệ.
-                    """
-                    
-                    ai_search_response = client.models.generate_content(
-                        model='gemini-2.5-flash',
-                        contents=reply_prompt
-                    )
-                    ai_reply = ai_search_response.text.strip()
+                    extracted = result_data.get("extracted_data", {})
+                    insert_room_to_db(extracted)
                     
             except Exception as ai_error:
-                print("Lỗi chi tiết trong khối xử lý Gemini/Elasticsearch:", ai_error)
-                ai_reply = "🤖 Đã xảy ra lỗi khi phân tích tin nhắn. Bạn vui lòng thử lại sau!"
+                print("❌ Lỗi chi tiết trong khối xử lý Gemini/Qdrant:", ai_error)
+                ai_reply = "🤖 Trợ lý AI đang quá tải lượt xử lý. Bạn vui lòng thử lại yêu cầu sau ít giây nhé!"
             
-            # Gửi tin nhắn phản hồi
+            # Gửi tin nhắn phản hồi cuối cùng tới Zalo
             send_zalo_message(recipient_id, ai_reply)
             
     except Exception as e:

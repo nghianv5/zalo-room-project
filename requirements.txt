@@ -3,5 +3,5 @@ uvicorn
 pydantic
 google-genai
 requests
-elasticsearch
+qdrant-client
 google-generativeai
