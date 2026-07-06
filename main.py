@@ -234,7 +234,7 @@ async def zalo_webhook(request: Request):
         raw_body = await request.body()
         data = json.loads(raw_body.decode("utf-8"))
         event_name = str(data.get("event_name", "")).strip()
-        
+        print(f"-> Nhận tin nhắn ")
         # SỰ KIỆN 1: Khách nhấn Quan tâm OA -> Gửi tin text thuần an toàn
         if "user_follow_oa" in event_name:
             recipient_id = data["sender"]["id"]
