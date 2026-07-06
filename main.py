@@ -314,3 +314,14 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
         print("Lỗi nghiêm trọng tại Webhook tổng:", e)
         
     return {"status": "success"}
+    
+    
+    
+    
+from fastapi.responses import HTMLResponse # <-- Nhớ thêm import này ở đầu file nếu chưa có
+
+# Thay thế tên file và chuỗi mã chính xác theo file Zalo cấp cho bạn
+@app.get("/zalo_verifierCjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn.html", response_class=HTMLResponse)
+async def zalo_verification():
+    # Điền đoạn mã bên trong file HTML của Zalo vào đây
+    return "CjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn"
