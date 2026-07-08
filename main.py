@@ -233,7 +233,7 @@ def send_zalo_message(recipient_id: str, text: str):
 
 # --- 5. WEBHOOK XỬ LÝ CHÍNH ---
 @app.post("/webhook/zalo")
-async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
+def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
     try:
         raw_body = await request.body()
         data = json.loads(raw_body.decode("utf-8"))
