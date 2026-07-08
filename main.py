@@ -230,6 +230,72 @@ def send_zalo_message(recipient_id: str, text: str):
         print("Lỗi kết nối Zalo API:", req_err)
         return None
 
+# --- 5. HÀM XỬ LÝ CHẠY NGẦM (BACKGROUND TASK) ---
+def process_zalo_ai_logic(data: dict):
+    """Toàn bộ logic kết nối Qdrant, gọi Gemini và gửi tin nhắn nằm ở đây"""
+    try:
+        event_name = str(data.get("event_name", "")).strip()
+        
+        # SỰ KIỆN 1: Khách nhấn Quan tâm OA
+        if "user_follow_oa" in event_name:
+            recipient_id = data["sender"]["id"]
+            welcome_text = "👋 Chào mừng bạn đến với Hệ Thống Tư Vấn Phòng Trọ Tự Động. Hãy gõ nhu cầu phòng trọ của bạn nhé!"
+            send_pure_text(recipient_id, welcome_text)
+            return
+            
+        # SỰ KIỆN 2: Khách nhắn tin chữ / Bấm nút chức năng
+        if "user_send_text" in event_name:
+            recipient_id = data.get("user_id_by_app") or data["sender"]["id"]
+            user_message = data["message"]["text"]
+            
+            print(f"-> [Chạy Ngầm] Nhận tin nhắn từ khách: {user_message}")
+            
+            # Đọc dữ liệu Qdrant và gọi Gemini xử lý
+            found_rooms = search_rooms_from_db(user_message)
+            
+            combined_prompt = f"""
+            Bạn là trợ lý ảo thông minh của Hệ thống Zalo OA Tư vấn phòng trọ. 
+            Tin nhắn của khách: "{user_message}"
+            Dữ liệu phòng tìm thấy trong Database: {json.dumps(found_rooms, ensure_ascii=False)}
+
+            Trả về định dạng JSON duy nhất:
+            {{
+                "action": "ADD_ROOM" hoặc "SEARCH_ROOM",
+                "extracted_data": {{
+                    "title": "Tiêu đề phòng",
+                    "price": "Giá",
+                    "address": "Địa chỉ",
+                    "description": "Mô tả chi tiết"
+                }},
+                "ai_reply": "Nội dung tin nhắn bạn đã soạn để gửi trực tiếp cho khách hàng"
+            }}
+            """
+            
+            try:
+                response = client.models.generate_content(
+                    model='gemini-2.5-flash',
+                    contents=combined_prompt,
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json"
+                    )
+                )
+                
+                result_data = json.loads(response.text.strip())
+                action = result_data.get("action")
+                ai_reply = result_data.get("ai_reply", "🤖 Trợ lý AI đang xử lý thông tin...")
+                
+                if action == "ADD_ROOM":
+                    extracted = result_data.get("extracted_data", {})
+                    insert_room_to_db(extracted)
+                    
+            except Exception as ai_error:
+                print("❌ Lỗi xử lý Gemini/Qdrant:", ai_error)
+                ai_reply = "🤖 Trợ lý AI đang quá tải, vui lòng thử lại sau!"
+            
+            send_zalo_message(recipient_id, ai_reply)
+            
+    except Exception as e:
+        print("❌ Lỗi nghiêm trọng tại hàm chạy ngầm:", e)
 
 # --- 5. WEBHOOK XỬ LÝ CHÍNH ---
 @app.post("/webhook/zalo")
@@ -328,14 +394,17 @@ from fastapi.responses import HTMLResponse # <-- Nhớ thêm import này ở đ�
 async def zalo_verification():
     # Điền đoạn mã bên trong file HTML của Zalo vào đây
     return """<!DOCTYPE html>
-<html lang="en">
+        <html lang="en">
 
-<head>
-    <meta property="zalo-platform-site-verification" content="CjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn" />
-</head>
+        <head>
+            <meta property="zalo-platform-site-verification" content="CjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn" />
+        </head>
 
-<body>
-CjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn
-</body>
+        <body>
+        CjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn
+        </body>
 
-</html>"""
+        </html>"""
+
+
+
