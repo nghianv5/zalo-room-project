@@ -324,4 +324,15 @@ from fastapi.responses import HTMLResponse # <-- Nhớ thêm import này ở đ�
 @app.get("/zalo_verifierCjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn.html", response_class=HTMLResponse)
 async def zalo_verification():
     # Điền đoạn mã bên trong file HTML của Zalo vào đây
-    return "zalo-platform-site-verification=CjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn"
+    return """<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta property="zalo-platform-site-verification" content="CjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn" />
+</head>
+
+<body>
+CjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn
+</body>
+
+</html>"""
