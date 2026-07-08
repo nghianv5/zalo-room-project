@@ -233,10 +233,13 @@ def send_zalo_message(recipient_id: str, text: str):
 
 # --- 5. WEBHOOK XỬ LÝ CHÍNH ---
 @app.post("/webhook/zalo")
-def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
+
+def zalo_webhook(data: dict, background_tasks: BackgroundTasks):
     try:
-        raw_body = await request.body()
-        data = json.loads(raw_body.decode("utf-8"))
+        if data:
+            # Đẩy dữ liệu vào luồng chạy ngầm xử lý AI
+            background_tasks.add_task(process_zalo_ai_logic, data)
+    
         event_name = str(data.get("event_name", "")).strip()
         print(f"-> Nhận tin nhắn ")
         # SỰ KIỆN 1: Khách nhấn Quan tâm OA -> Gửi tin text thuần an toàn
@@ -311,7 +314,7 @@ def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
             send_zalo_message(recipient_id, ai_reply)
             
     except Exception as e:
-        print("Lỗi nghiêm trọng tại Webhook tổng:", e)
+        print("Lỗi tiếp nhận webhook đầu vào:", e)
         
     return {"status": "success"}
     
