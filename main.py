@@ -54,12 +54,12 @@ except Exception as e:
 
 # --- 2. HÀM TẠO VECTOR EMBEDDING BẰNG GEMINI ---
 def get_text_embedding(text: str):
-    """Biến đổi câu chữ thành mảng số vector để tìm kiếm ngữ nghĩa"""
+    """Sửa tên model embedding để tương thích 100% với Google GenAI SDK v1beta"""
     if not client:
         return None
     try:
         response = client.models.embed_content(
-            model="text-embedding-004",
+            model="text-embedding-004", # Đảm bảo viết thường, không chứa tiền tố 'models/'
             contents=text
         )
         return response.embeddings[0].values
@@ -273,12 +273,12 @@ def process_zalo_ai_logic(data: dict):
             
             try:
                 response = client.models.generate_content(
-                    model='gemini-2.5-flash',
+                    model='gemini-2.5-flash-8b',  # <--- ĐỔI SANG BẢN 8B ĐỂ NÉ GIỚI HẠN 20 CÂU/NGÀY
                     contents=combined_prompt,
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json"
                     )
-                )
+)
                 
                 result_data = json.loads(response.text.strip())
                 action = result_data.get("action")
@@ -355,12 +355,12 @@ def zalo_webhook(data: dict, background_tasks: BackgroundTasks):
             try:
                 # Gọi Gemini duy nhất một lần
                 response = client.models.generate_content(
-                    model='gemini-2.5-flash',
+                    model='gemini-2.5-flash-8b',  # <--- ĐỔI SANG BẢN 8B ĐỂ NÉ GIỚI HẠN 20 CÂU/NGÀY
                     contents=combined_prompt,
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json"
                     )
-                )
+)
                 
                 result_data = json.loads(response.text.strip())
                 action = result_data.get("action")
