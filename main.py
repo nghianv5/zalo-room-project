@@ -108,34 +108,28 @@ def insert_room_to_db(room_data: dict):
         print("Lỗi khi thêm phòng vào Qdrant:", e)
         return False
 
-def search_rooms_from_db(user_query: str):
-    if not qd_client:
-        print("❌ Qdrant chưa được kết nối. Không thể tìm kiếm.")
+def search_rooms_from_db(query_text: str):
+    # Khối tạo embedding từ văn bản của bạn ở đây...
+    query_vector = get_text_embedding(query_text)
+    if not query_vector:
         return []
+        
     try:
-        query_vector = get_text_embedding(user_query)
-        if not query_vector:
-            return []
-            
-        # Tìm kiếm không gian Vector (Top 3 phòng có nghĩa sát nhất)
-        search_result = qd_client.search(
-            collection_name=ROOM_COLLECTION,
-            query_vector=query_vector,
+        # SỬA TẠI ĐÂY: Thay client.search bằng client.query_points
+        response = qdrant_client.query_points(
+            collection_name="rooms", # Tên collection của bạn
+            query=query_vector,
             limit=3
         )
         
-        rooms_list = []
-        for hit in search_result:
-            source = hit.payload
-            rooms_list.append({
-                "Tiêu đề": source.get("title"),
-                "Giá": source.get("price"),
-                "Địa chỉ": source.get("address"),
-                "Mô tả": source.get("description")
-            })
-        return rooms_list
+        # Trích xuất kết quả từ cấu trúc mới
+        rooms = []
+        for point in response.points:
+            rooms.append(point.payload)
+        return rooms
+        
     except Exception as e:
-        print("Lỗi truy vấn Qdrant:", e)
+        print("❌ Lỗi truy vấn Qdrant:", e)
         return []
 
 
