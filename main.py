@@ -54,19 +54,25 @@ except Exception as e:
 
 # --- 2. HÀM TẠO VECTOR EMBEDDING BẰNG GEMINI ---
 def get_text_embedding(text: str):
+    """Đổi sang mô hình gemini-embedding-001 để tránh lỗi 404"""
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         return None
     try:
-        # CHÚ Ý: Đổi v1beta thành v1 và chỉ để text-embedding-004 (không có models/ phía trước)
-        url = f"https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key={api_key}"
+        # Sử dụng gemini-embedding-001 trên endpoint /v1/
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-embedding-001:embedContent?key={api_key}"
         headers = {"Content-Type": "application/json"}
         payload = {"content": {"parts": [{"text": text}]}}
         
         response = requests.post(url, headers=headers, json=payload)
         res_json = response.json()
         
-        return res_json["embedding"]["values"]
+        # Bóc tách đúng cấu trúc dữ liệu của Google
+        if "embedding" in res_json and "values" in res_json["embedding"]:
+            return res_json["embedding"]["values"]
+        else:
+            print("❌ Cấu trúc JSON trả về không có embedding:", res_json)
+            return None
     except Exception as e:
         print("❌ Lỗi tạo Embedding trực tiếp:", e)
         return None
@@ -275,10 +281,10 @@ def process_zalo_ai_logic(data: dict):
             }}
             """
             
-            # --- ĐOẠN ĐÃ SỬA URL CHAT ĐỂ TRÁNH LỖI 404 ---
+            # --- ĐOẠN GỌI CHAT ỔN ĐỊNH TRÊN ENDPOINT V1 ---
             try:
                 api_key = os.environ.get("GEMINI_API_KEY")
-                # Đổi v1beta thành v1 để gọi đúng phân vùng model ổn định
+                # Ép cứng endpoint /v1/ và dùng mô hình gemini-2.5-flash tiêu chuẩn
                 chat_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
                 
                 chat_headers = {"Content-Type": "application/json"}
@@ -290,7 +296,7 @@ def process_zalo_ai_logic(data: dict):
                 chat_response = requests.post(chat_url, headers=chat_headers, json=chat_payload)
                 chat_res_json = chat_response.json()
                 
-                # Bóc tách text JSON trả về từ cấu trúc chuẩn
+                # Bóc tách text JSON trả về
                 raw_text = chat_res_json["candidates"][0]["content"]["parts"][0]["text"]
                 
                 result_data = json.loads(raw_text.strip())
@@ -303,7 +309,7 @@ def process_zalo_ai_logic(data: dict):
                     
             except Exception as ai_error:
                 print("❌ Lỗi xử lý Gemini trực tiếp:", ai_error)
-                ai_reply = "🤖 Trợ lý AI đang bận xử lý yêu cầu, bạn vui lòng thử lại sau nhé!"
+                ai_reply = "🤖 Hệ thống đang bận xử lý, vui lòng nhắn lại sau ít phút!"
             
     except Exception as e:
         print("❌ Lỗi nghiêm trọng tại hàm chạy ngầm:", e)
