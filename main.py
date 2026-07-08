@@ -54,17 +54,21 @@ except Exception as e:
 
 # --- 2. HÀM TẠO VECTOR EMBEDDING BẰNG GEMINI ---
 def get_text_embedding(text: str):
-    """Sửa tên model embedding để tương thích 100% với Google GenAI SDK v1beta"""
-    if not client:
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
         return None
     try:
-        response = client.models.embed_content(
-            model="text-embedding-004", # Đảm bảo viết thường, không chứa tiền tố 'models/'
-            contents=text
-        )
-        return response.embeddings[0].values
+        # CHÚ Ý: Đổi v1beta thành v1 và chỉ để text-embedding-004 (không có models/ phía trước)
+        url = f"https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key={api_key}"
+        headers = {"Content-Type": "application/json"}
+        payload = {"content": {"parts": [{"text": text}]}}
+        
+        response = requests.post(url, headers=headers, json=payload)
+        res_json = response.json()
+        
+        return res_json["embedding"]["values"]
     except Exception as e:
-        print("❌ Lỗi tạo Embedding từ Gemini:", e)
+        print("❌ Lỗi tạo Embedding trực tiếp:", e)
         return None
 
 
@@ -271,28 +275,35 @@ def process_zalo_ai_logic(data: dict):
             }}
             """
             
+            # --- ĐOẠN ĐÃ SỬA URL CHAT ĐỂ TRÁNH LỖI 404 ---
             try:
-                response = client.models.generate_content(
-                    model='gemini-2.5-flash-8b',  # <--- ĐỔI SANG BẢN 8B ĐỂ NÉ GIỚI HẠN 20 CÂU/NGÀY
-                    contents=combined_prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json"
-                    )
-)
+                api_key = os.environ.get("GEMINI_API_KEY")
+                # Đổi v1beta thành v1 để gọi đúng phân vùng model ổn định
+                chat_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
                 
-                result_data = json.loads(response.text.strip())
+                chat_headers = {"Content-Type": "application/json"}
+                chat_payload = {
+                    "contents": [{"parts": [{"text": combined_prompt}]}],
+                    "generationConfig": {"responseMimeType": "application/json"}
+                }
+                
+                chat_response = requests.post(chat_url, headers=chat_headers, json=chat_payload)
+                chat_res_json = chat_response.json()
+                
+                # Bóc tách text JSON trả về từ cấu trúc chuẩn
+                raw_text = chat_res_json["candidates"][0]["content"]["parts"][0]["text"]
+                
+                result_data = json.loads(raw_text.strip())
                 action = result_data.get("action")
-                ai_reply = result_data.get("ai_reply", "🤖 Trợ lý AI đang xử lý thông tin...")
+                ai_reply = result_data.get("ai_reply", "🤖 Trợ lý AI đang xử lý...")
                 
                 if action == "ADD_ROOM":
                     extracted = result_data.get("extracted_data", {})
                     insert_room_to_db(extracted)
                     
             except Exception as ai_error:
-                print("❌ Lỗi xử lý Gemini/Qdrant:", ai_error)
-                ai_reply = "🤖 Trợ lý AI đang quá tải, vui lòng thử lại sau!"
-            
-            send_zalo_message(recipient_id, ai_reply)
+                print("❌ Lỗi xử lý Gemini trực tiếp:", ai_error)
+                ai_reply = "🤖 Trợ lý AI đang bận xử lý yêu cầu, bạn vui lòng thử lại sau nhé!"
             
     except Exception as e:
         print("❌ Lỗi nghiêm trọng tại hàm chạy ngầm:", e)
