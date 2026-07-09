@@ -17,7 +17,7 @@ async def root():
     return {"status": "running", "message": "Zalo Room Chatbot AI is active!"}
 
 # Tên bảng lưu trữ phòng trọ trên Qdrant
-ROOM_COLLECTION = "room_collection"
+ROOM_COLLECTION = "rooms_v2"
 
 # --- 1. KHỞI TẠO CÁC KẾT NỐI (GEMINI & QDRANT) ---
 
@@ -53,28 +53,21 @@ qdrant_url = os.environ.get("QDRANT_URL")
 qdrant_api_key = os.environ.get("QDRANT_API_KEY")
 
 try:
-    if qdrant_url and qdrant_api_key:
-        qd_client = QdrantClient(url=qdrant_url, api_key=qdrant_api_key)
-        
-        # Tự động tạo Collection nếu chưa có trên Qdrant Cloud
-        # Model 'text-embedding-004' tạo ra vector 768 chiều
-        collections = qd_client.get_collections().collections
-        collection_names = [c.name for c in collections]
-        
-        if ROOM_COLLECTION not in collection_names:
-            qd_client.create_collection(
-                collection_name=ROOM_COLLECTION,
-                vectors_config=VectorParams(size=768, distance=Distance.COSINE),
+    if not qdrant_client.collection_exists(collection_name=COLLECTION_NAME):
+        print(f"⚠ Không tìm thấy collection '{COLLECTION_NAME}'. Đang tạo mới...")
+        qdrant_client.create_collection(
+            collection_name=COLLECTION_NAME,
+            vectors_config=VectorParams(
+                size=3072,  # <--- SỬA THÀNH 3072 ĐỂ KHỚP VỚI TEXT-EMBEDDING-004
+                distance=Distance.COSINE
             )
-        print(" Connected to Qdrant Cloud & Collection is ready!")
-    else:
-        raise ValueError("Chưa cấu hình QDRANT_URL hoặc QDRANT_API_KEY trong môi trường.")
-except Exception as e:
-    logging.error(f"❌ Thất bại khi kết nối Qdrant: {e}")
-    print("⚠ Hệ thống sẽ chạy tạm thời ở chế độ KHÔNG CÓ DATABASE để tránh sập Server.")
-    qd_client = None 
-
-
+        )
+        print(f" Tạo thành công collection '{COLLECTION_NAME}' (3072 dims)!")
+except Exception as qdrant_init_error:
+    print("❌ Lỗi khi khởi tạo kiểm tra Collection Qdrant:", qdrant_init_error)
+    
+    
+    
 # --- 2. HÀM TẠO VECTOR EMBEDDING BẰNG GEMINI ---
 def get_text_embedding(text: str):
     """Đổi sang mô hình gemini-embedding-001 để tránh lỗi 404"""
