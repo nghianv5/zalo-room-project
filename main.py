@@ -25,11 +25,28 @@ ROOM_COLLECTION = "room_collection"
 api_key_env = os.environ.get("GEMINI_API_KEY")
 client = genai.Client(api_key=api_key_env) if api_key_env else None
 
-# Hãy chắc chắn bạn đặt tên biến là qdrant_client (viết thường toàn bộ)
+# 1. Khởi tạo client kết nối Qdrant
 qdrant_client = QdrantClient(
     url=os.environ.get("QDRANT_URL"),
     api_key=os.environ.get("QDRANT_API_KEY")
 )
+
+# 2. ĐOẠN THÊM MỚI: Tự động kiểm tra và tạo Collection "rooms" để tránh lỗi 404
+try:
+    if not qdrant_client.collection_exists(collection_name="rooms"):
+        print("⚠ Không tìm thấy collection 'rooms'. Đang tiến hành tạo mới...")
+        qdrant_client.create_collection(
+            collection_name="rooms",
+            vectors_config=VectorParams(
+                size=768,  # Kích thước vector chuẩn cho các model Embedding của Gemini
+                distance=Distance.COSINE # Khoảng cách tính toán độ tương đồng
+            )
+        )
+        print(" Tạo thành công collection 'rooms' trên Qdrant!")
+    else:
+        print(" Collection 'rooms' đã tồn tại sẵn trên Qdrant.")
+except Exception as qdrant_init_error:
+    print("❌ Lỗi khi khởi tạo kiểm tra Collection Qdrant:", qdrant_init_error)
 
 # Lấy cấu hình môi trường cho Qdrant Cloud (Thay thế Elasticsearch)
 qdrant_url = os.environ.get("QDRANT_URL")
