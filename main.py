@@ -74,19 +74,16 @@ def get_text_embedding(text: str):
     if not api_key:
         return None
     try:
-        # Sử dụng gemini-embedding-001 trên endpoint /v1/ (Tự động trả về 768 chiều chuẩn)
+        # Sử dụng mô hình gemini-embedding-001 trên endpoint v1 ổn định
         url = f"https://generativelanguage.googleapis.com/v1/models/gemini-embedding-001:embedContent?key={api_key}"
         headers = {"Content-Type": "application/json"}
-        
-        payload = {
-            "content": {"parts": [{"text": text}]}
-        }
+        payload = {"content": {"parts": [{"text": text}]}}
         
         response = requests.post(url, headers=headers, json=payload)
         res_json = response.json()
         
         if "embedding" in res_json and "values" in res_json["embedding"]:
-            return res_json["embedding"]["values"]
+            return res_json["embedding"]["values"]  # Trả về mảng 768 chiều chuẩn
         else:
             print("❌ Cấu trúc JSON trả về không có embedding:", res_json)
             return None
@@ -292,10 +289,10 @@ def process_zalo_ai_logic(data: dict):
             }}
             """
             
-            # --- ĐOẠN ĐÃ ĐỒNG BỘ URL CHAT V1 VÀ MÔ HÌNH CHUẨN ---
+            # --- ĐOẠN ĐÃ SỬA ENDPOINT CHAT V1 ỔN ĐỊNH ---
             try:
                 api_key = os.environ.get("GEMINI_API_KEY")
-                # Đảm bảo link là /v1/ và mô hình là gemini-2.5-flash
+                # Đảm bảo đường dẫn là /v1/ và mô hình là gemini-2.5-flash (KHÔNG chứa chữ -8b)
                 chat_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
                 
                 chat_headers = {"Content-Type": "application/json"}
@@ -307,7 +304,6 @@ def process_zalo_ai_logic(data: dict):
                 chat_response = requests.post(chat_url, headers=chat_headers, json=chat_payload)
                 chat_res_json = chat_response.json()
                 
-                # Bóc tách text JSON trả về theo cấu trúc chuẩn của Google API
                 raw_text = chat_res_json["candidates"][0]["content"]["parts"][0]["text"]
                 
                 result_data = json.loads(raw_text.strip())
@@ -320,7 +316,7 @@ def process_zalo_ai_logic(data: dict):
                     
             except Exception as ai_error:
                 print("❌ Lỗi xử lý Gemini trực tiếp:", ai_error)
-                ai_reply = "🤖 Hệ thống đang bận, vui lòng thử lại sau ít phút!"
+                ai_reply = "🤖 Hệ thống đang bận, bạn vui lòng nhắn lại sau ít phút!"
             
     except Exception as e:
         print("❌ Lỗi nghiêm trọng tại hàm chạy ngầm:", e)
@@ -417,22 +413,7 @@ def zalo_webhook(data: dict, background_tasks: BackgroundTasks):
     
 from fastapi.responses import HTMLResponse # <-- Nhớ thêm import này ở đầu file nếu chưa có
 
-# Thay thế tên file và chuỗi mã chính xác theo file Zalo cấp cho bạn
-@app.get("/zalo_verifierCjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn.html", response_class=HTMLResponse)
-async def zalo_verification():
-    # Điền đoạn mã bên trong file HTML của Zalo vào đây
-    return """<!DOCTYPE html>
-        <html lang="en">
 
-        <head>
-            <meta property="zalo-platform-site-verification" content="CjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn" />
-        </head>
-
-        <body>
-        CjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn
-        </body>
-
-        </html>"""
 
 
 
