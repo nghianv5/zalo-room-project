@@ -18,7 +18,7 @@ async def root():
 
 # Tên bảng lưu trữ phòng trọ trên Qdrant
 ROOM_COLLECTION = "rooms_v2"
-
+COLLECTION_NAME = "rooms"
 # --- 1. KHỞI TẠO CÁC KẾT NỐI (GEMINI & QDRANT) ---
 
 # Khởi tạo Client Gemini an toàn
@@ -33,10 +33,10 @@ qdrant_client = QdrantClient(
 
 # 2. ĐOẠN THÊM MỚI: Tự động kiểm tra và tạo Collection "rooms" để tránh lỗi 404
 try:
-    if not qdrant_client.collection_exists(collection_name="rooms"):
+    if not qdrant_client.collection_exists(COLLECTION_NAME):
         print("⚠ Không tìm thấy collection 'rooms'. Đang tiến hành tạo mới...")
         qdrant_client.create_collection(
-            collection_name="rooms",
+            COLLECTION_NAME,
             vectors_config=VectorParams(
                 size=768,  # Kích thước vector chuẩn cho các model Embedding của Gemini
                 distance=Distance.COSINE # Khoảng cách tính toán độ tương đồng
