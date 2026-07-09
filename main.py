@@ -74,14 +74,12 @@ def get_text_embedding(text: str):
     if not api_key:
         return None
     try:
-        # Gọi mô hình text-embedding-004 trên endpoint v1 chính thức
-        url = f"https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key={api_key}"
+        # Sử dụng gemini-embedding-001 trên endpoint /v1/ (Tự động trả về 768 chiều chuẩn)
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-embedding-001:embedContent?key={api_key}"
         headers = {"Content-Type": "application/json"}
         
-        # SỬA TẠI ĐÂY: Thêm outputDimensionality để ép về đúng 768 chiều
         payload = {
-            "content": {"parts": [{"text": text}]},
-            "outputDimensionality": 768
+            "content": {"parts": [{"text": text}]}
         }
         
         response = requests.post(url, headers=headers, json=payload)
@@ -294,10 +292,10 @@ def process_zalo_ai_logic(data: dict):
             }}
             """
             
-            # --- ĐOẠN ĐÃ SỬA ENDPOINT CHAT V1 ---
+            # --- ĐOẠN ĐÃ ĐỒNG BỘ URL CHAT V1 VÀ MÔ HÌNH CHUẨN ---
             try:
                 api_key = os.environ.get("GEMINI_API_KEY")
-                # Đảm bảo link là /v1/ và mô hình là gemini-2.5-flash (KHÔNG có chữ -8b)
+                # Đảm bảo link là /v1/ và mô hình là gemini-2.5-flash
                 chat_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
                 
                 chat_headers = {"Content-Type": "application/json"}
@@ -309,6 +307,7 @@ def process_zalo_ai_logic(data: dict):
                 chat_response = requests.post(chat_url, headers=chat_headers, json=chat_payload)
                 chat_res_json = chat_response.json()
                 
+                # Bóc tách text JSON trả về theo cấu trúc chuẩn của Google API
                 raw_text = chat_res_json["candidates"][0]["content"]["parts"][0]["text"]
                 
                 result_data = json.loads(raw_text.strip())
