@@ -25,6 +25,12 @@ ROOM_COLLECTION = "room_collection"
 api_key_env = os.environ.get("GEMINI_API_KEY")
 client = genai.Client(api_key=api_key_env) if api_key_env else None
 
+# Hãy chắc chắn bạn đặt tên biến là qdrant_client (viết thường toàn bộ)
+qdrant_client = QdrantClient(
+    url=os.environ.get("QDRANT_URL"),
+    api_key=os.environ.get("QDRANT_API_KEY")
+)
+
 # Lấy cấu hình môi trường cho Qdrant Cloud (Thay thế Elasticsearch)
 qdrant_url = os.environ.get("QDRANT_URL")
 qdrant_api_key = os.environ.get("QDRANT_API_KEY")
