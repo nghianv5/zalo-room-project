@@ -71,10 +71,13 @@ def get_text_embedding(text: str):
     if not api_key:
         return None
     try:
-        # Chuyển hẳn sang cổng v1 và dùng mô hình gemini-embedding-001 để tự động sinh ra 768 chiều
-        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-embedding-001:embedContent?key={api_key}"
+        # Ép về cổng v1beta để text-embedding-004 hoạt động mượt qua HTTP thuần
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={api_key}"
         headers = {"Content-Type": "application/json"}
-        payload = {"content": {"parts": [{"text": text}]}}
+        payload = {
+            "content": {"parts": [{"text": text}]},
+            "outputDimensionality": 768  # Ép chặt Google trả về đúng 768 chiều khớp với Qdrant
+        }
         
         response = requests.post(url, headers=headers, json=payload)
         res_json = response.json()
@@ -196,31 +199,20 @@ def send_zalo_message(user_id: str, ai_reply: str):
         print("❌ Thiếu Zalo Access Token")
         return
         
-    # KIỂM TRA ĐÚNG URL NÀY (Không thừa, thiếu ký tự nào)
-    url = "https://openapi.zalo.me/v3.0/oa/message"
-    
-    # KIỂM TRA ĐÚNG HEADERS NÀY
+    url = "https://openapi.zalo.me/v3.0/oa/message" # URL CHUẨN KHÔNG ĐƯỢC THAY ĐỔI
     headers = {
         "Content-Type": "application/json",
-        "access_token": access_token  # Chữ access_token viết thường
+        "access_token": access_token
     }
-    
     payload = {
-        "recipient": {
-            "user_id": user_id
-        },
-        "message": {
-            "text": ai_reply
-        }
+        "recipient": {"user_id": user_id},
+        "message": {"text": ai_reply}
     }
-
     try:
         response = requests.post(url, headers=headers, json=payload)
-        res_json = response.json()
-        print("--- KẾT QUẢ TRẢ VỀ TỪ ZALO API V3 ---", res_json)
-        return res_json
+        return response.json()
     except Exception as e:
-        print("❌ Lỗi khi gọi API gửi tin nhắn Zalo:", e)
+        print("❌ Lỗi gọi API Zalo:", e)
         return None
 
 # --- 5. HÀM XỬ LÝ CHẠY NGẦM (BACKGROUND TASK) ---
