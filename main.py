@@ -72,16 +72,19 @@ def get_text_embedding(text: str):
     if not api_key:
         return None
     try:
-        # Sử dụng mô hình gemini-embedding-001 trên endpoint v1 ổn định
-        url = f"https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key={api_key}"
+        # CHÚ Ý: Dùng cổng v1beta cho text-embedding-004 qua HTTP thuần
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={api_key}"
         headers = {"Content-Type": "application/json"}
-        payload = {"content": {"parts": [{"text": text}]}}
+        payload = {
+            "content": {"parts": [{"text": text}]},
+            "outputDimensionality": 768  # Ép về 768 chiều để vừa khít với bảng rooms hiện tại của bạn
+        }
         
         response = requests.post(url, headers=headers, json=payload)
         res_json = response.json()
         
         if "embedding" in res_json and "values" in res_json["embedding"]:
-            return res_json["embedding"]["values"]  # Trả về mảng 768 chiều chuẩn
+            return res_json["embedding"]["values"]
         else:
             print("❌ Cấu trúc JSON trả về không có embedding:", res_json)
             return None
@@ -290,8 +293,8 @@ def process_zalo_ai_logic(data: dict):
             # --- ĐOẠN ĐÃ SỬA ENDPOINT CHAT V1 ỔN ĐỊNH ---
             try:
                 api_key = os.environ.get("GEMINI_API_KEY")
-                # Đảm bảo đường dẫn là /v1/ và mô hình là gemini-2.5-flash (KHÔNG chứa chữ -8b)
-                chat_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
+                # Đổi hẳn sang gemini-1.5-flash trên cổng v1 để dứt điểm lỗi 404 và né hạn mức 20 câu/ngày
+                chat_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
                 
                 chat_headers = {"Content-Type": "application/json"}
                 chat_payload = {
