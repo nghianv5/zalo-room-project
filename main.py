@@ -71,7 +71,7 @@ def get_text_embedding(text: str):
     if not api_key:
         return None
     try:
-        # Thay đổi sang endpoint v1 và model gemini-embedding-001 ổn định
+        # Chuyển hẳn sang cổng v1 và dùng mô hình gemini-embedding-001 để tự động sinh ra 768 chiều
         url = f"https://generativelanguage.googleapis.com/v1/models/gemini-embedding-001:embedContent?key={api_key}"
         headers = {"Content-Type": "application/json"}
         payload = {"content": {"parts": [{"text": text}]}}
@@ -191,28 +191,28 @@ def send_pure_text(recipient_id: str, text: str):
         return None
 
 def send_zalo_message(user_id: str, ai_reply: str):
-    """Hàm gửi tin nhắn phản hồi về Zalo OA"""
     access_token = os.environ.get("ZALO_ACCESS_TOKEN")
     if not access_token:
         print("❌ Thiếu Zalo Access Token")
         return
         
+    # KIỂM TRA ĐÚNG URL NÀY (Không thừa, thiếu ký tự nào)
     url = "https://openapi.zalo.me/v3.0/oa/message"
+    
+    # KIỂM TRA ĐÚNG HEADERS NÀY
     headers = {
         "Content-Type": "application/json",
-        "access_token": access_token
+        "access_token": access_token  # Chữ access_token viết thường
     }
     
-    # --- ĐÂY CHÍNH LÀ NƠI BẠN THAY THẾ payload ---
     payload = {
         "recipient": {
-            "user_id": user_id  # ID người nhận tin nhắn (bốc từ webhook)
+            "user_id": user_id
         },
         "message": {
-            "text": ai_reply    # Nội dung chữ thuần túy đã sửa định dạng lỗi -201
+            "text": ai_reply
         }
     }
-    # ---------------------------------------------
 
     try:
         response = requests.post(url, headers=headers, json=payload)
