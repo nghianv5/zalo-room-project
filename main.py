@@ -72,22 +72,17 @@ def get_text_embedding(text: str):
     if not api_key:
         return None
     try:
-        # CHÚ Ý: Dùng cổng v1beta cho text-embedding-004 qua HTTP thuần
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={api_key}"
+        # Thay đổi sang endpoint v1 và model gemini-embedding-001 ổn định
+        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-embedding-001:embedContent?key={api_key}"
         headers = {"Content-Type": "application/json"}
-        payload = {
-            "content": {"parts": [{"text": text}]},
-            "outputDimensionality": 768  # Ép về 768 chiều để vừa khít với bảng rooms hiện tại của bạn
-        }
+        payload = {"content": {"parts": [{"text": text}]}}
         
         response = requests.post(url, headers=headers, json=payload)
         res_json = response.json()
         
         if "embedding" in res_json and "values" in res_json["embedding"]:
             return res_json["embedding"]["values"]
-        else:
-            print("❌ Cấu trúc JSON trả về không có embedding:", res_json)
-            return None
+        return None
     except Exception as e:
         print("❌ Lỗi tạo Embedding trực tiếp:", e)
         return None
