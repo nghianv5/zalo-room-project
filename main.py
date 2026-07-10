@@ -17,8 +17,7 @@ async def root():
     return {"status": "running", "message": "Zalo Room Chatbot AI is active!"}
 
 # Tên bảng lưu trữ phòng trọ trên Qdrant
-ROOM_COLLECTION = "rooms_v3"
-COLLECTION_NAME = "rooms"
+COLLECTION_NAME = "rooms_v3"
 # --- 1. KHỞI TẠO CÁC KẾT NỐI (GEMINI & QDRANT) ---
 
 # Khởi tạo Client Gemini an toàn
@@ -31,14 +30,14 @@ qdrant_client = QdrantClient(
     api_key=os.environ.get("QDRANT_API_KEY")
 )
 
-# Ở đoạn code tự động khởi tạo bảng, hãy sửa kích thước lên 3072 để đi với text-embedding-004
+# 2. Sửa đoạn tự động tạo bảng (Nâng size lên 3072)
 try:
     if not qdrant_client.collection_exists(collection_name=COLLECTION_NAME):
         print(f"⚠ Không tìm thấy collection '{COLLECTION_NAME}'. Đang tạo mới...")
         qdrant_client.create_collection(
             collection_name=COLLECTION_NAME,
             vectors_config=VectorParams(
-                size=3072,  # <--- ÉP LÊN 3072 CHIỀU LUÔN
+                size=3072,  # <--- SỬA LÊN 3072 ĐỂ KHỚP VỚI VECTOR EMBEDDING MỚI
                 distance=Distance.COSINE
             )
         )
@@ -103,7 +102,7 @@ def insert_room_to_db(room_data: dict):
             
         point_id = str(uuid.uuid4())
         qd_client.upsert(
-            collection_name=ROOM_COLLECTION,
+            collection_name=COLLECTION_NAME,
             points=[
                 PointStruct(
                     id=point_id,
@@ -191,57 +190,37 @@ def send_pure_text(recipient_id: str, text: str):
         print("Lỗi gửi text thuần:", e)
         return None
 
-def send_zalo_message(recipient_id: str, text: str):
-    token = os.environ.get("ZALO_ACCESS_TOKEN")
-    url = "https://openapi.zalo.me/v3.0/oa/message/cs"
-    headers = {"access_token": token, "Content-Type": "application/json"}
-    
-    payload = {
-        "recipient": {
-            "user_id": recipient_id
-        },
-        "message": {
-            "attachment": {
-                "type": "template",
-                "payload": {
-                    "template_type": "transaction",
-                    "elements": [{
-                        "title": "Hệ Thống Phòng Trọ AI",
-                        "subtitle": text
-                    }],
-                    "buttons": [
-                        {
-                            "title": "➕ Đăng/Thêm Phòng",
-                            "type": "oa.query.show",
-                            "payload": "Thêm phòng trọ mới tại: "
-                        },
-                        {
-                            "title": "🔍 Tìm Kiếm Phòng",
-                            "type": "oa.query.show",
-                            "payload": "Tìm phòng trọ tại: "
-                        }
-                    ]
-                }
-            }
-        }
+def send_zalo_message(user_id: str, ai_reply: str):
+    """Hàm gửi tin nhắn phản hồi về Zalo OA"""
+    access_token = os.environ.get("ZALO_ACCESS_TOKEN")
+    if not access_token:
+        print("❌ Thiếu Zalo Access Token")
+        return
+        
+    url = "https://openapi.zalo.me/v3.0/oa/message"
+    headers = {
+        "Content-Type": "application/json",
+        "access_token": access_token
     }
     
+    # --- ĐÂY CHÍNH LÀ NƠI BẠN THAY THẾ payload ---
+    payload = {
+        "recipient": {
+            "user_id": user_id  # ID người nhận tin nhắn (bốc từ webhook)
+        },
+        "message": {
+            "text": ai_reply    # Nội dung chữ thuần túy đã sửa định dạng lỗi -201
+        }
+    }
+    # ---------------------------------------------
+
     try:
         response = requests.post(url, headers=headers, json=payload)
         res_json = response.json()
-        
-        if res_json.get("error") == -216:
-            print("⚠️ Phát hiện Token hết hạn! Đang tiến hành tự động gia hạn...")
-            new_token = refresh_zalo_access_token()
-            if new_token:
-                headers["access_token"] = new_token
-                response = requests.post(url, headers=headers, json=payload)
-                res_json = response.json()
-                
         print("--- KẾT QUẢ TRẢ VỀ TỪ ZALO API V3 ---", res_json)
         return res_json
-    except Exception as req_err:
-        print("Lỗi kết nối Zalo API:", req_err)
+    except Exception as e:
+        print("❌ Lỗi khi gọi API gửi tin nhắn Zalo:", e)
         return None
 
 # --- 5. HÀM XỬ LÝ CHẠY NGẦM (BACKGROUND TASK) ---
@@ -289,7 +268,7 @@ def process_zalo_ai_logic(data: dict):
             try:
                 api_key = os.environ.get("GEMINI_API_KEY")
                 # Đổi hẳn sang gemini-1.5-flash trên cổng v1 để dứt điểm lỗi 404 và né hạn mức 20 câu/ngày
-                chat_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
+                chat_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
                 
                 chat_headers = {"Content-Type": "application/json"}
                 chat_payload = {
