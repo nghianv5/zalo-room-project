@@ -9,7 +9,7 @@ from google import genai
 from google.genai import types  
 from config import Config
 import logging
-
+from fastapi.responses import HTMLResponse # <-- Nhớ thêm import này ở đầu file nếu chưa có
 
 app = FastAPI()
 @app.get("/")
@@ -17,7 +17,7 @@ async def root():
     return {"status": "running", "message": "Zalo Room Chatbot AI is active!"}
 
 # Tên bảng lưu trữ phòng trọ trên Qdrant
-ROOM_COLLECTION = "rooms_v2"
+ROOM_COLLECTION = "rooms_v3"
 COLLECTION_NAME = "rooms"
 # --- 1. KHỞI TẠO CÁC KẾT NỐI (GEMINI & QDRANT) ---
 
@@ -31,20 +31,18 @@ qdrant_client = QdrantClient(
     api_key=os.environ.get("QDRANT_API_KEY")
 )
 
-# 2. ĐOẠN THÊM MỚI: Tự động kiểm tra và tạo Collection "rooms" để tránh lỗi 404
+# Ở đoạn code tự động khởi tạo bảng, hãy sửa kích thước lên 3072 để đi với text-embedding-004
 try:
-    if not qdrant_client.collection_exists(COLLECTION_NAME):
-        print("⚠ Không tìm thấy collection 'rooms'. Đang tiến hành tạo mới...")
+    if not qdrant_client.collection_exists(collection_name=COLLECTION_NAME):
+        print(f"⚠ Không tìm thấy collection '{COLLECTION_NAME}'. Đang tạo mới...")
         qdrant_client.create_collection(
-            COLLECTION_NAME,
+            collection_name=COLLECTION_NAME,
             vectors_config=VectorParams(
-                size=768,  # Kích thước vector chuẩn cho các model Embedding của Gemini
-                distance=Distance.COSINE # Khoảng cách tính toán độ tương đồng
+                size=3072,  # <--- ÉP LÊN 3072 CHIỀU LUÔN
+                distance=Distance.COSINE
             )
         )
-        print(" Tạo thành công collection 'rooms' trên Qdrant!")
-    else:
-        print(" Collection 'rooms' đã tồn tại sẵn trên Qdrant.")
+        print(f" Tạo thành công collection '{COLLECTION_NAME}' (3072 dims)!")
 except Exception as qdrant_init_error:
     print("❌ Lỗi khi khởi tạo kiểm tra Collection Qdrant:", qdrant_init_error)
 
@@ -75,7 +73,7 @@ def get_text_embedding(text: str):
         return None
     try:
         # Sử dụng mô hình gemini-embedding-001 trên endpoint v1 ổn định
-        url = f"https://generativelanguage.googleapis.com/v1/models/gemini-embedding-001:embedContent?key={api_key}"
+        url = f"https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key={api_key}"
         headers = {"Content-Type": "application/json"}
         payload = {"content": {"parts": [{"text": text}]}}
         
@@ -409,9 +407,7 @@ def zalo_webhook(data: dict, background_tasks: BackgroundTasks):
     return {"status": "success"}
     
     
-    
-    
-from fastapi.responses import HTMLResponse # <-- Nhớ thêm import này ở đầu file nếu chưa có
+
 
 
 
