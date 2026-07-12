@@ -309,19 +309,19 @@ def zalo_webhook(request_data: dict, background_tasks: BackgroundTasks):
         except Exception as e:
             print("❌ Lỗi bóc tách webhook Zalo:", e)
         
-        event_name = str(data.get("event_name", "")).strip()
+        event_name = str(request_data.get("event_name", "")).strip()
         print(f"-> Nhận tin nhắn ")
         # SỰ KIỆN 1: Khách nhấn Quan tâm OA -> Gửi tin text thuần an toàn
         if "user_follow_oa" in event_name:
-            recipient_id = data["sender"]["id"]
+            recipient_id = request_data["sender"]["id"]
             welcome_text = "👋 Chào mừng bạn đến với Hệ Thống Tư Vấn Phòng Trọ Tự Động. Hãy gõ nhu cầu phòng trọ hoặc thông tin phòng cho thuê của bạn để trợ lý AI hỗ trợ nhé!"
             send_pure_text(recipient_id, welcome_text)
             return {"status": "success"}
             
         # SỰ KIỆN 2: Khách nhắn tin chữ / Bấm nút chức năng
         if "user_send_text" in event_name:
-            recipient_id = data.get("user_id_by_app") or data["sender"]["id"]
-            user_message = data["message"]["text"]
+            recipient_id = request_data.get("user_id_by_app") or request_data["sender"]["id"]
+            user_message = request_data["message"]["text"]
             
             print(f"-> Nhận tin nhắn từ khách: {user_message}")
             
