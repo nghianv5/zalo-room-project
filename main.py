@@ -216,89 +216,77 @@ def send_zalo_message(user_id: str, ai_reply: str):
         return None
 
 # --- 5. HÀM XỬ LÝ CHẠY NGẦM (BACKGROUND TASK) ---
-def process_zalo_ai_logic(data: dict):
-    """Toàn bộ logic kết nối Qdrant, gọi Gemini và gửi tin nhắn nằm ở đây"""
+def process_zalo_ai_logic(user_id: str, message_text: str):
+    print(f"🔄 [AI] Bắt đầu xử lý luồng chạy ngầm cho User: {user_id}")
+    
+    # Định nghĩa sẵn câu trả lời mặc định, nếu có sập toàn bộ thì khách vẫn nhận được tin này
+    ai_reply = "🤖 Trợ lý AI đang xử lý thông tin, bạn vui lòng nhắn lại rõ hơn nhé!" 
+    
     try:
-        event_name = str(data.get("event_name", "")).strip()
+        # 1. Tìm kiếm thông tin từ cơ sở dữ liệu Qdrant
+        context = ""
+        try:
+            rooms = search_rooms_from_db(message_text)
+            if rooms:
+                context = f"Danh sách phòng trống phù hợp tìm thấy: {rooms}"
+        except Exception as qdrant_err:
+            print("❌ [AI] Lỗi tìm kiếm Qdrant nhưng bỏ qua để chạy tiếp:", qdrant_err)
+
+        # 2. Thiết lập gọi API Chat Gemini v1 ổn định
+        api_key = os.environ.get("GEMINI_API_KEY")
+        chat_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
+        chat_headers = {"Content-Type": "application/json"}
         
-        # SỰ KIỆN 1: Khách nhấn Quan tâm OA
-        if "user_follow_oa" in event_name:
-            recipient_id = data["sender"]["id"]
-            welcome_text = "👋 Chào mừng bạn đến với Hệ Thống Tư Vấn Phòng Trọ Tự Động. Hãy gõ nhu cầu phòng trọ của bạn nhé!"
-            send_pure_text(recipient_id, welcome_text)
-            return
+        combined_prompt = f"""
+        Bạn là trợ lý ảo tư vấn phòng trọ thông minh.
+        Dữ liệu phòng trọ tìm được: {context}
+        Khách hàng nhắn: "{message_text}"
+        
+        HÃY TRẢ VỀ ĐỊNH DẠNG JSON NGHIÊM NGẶT THEO MẪU SAU, KHÔNG ĐƯỢC THỪA CHỮ NÀO NGOÀI JSON:
+        {{
+            "action": "REPLY",
+            "ai_reply": "Nội dung câu trả lời tư vấn bằng tiếng Việt thân thiện"
+        }}
+        """
+        
+        chat_payload = {
+            "contents": [{"parts": [{"text": combined_prompt}]}],
+            "generationConfig": {"responseMimeType": "application/json"}
+        }
+        
+        print("📡 [AI] Đang gửi yêu cầu sang Gemini API...")
+        # Thêm timeout=10 để phòng trường hợp mạng nghẽn không bị treo hàm
+        chat_response = requests.post(chat_url, headers=chat_headers, json=chat_payload, timeout=10)
+        chat_res_json = chat_response.json()
+        
+        # 3. Bóc tách dữ liệu an toàn
+        if "candidates" in chat_res_json and chat_res_json["candidates"]:
+            raw_text = chat_res_json["candidates"][0]["content"]["parts"][0]["text"]
+            print("📩 [AI] Văn bản thô nhận từ Gemini:", raw_text)
             
-        # SỰ KIỆN 2: Khách nhắn tin chữ / Bấm nút chức năng
-        if "user_send_text" in event_name:
-            recipient_id = data.get("user_id_by_app") or data["sender"]["id"]
-            user_message = data["message"]["text"]
-            
-            print(f"-> [Chạy Ngầm] Nhận tin nhắn từ khách: {user_message}")
-            
-            # Đọc dữ liệu Qdrant và gọi Gemini xử lý
-            found_rooms = search_rooms_from_db(user_message)
-            
-            combined_prompt = f"""
-            Bạn là trợ lý ảo thông minh của Hệ thống Zalo OA Tư vấn phòng trọ. 
-            Tin nhắn của khách: "{user_message}"
-            Dữ liệu phòng tìm thấy trong Database: {json.dumps(found_rooms, ensure_ascii=False)}
-
-            Trả về định dạng JSON duy nhất:
-            {{
-                "action": "ADD_ROOM" hoặc "SEARCH_ROOM",
-                "extracted_data": {{
-                    "title": "Tiêu đề phòng",
-                    "price": "Giá",
-                    "address": "Địa chỉ",
-                    "description": "Mô tả chi tiết"
-                }},
-                "ai_reply": "Nội dung tin nhắn bạn đã soạn để gửi trực tiếp cho khách hàng"
-            }}
-            """
-            
-            # --- ĐOẠN ĐÃ SỬA ENDPOINT CHAT V1 ỔN ĐỊNH ---
             try:
-                api_key = os.environ.get("GEMINI_API_KEY")
-                # Sửa thành link v1 và mô hình gemini-2.5-flash tiêu chuẩn (bỏ đuôi -8b)
-                chat_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
+                # Ép kiểu JSON xem có đúng cấu trúc không
+                result_data = json.loads(raw_text.strip())
+                ai_reply = result_data.get("ai_reply", ai_reply)
                 
-                chat_headers = {"Content-Type": "application/json"}
-                chat_payload = {
-                    "contents": [{"parts": [{"text": combined_prompt}]}],
-                    "generationConfig": {"responseMimeType": "application/json"}
-                }
-                
-                chat_response = requests.post(chat_url, headers=chat_headers, json=chat_payload)
-                chat_res_json = chat_response.json()
-                
-                # --- ĐOẠN KIỂM TRA VÀ SỬA LỖI 'candidates' ---
-                if "error" in chat_res_json:
-                    print("❌ Google API trả về lỗi:", chat_res_json["error"])
-                    ai_reply = "🤖 Trợ lý AI đang bảo trì hệ thống, vui lòng thử lại sau!"
-                elif "candidates" in chat_res_json and chat_res_json["candidates"]:
-                    # Nếu có candidates hợp lệ thì bóc tách bình thường
-                    raw_text = chat_res_json["candidates"][0]["content"]["parts"][0]["text"]
-                    
-                    result_data = json.loads(raw_text.strip())
-                    action = result_data.get("action")
-                    ai_reply = result_data.get("ai_reply", "🤖 Trợ lý AI đang xử lý...")
-                    
-                    if action == "ADD_ROOM":
-                        extracted = result_data.get("extracted_data", {})
-                        insert_room_to_db(extracted)
-                else:
-                    # In ra toàn bộ cấu trúc lạ để bạn nhìn thấy trong log Render
-                    print("❌ Cấu trúc JSON lạ không có candidates:", chat_res_json)
-                    ai_reply = "🤖 Hệ thống gặp sự cố phản hồi, vui lòng thử lại!"
-                # ---------------------------------------------
-
-                    
-            except Exception as ai_error:
-                print("❌ Lỗi xử lý Gemini trực tiếp:", ai_error)
-                ai_reply = "🤖 Hệ thống đang bận, bạn vui lòng nhắn lại sau ít phút!"
+                # Nếu là lệnh thêm phòng trọ tự động
+                if result_data.get("action") == "ADD_ROOM":
+                    extracted = result_data.get("extracted_data", {})
+                    insert_room_to_db(extracted)
+            except Exception as json_parse_err:
+                print("⚠ [AI] Gemini trả về cấu trúc không phải JSON chuẩn. Ép lấy chữ thuần.")
+                # Phòng hờ nếu Gemini trả về text thường, ta lấy luôn text đó trả lời khách
+                ai_reply = raw_text
+        else:
+            print("❌ [AI] Khối phản hồi Google lỗi hoặc trống rỗng:", chat_res_json)
             
-    except Exception as e:
-        print("❌ Lỗi nghiêm trọng tại hàm chạy ngầm:", e)
+    except Exception as general_error:
+        print("❌ [AI] Lỗi tổng quát trong luồng xử lý:", general_error)
+        
+    # === VỊ TRÍ CHÍ CHÍ MẠNG ===
+    # Đưa hàm gửi tin nhắn ra RIÊNG BIỆT ở cuối cùng, đảm bảo DÙ LỖI HAY KHÔNG LỖI thì vẫn phải bắn tin nhắn về Zalo
+    print(f"📤 [AI] Tiến hành gửi phản hồi về Zalo cho khách: {ai_reply}")
+    send_zalo_message(user_id, ai_reply)
 
 # --- 5. WEBHOOK XỬ LÝ CHÍNH ---
 @app.post("/webhook/zalo")
