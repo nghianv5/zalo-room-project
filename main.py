@@ -271,15 +271,27 @@ def process_zalo_ai_logic(data: dict):
                 chat_response = requests.post(chat_url, headers=chat_headers, json=chat_payload)
                 chat_res_json = chat_response.json()
                 
-                raw_text = chat_res_json["candidates"][0]["content"]["parts"][0]["text"]
-                
-                result_data = json.loads(raw_text.strip())
-                action = result_data.get("action")
-                ai_reply = result_data.get("ai_reply", "🤖 Trợ lý AI đang xử lý...")
-                
-                if action == "ADD_ROOM":
-                    extracted = result_data.get("extracted_data", {})
-                    insert_room_to_db(extracted)
+                # --- ĐOẠN KIỂM TRA VÀ SỬA LỖI 'candidates' ---
+                if "error" in chat_res_json:
+                    print("❌ Google API trả về lỗi:", chat_res_json["error"])
+                    ai_reply = "🤖 Trợ lý AI đang bảo trì hệ thống, vui lòng thử lại sau!"
+                elif "candidates" in chat_res_json and chat_res_json["candidates"]:
+                    # Nếu có candidates hợp lệ thì bóc tách bình thường
+                    raw_text = chat_res_json["candidates"][0]["content"]["parts"][0]["text"]
+                    
+                    result_data = json.loads(raw_text.strip())
+                    action = result_data.get("action")
+                    ai_reply = result_data.get("ai_reply", "🤖 Trợ lý AI đang xử lý...")
+                    
+                    if action == "ADD_ROOM":
+                        extracted = result_data.get("extracted_data", {})
+                        insert_room_to_db(extracted)
+                else:
+                    # In ra toàn bộ cấu trúc lạ để bạn nhìn thấy trong log Render
+                    print("❌ Cấu trúc JSON lạ không có candidates:", chat_res_json)
+                    ai_reply = "🤖 Hệ thống gặp sự cố phản hồi, vui lòng thử lại!"
+                # ---------------------------------------------
+
                     
             except Exception as ai_error:
                 print("❌ Lỗi xử lý Gemini trực tiếp:", ai_error)
