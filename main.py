@@ -91,34 +91,29 @@ def get_text_embedding(text: str):
 
 
 # --- 3. CÁC HÀM XỬ LÝ DATABASE QDRANT ---
-def insert_room_to_db(room_data: dict):
-    if not qd_client:
-        print("❌ Qdrant chưa được kết nối. Bỏ qua thao tác lưu.")
-        return False
-    try:
-        # Gom thông tin phòng trọ làm giàu ngữ nghĩa cho Vector
-        combined_text = f"{room_data.get('title', '')} {room_data.get('address', '')} {room_data.get('description', '')}"
-        vector = get_text_embedding(combined_text)
+def search_rooms_from_db(query_text: str):
+    # 1. Tạo embedding từ câu hỏi của khách
+    query_vector = get_text_embedding(query_text)
+    if not query_vector:
+        return None
         
-        if not vector:
-            return False
-            
-        point_id = str(uuid.uuid4())
-        qd_client.upsert(
+    try:
+        # --- ĐÃ SỬA: Thay qd_client bằng qdrant_client cho đúng khai báo đầu file ---
+        response = qdrant_client.search(
             collection_name=COLLECTION_NAME,
-            points=[
-                PointStruct(
-                    id=point_id,
-                    vector=vector,
-                    payload=room_data  # Lưu dữ liệu gốc (Tiêu đề, Giá, Địa chỉ, Mô tả)
-                )
-            ]
+            query_vector=query_vector,
+            limit=3
         )
-        print("-> Đã lưu phòng vào Qdrant Cloud thành công!")
-        return True
+        # --------------------------------------------------------------------------
+        
+        # Bóc tách kết quả phòng trọ trả về
+        rooms = []
+        for hit in response:
+            rooms.append(hit.payload)
+        return rooms
     except Exception as e:
-        print("Lỗi khi thêm phòng vào Qdrant:", e)
-        return False
+        print("❌ Lỗi khi truy vấn Qdrant:", e)
+        return None
 
 def search_rooms_from_db(query_text: str):
     # Khối tạo embedding từ văn bản của bạn ở đây...
