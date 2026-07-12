@@ -210,6 +210,44 @@ def send_zalo_message(user_id: str, ai_reply: str):
         print("❌ Lỗi gọi API Zalo:", e)
         return None
 
+def insert_room_to_db(room_data: dict):
+    """Hàm tự động lưu thông tin phòng trọ mới vào Qdrant sau khi được Gemini bóc tách"""
+    print(f"📥 [Qdrant] Tiến hành thêm phòng mới vào DB: {room_data}")
+    try:
+        # 1. Định nghĩa văn bản mô tả để tạo vector embedding
+        # Gộp các thông tin như địa chỉ, giá, diện tích thành 1 đoạn văn
+        description = f"Phòng trọ tại {room_data.get('address', 'Chưa rõ địa chỉ')}. " \
+                      f"Giá: {room_data.get('price', 'Chưa rõ giá')}. " \
+                      f"Diện tích: {room_data.get('area', 'Chưa rõ')} m2. " \
+                      f"Mô tả chi tiết: {room_data.get('description', '')}"
+                      
+        # 2. Sinh vector embedding 768 chiều từ đoạn mô tả trên
+        vector = get_text_embedding(description)
+        if not vector:
+            print("❌ [Qdrant] Không thể tạo embedding cho phòng mới, hủy lưu!")
+            return False
+            
+        # 3. Import thư viện uuid nếu đầu file chưa có để sinh ID ngẫu nhiên cho point
+        import uuid
+        point_id = str(uuid.uuid4())
+        
+        # 4. Đẩy dữ liệu lên bảng Qdrant (Sử dụng đúng biến qdrant_client đã sửa ở bước trước)
+        qdrant_client.upsert(
+            collection_name=COLLECTION_NAME,
+            points=[
+                {
+                    "id": point_id,
+                    "vector": vector,
+                    "payload": room_data # Lưu toàn bộ thông tin gốc của phòng để sau này lôi ra dùng
+                }
+            ]
+        )
+        print(f"✅ [Qdrant] Đã lưu phòng mới thành công với ID: {point_id}")
+        return True
+    except Exception as e:
+        print("❌ [Qdrant] Lỗi khi thêm phòng trọ vào cơ sở dữ liệu:", e)
+        return False
+
 # --- 5. HÀM XỬ LÝ CHẠY NGẦM (BACKGROUND TASK) ---
 def process_zalo_ai_logic(user_id: str, message_text: str):
     print(f"🔄 [AI] Bắt đầu xử lý luồng chạy ngầm cho User: {user_id}")
