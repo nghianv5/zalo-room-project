@@ -259,7 +259,7 @@ def process_zalo_ai_logic(data: dict):
             # --- ĐOẠN ĐÃ SỬA ENDPOINT CHAT V1 ỔN ĐỊNH ---
             try:
                 api_key = os.environ.get("GEMINI_API_KEY")
-                # Đổi hẳn sang gemini-1.5-flash trên cổng v1 để dứt điểm lỗi 404 và né hạn mức 20 câu/ngày
+                # Sửa thành link v1 và mô hình gemini-2.5-flash tiêu chuẩn (bỏ đuôi -8b)
                 chat_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
                 
                 chat_headers = {"Content-Type": "application/json"}
@@ -346,7 +346,7 @@ def zalo_webhook(data: dict, background_tasks: BackgroundTasks):
             try:
                 # Gọi Gemini duy nhất một lần
                 response = client.models.generate_content(
-                    model='gemini-2.5-flash-8b',  # <--- ĐỔI SANG BẢN 8B ĐỂ NÉ GIỚI HẠN 20 CÂU/NGÀY
+                    model='gemini-2.5-flash',  # <--- ĐỔI SANG BẢN 8B ĐỂ NÉ GIỚI HẠN 20 CÂU/NGÀY
                     contents=combined_prompt,
                     config=types.GenerateContentConfig(
                         response_mime_type="application/json"
