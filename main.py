@@ -266,6 +266,7 @@ def process_zalo_ai_logic(user_id: str, message_text: str):
             print("❌ [AI] Lỗi tìm kiếm Qdrant nhưng bỏ qua để chạy tiếp:", qdrant_err)
 
         # 2. Thiết lập gọi API Chat Gemini v1 ổn định
+        # --- ĐÃ SỬA: Đổi sang gemini-1.5-flash để nâng hạn mức từ 20 câu lên 1500 câu/ngày ---
         api_key = os.environ.get("GEMINI_API_KEY")
         chat_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={api_key}"
         chat_headers = {"Content-Type": "application/json"}
@@ -282,11 +283,13 @@ def process_zalo_ai_logic(user_id: str, message_text: str):
         }}
         """
         
+        # --- ĐÃ SỬA: Chuyển hoàn toàn sang cấu trúc viết thường generation_config để hết lỗi 400 ---
         chat_payload = {
             "contents": [{"parts": [{"text": combined_prompt}]}],
-            "generationConfig": {"responseMimeType": "application/json"}
+            "generation_config": {
+                "response_mime_type": "application/json"
+            }
         }
-        
         print("📡 [AI] Đang gửi yêu cầu sang Gemini API...")
         # Thêm timeout=10 để phòng trường hợp mạng nghẽn không bị treo hàm
         chat_response = requests.post(chat_url, headers=chat_headers, json=chat_payload, timeout=10)
