@@ -290,13 +290,25 @@ def process_zalo_ai_logic(user_id: str, message_text: str):
 
 # --- 5. WEBHOOK XỬ LÝ CHÍNH ---
 @app.post("/webhook/zalo")
-
-def zalo_webhook(data: dict, background_tasks: BackgroundTasks):
+def zalo_webhook(request_data: dict, background_tasks: BackgroundTasks):
     try:
-        if data:
-            # Đẩy dữ liệu vào luồng chạy ngầm xử lý AI
-            background_tasks.add_task(process_zalo_ai_logic, data)
-    
+        try:
+            user_id = request_data.get("sender", {}).get("id") or request_data.get("recipient", {}).get("id")
+            
+            # Hãy chắc chắn bạn đã lấy được nội dung tin nhắn vào một biến, ví dụ: message_text
+            message_text = request_data.get("message", {}).get("text", "")
+            
+            print(f"-> Nhận tin nhắn từ khách: {message_text}")
+            
+            if user_id and message_text:
+                # --- ĐOẠN BẠN CẦN SỬA CHÍNH XÁC ---
+                # Phải truyền đủ cả user_id VÀ message_text vào sau tên hàm
+                background_tasks.add_task(process_zalo_ai_logic, user_id, message_text)
+                # ----------------------------------
+                
+        except Exception as e:
+            print("❌ Lỗi bóc tách webhook Zalo:", e)
+        
         event_name = str(data.get("event_name", "")).strip()
         print(f"-> Nhận tin nhắn ")
         # SỰ KIỆN 1: Khách nhấn Quan tâm OA -> Gửi tin text thuần an toàn
