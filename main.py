@@ -227,11 +227,18 @@ def process_zalo_ai_logic(user_id: str, message_text: str):
         """
         
         # Cấu hình chuẩn xác camelCase và snake_case lồng nhau của Google REST API v1
+        # BƯỚC 1: Đưa yêu cầu JSON thẳng vào cấu trúc prompt hệ thống của Google
         chat_payload = {
-            "contents": [{"parts": [{"text": combined_prompt}]}],
-            "generation_config": {
-                "response_mime_type": "application/json"
-            }
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            "text": combined_prompt + "\n\nTUYỆT ĐỐI CHỈ TRẢ VỀ DỮ LIỆU ĐỊNH DẠNG JSON, KHÔNG CHỨA CÁC ĐÁM KÝ TỰ BAO BỌC KIỂU ```json VÀ KHÔNG VIẾT CHỮ NÀO NGOÀI KHỐI JSON."
+                        }
+                    ]
+                }
+            ]
+            # Đã xóa hoàn toàn khối generation_config gây lỗi 400
         }
         
         print("📡 [AI] Đang gửi yêu cầu sang Gemini 1.5-Flash API...")
