@@ -229,8 +229,8 @@ def process_zalo_ai_logic(user_id: str, message_text: str):
         # Cấu hình chuẩn xác camelCase và snake_case lồng nhau của Google REST API v1
         chat_payload = {
             "contents": [{"parts": [{"text": combined_prompt}]}],
-            "generationConfig": {
-                "responseMimeType": "application/json"
+            "generation_config": {
+                "response_mime_type": "application/json"
             }
         }
         
