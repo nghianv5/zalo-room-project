@@ -170,7 +170,7 @@ def send_zalo_message(user_id: str, ai_reply: str):
         print("❌ Thiếu Zalo Access Token")
         return
         
-    url = "[https://openapi.zalo.me/v3.0/oa/message/cs](https://openapi.zalo.me/v3.0/oa/message/cs)"
+    url = "https://openapi.zalo.me/v3.0/oa/message/cs"
     headers = {
         "Content-Type": "application/json",
         "access_token": access_token
