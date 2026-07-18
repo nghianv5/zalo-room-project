@@ -235,7 +235,7 @@ def process_zalo_ai_logic(user_id: str, message_text: str):
     print(f"🔄 [AI] Bắt đầu xử lý luồng chạy ngầm cho User: {user_id}")
     ai_reply = "🤖 Trợ lý AI đang bận xử lý hệ thống, bạn vui lòng đợi vài giây rồi nhắn lại nhé!" 
     if message_text in ["chào", "hi", "hello", "bắt đầu"]:
-        send_zalo_message(sender_id, "MENU_CHOICE")
+        send_zalo_message(user_id, "MENU_CHOICE")
     else:
         try:
              
