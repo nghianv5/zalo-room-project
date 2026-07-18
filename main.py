@@ -173,54 +173,30 @@ def send_zalo_message(user_id: str, text_or_menu: str):
         "access_token": access_token
     }
 
-    # Nếu gọi menu lựa chọn chức năng
     if text_or_menu == "MENU_CHOICE":
+        # Menu bằng text kèm Emoji cực kỳ chuyên nghiệp, không bao giờ bị Zalo ẩn
+        menu_text = (
+            "🤖 CHÀO MỪNG BẠN ĐẾN VỚI HỆ THỐNG PHÒNG TRỌ AI!\n\n"
+            "Vui lòng phản hồi bằng cách chọn hoặc gõ một trong các lựa chọn dưới đây:\n\n"
+            "👉 Gõ [1] hoặc: Tôi muốn ĐĂNG PHÒNG TRỌ\n"
+            "👉 Gõ [2] hoặc: Tôi muốn TÌM PHÒNG TRỌ\n\n"
+            "Trợ lý AI sẵn sàng hỗ trợ bạn 24/7!"
+        )
         payload = {
             "recipient": {"user_id": user_id},
-            "message": {
-                "text": "Chào mừng bạn đến với Hệ thống tư vấn phòng trọ! Vui lòng chọn nhu cầu của bạn dưới đây để tiếp tục:",
-                "attachment": {
-                    "type": "template",
-                    "payload": {
-                        "template_type": "text", # Sử dụng cấu trúc text template phẳng, loại bỏ hoàn toàn thẻ 'elements' gây lỗi
-                        "buttons": [
-                            {
-                                "title": "🏢 Đăng cho thuê phòng",
-                                "type": "oa.query.show",
-                                "payload": "Tôi muốn đăng cho thuê phòng"
-                            },
-                            {
-                                "title": "🔍 Tìm kiếm phòng trọ",
-                                "type": "oa.query.show",
-                                "payload": "Tôi muốn tìm kiếm phòng trọ"
-                            }
-                        ]
-                    }
-                }
-            }
+            "message": {"text": menu_text}
         }
     else:
-        # Gửi tin nhắn văn bản thuần túy cho các đoạn tư vấn khác
         payload = {
             "recipient": {"user_id": user_id},
             "message": {"text": text_or_menu}
         }
 
     try:
-        response = requests.post(url, headers=headers, json=payload)
-        res_data = response.json()
-        
-        print(f"📡 [ZALO API RESPONSE]: {res_data}")
-        
-        if res_data.get("error") != 0:
-            print(f"❌ [ZALO ERROR]: Gửi tin thất bại. Mã lỗi: {res_data.get('error')} - Lý do: {res_data.get('message')}")
-        else:
-            print("✨ [ZALO SUCCESS]: Đã hiển thị menu nút bấm thành công tới người dùng!")
-            
-        return res_data
+        res = requests.post(url, headers=headers, json=payload)
+        print(f"📡 [ZALO API RESPONSE]: {res.json()}")
     except Exception as e:
-        print("❌ [ZALO CRITICAL ERROR]: Không thể kết nối đến API Zalo:", e)
-        return None
+        print(f"❌ Lỗi gửi tin Zalo: {e}")
 
 # --- 5. LUỒNG XỬ LÝ CHẠY NGẦM BẰNG GEMINI 1.5-FLASH (HẠN MỨC CAO) ---
 def process_zalo_ai_logic(user_id: str, message_text: str):
