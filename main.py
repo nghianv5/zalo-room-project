@@ -177,37 +177,40 @@ def send_zalo_message(user_id: str, ai_reply: str):
     }
     
     # Kiểm tra xem có phải tin nhắn chào hỏi hoặc chứa menu không
-    if "[1]" in ai_reply or "[2]" in ai_reply or "chọn hoặc nhập" in ai_reply.lower():
-        # Sử dụng cấu hình nút bấm Text chuẩn và gọn nhẹ nhất của Zalo
+    if message_type == "MENU_CHOICE":
         payload = {
             "recipient": {"user_id": user_id},
             "message": {
-                "text": "Chào mừng bạn đến với Hệ thống tư vấn phòng trọ! Vui lòng chọn nhu cầu của bạn dưới đây để tiếp tục:",
+                "text": "Chào mừng bạn! Trợ lý AI có thể giúp gì cho bạn hôm nay?",
                 "attachment": {
                     "type": "template",
                     "payload": {
-                        "template_type": "text",
-                        "buttons": [
-                            {
-                                "title": "🏢 Đăng cho thuê phòng",
-                                "type": "oa.query.show",
-                                "payload": "Tôi muốn đăng cho thuê phòng"
-                            },
-                            {
-                                "title": "🔍 Tìm phòng trọ trống",
-                                "type": "oa.query.show",
-                                "payload": "Tôi muốn tìm phòng trọ"
-                            }
-                        ]
+                        "template_type": "promotion", # Dạng template có nút
+                        "elements": [{
+                            "title": "Bạn muốn thực hiện thao tác nào?",
+                            "subtitle": "Vui lòng chọn một trong hai tính năng dưới đây:",
+                            "buttons": [
+                                {
+                                    "title": "🏢 Đăng cho thuê phòng",
+                                    "type": "oa.query.show",
+                                    "payload": "Tôi muốn đăng cho thuê phòng"
+                                },
+                                {
+                                    "title": "🔍 Tìm kiếm phòng trọ",
+                                    "type": "oa.query.show",
+                                    "payload": "Tôi muốn tìm kiếm phòng trọ"
+                                }
+                            ]
+                        }]
                     }
                 }
             }
         }
     else:
-        # Gửi tin nhắn văn bản thuần túy cho các hội thoại tư vấn khác
+        # Gửi văn bản bình thường
         payload = {
             "recipient": {"user_id": user_id},
-            "message": {"text": ai_reply}
+            "message": {"text": content}
         }
 
     try:
@@ -311,7 +314,11 @@ def process_zalo_ai_logic(user_id: str, message_text: str):
         print("❌ [AI] Lỗi tổng quát trong luồng xử lý ngầm:", general_error)
         
     print(f"📤 [AI] Tiến hành bắn phản hồi về Zalo: {ai_reply}")
-    send_zalo_message(user_id, ai_reply)
+    # Nếu khách chào hoặc bắt đầu cuộc hội thoại
+    if message_text in ["chào", "hi", "hello", "bắt đầu"]:
+        send_zalo_message(sender_id, "MENU_CHOICE")
+    else:
+        send_zalo_message(user_id, ai_reply)
 
 # --- 6. WEBHOOK TIẾP NHẬN CHÍNH ---
 @app.post("/webhook/zalo")
