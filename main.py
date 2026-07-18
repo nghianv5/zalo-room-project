@@ -238,8 +238,8 @@ def process_zalo_ai_logic(user_id: str, message_text: str):
         
         api_key = os.environ.get("GEMINI_API_KEY")
         
-        # --- THAY ĐỔI CHÍNH XÁC SANG ENDPOINT 2.5-FLASH ĐỂ HẾT BỊ 404 ---
-        chat_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
+        # --- ĐỔI SANG 1.5 FLASH CỔNG V1BETA ĐỂ CÓ QUOTA NGÀY NHIỀU HƠN ---
+        chat_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
         chat_headers = {"Content-Type": "application/json"}
         
         combined_prompt = f"""
