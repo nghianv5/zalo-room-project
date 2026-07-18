@@ -170,15 +170,49 @@ def send_zalo_message(user_id: str, ai_reply: str):
         print("❌ Thiếu Zalo Access Token")
         return
         
-    url = "https://openapi.zalo.me/v3.0/oa/message/cs"  # Sử dụng endpoint CS chuẩn chăm sóc khách hàng
+    url = "[https://openapi.zalo.me/v3.0/oa/message/cs](https://openapi.zalo.me/v3.0/oa/message/cs)"
     headers = {
         "Content-Type": "application/json",
         "access_token": access_token
     }
-    payload = {
-        "recipient": {"user_id": user_id},
-        "message": {"text": ai_reply}
-    }
+    
+    # Nếu là tin nhắn chào hỏi cần chọn chức năng, ta đóng gói kèm nút bấm
+    if "[1]" in ai_reply or "[2]" in ai_reply or "chọn hoặc nhập" in ai_reply.lower():
+        payload = {
+            "recipient": {"user_id": user_id},
+            "message": {
+                "text": "Chào mừng bạn! Vui lòng chọn nhu cầu của bạn dưới đây:",
+                "attachment": {
+                    "type": "template",
+                    "payload": {
+                        "template_type": "media",
+                        "elements": [{
+                            "media_type": "image",
+                            "url": "[https://img.freepik.com/free-vector/real-estate-searching-concept_23-2148638973.jpg](https://img.freepik.com/free-vector/real-estate-searching-concept_23-2148638973.jpg)", # Bạn có thể thay đổi link ảnh bìa menu
+                            "buttons": [
+                                {
+                                    "title": "🏢 Đăng cho thuê phòng",
+                                    "type": "oa.query.show",
+                                    "payload": "Tôi muốn đăng cho thuê phòng"
+                                },
+                                {
+                                    "title": "🔍 Tìm phòng trọ trống",
+                                    "type": "oa.query.show",
+                                    "payload": "Tôi muốn tìm phòng trọ"
+                                }
+                            ]
+                        }]
+                    }
+                }
+            }
+        }
+    else:
+        # Đối với các tin nhắn tư vấn bình thường, giữ nguyên gửi văn bản thuần
+        payload = {
+            "recipient": {"user_id": user_id},
+            "message": {"text": ai_reply}
+        }
+
     try:
         response = requests.post(url, headers=headers, json=payload)
         return response.json()
