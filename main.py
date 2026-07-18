@@ -167,8 +167,8 @@ def send_pure_text(recipient_id: str, text: str):
 def send_zalo_message(user_id: str, ai_reply: str):
     access_token = os.environ.get("ZALO_ACCESS_TOKEN")
     if not access_token:
-        print("❌ Thiếu Zalo Access Token")
-        return
+        print("❌ [ZALO] Thiếu Zalo Access Token trong biến môi trường!")
+        return None
         
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
     headers = {
@@ -176,38 +176,35 @@ def send_zalo_message(user_id: str, ai_reply: str):
         "access_token": access_token
     }
     
-    # Nếu là tin nhắn chào hỏi cần chọn chức năng, ta đóng gói kèm nút bấm
+    # Kiểm tra xem có phải tin nhắn chào hỏi hoặc chứa menu không
     if "[1]" in ai_reply or "[2]" in ai_reply or "chọn hoặc nhập" in ai_reply.lower():
+        # Sử dụng cấu hình nút bấm Text chuẩn và gọn nhẹ nhất của Zalo
         payload = {
             "recipient": {"user_id": user_id},
             "message": {
-                "text": "Chào mừng bạn! Vui lòng chọn nhu cầu của bạn dưới đây:",
+                "text": "Chào mừng bạn đến với Hệ thống tư vấn phòng trọ! Vui lòng chọn nhu cầu của bạn dưới đây để tiếp tục:",
                 "attachment": {
                     "type": "template",
                     "payload": {
-                        "template_type": "media",
-                        "elements": [{
-                            "media_type": "image",
-                            "url": "[https://img.freepik.com/free-vector/real-estate-searching-concept_23-2148638973.jpg](https://img.freepik.com/free-vector/real-estate-searching-concept_23-2148638973.jpg)", # Bạn có thể thay đổi link ảnh bìa menu
-                            "buttons": [
-                                {
-                                    "title": "🏢 Đăng cho thuê phòng",
-                                    "type": "oa.query.show",
-                                    "payload": "Tôi muốn đăng cho thuê phòng"
-                                },
-                                {
-                                    "title": "🔍 Tìm phòng trọ trống",
-                                    "type": "oa.query.show",
-                                    "payload": "Tôi muốn tìm phòng trọ"
-                                }
-                            ]
-                        }]
+                        "template_type": "text",
+                        "buttons": [
+                            {
+                                "title": "🏢 Đăng cho thuê phòng",
+                                "type": "oa.query.show",
+                                "payload": "Tôi muốn đăng cho thuê phòng"
+                            },
+                            {
+                                "title": "🔍 Tìm phòng trọ trống",
+                                "type": "oa.query.show",
+                                "payload": "Tôi muốn tìm phòng trọ"
+                            }
+                        ]
                     }
                 }
             }
         }
     else:
-        # Đối với các tin nhắn tư vấn bình thường, giữ nguyên gửi văn bản thuần
+        # Gửi tin nhắn văn bản thuần túy cho các hội thoại tư vấn khác
         payload = {
             "recipient": {"user_id": user_id},
             "message": {"text": ai_reply}
@@ -215,9 +212,19 @@ def send_zalo_message(user_id: str, ai_reply: str):
 
     try:
         response = requests.post(url, headers=headers, json=payload)
-        return response.json()
+        res_data = response.json()
+        
+        # --- IN LOG CHI TIẾT KẾT QUẢ TỪ ZALO ---
+        print(f"📡 [ZALO API RESPONSE]: {res_data}")
+        
+        if res_data.get("error") != 0:
+            print(f"❌ [ZALO ERROR]: Gửi tin thất bại. Mã lỗi: {res_data.get('error')} - Lý do: {res_data.get('message')}")
+        else:
+            print("✨ [ZALO SUCCESS]: Đã bắn tin nhắn thành công tới người dùng!")
+            
+        return res_data
     except Exception as e:
-        print("❌ Lỗi gọi API Zalo:", e)
+        print("❌ [ZALO CRITICAL ERROR]: Không thể kết nối đến API Zalo:", e)
         return None
 
 # --- 5. LUỒNG XỬ LÝ CHẠY NGẦM BẰNG GEMINI 1.5-FLASH (HẠN MỨC CAO) ---
