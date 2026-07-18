@@ -164,66 +164,58 @@ def send_pure_text(recipient_id: str, text: str):
         print("Lỗi gửi text thuần:", e)
         return None
 
-def send_zalo_message(user_id: str, ai_reply: str):
+def send_zalo_message(user_id: str, text_or_menu: str):
     access_token = os.environ.get("ZALO_ACCESS_TOKEN")
-    if not access_token:
-        print("❌ [ZALO] Thiếu Zalo Access Token trong biến môi trường!")
-        return None
-        
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
+    
     headers = {
         "Content-Type": "application/json",
         "access_token": access_token
     }
-    
-    # Kiểm tra xem có phải tin nhắn chào hỏi hoặc chứa menu không
-    if ai_reply == "MENU_CHOICE":
+
+    # Nếu gọi menu lựa chọn chức năng
+    if text_or_menu == "MENU_CHOICE":
         payload = {
             "recipient": {"user_id": user_id},
             "message": {
-                "text": "Chào mừng bạn! Trợ lý AI có thể giúp gì cho bạn hôm nay?",
+                "text": "Chào mừng bạn đến với Hệ thống tư vấn phòng trọ! Vui lòng chọn nhu cầu của bạn dưới đây để tiếp tục:",
                 "attachment": {
                     "type": "template",
                     "payload": {
-                        "template_type": "promotion", # Dạng template có nút
-                        "elements": [{
-                            "title": "Bạn muốn thực hiện thao tác nào?",
-                            "subtitle": "Vui lòng chọn một trong hai tính năng dưới đây:",
-                            "buttons": [
-                                {
-                                    "title": "🏢 Đăng cho thuê phòng",
-                                    "type": "oa.query.show",
-                                    "payload": "Tôi muốn đăng cho thuê phòng"
-                                },
-                                {
-                                    "title": "🔍 Tìm kiếm phòng trọ",
-                                    "type": "oa.query.show",
-                                    "payload": "Tôi muốn tìm kiếm phòng trọ"
-                                }
-                            ]
-                        }]
+                        "template_type": "text", # Sử dụng cấu trúc text template phẳng, loại bỏ hoàn toàn thẻ 'elements' gây lỗi
+                        "buttons": [
+                            {
+                                "title": "🏢 Đăng cho thuê phòng",
+                                "type": "oa.query.show",
+                                "payload": "Tôi muốn đăng cho thuê phòng"
+                            },
+                            {
+                                "title": "🔍 Tìm kiếm phòng trọ",
+                                "type": "oa.query.show",
+                                "payload": "Tôi muốn tìm kiếm phòng trọ"
+                            }
+                        ]
                     }
                 }
             }
         }
     else:
-        # Gửi văn bản bình thường
+        # Gửi tin nhắn văn bản thuần túy cho các đoạn tư vấn khác
         payload = {
             "recipient": {"user_id": user_id},
-            "message": {"text": ai_reply}
+            "message": {"text": text_or_menu}
         }
 
     try:
         response = requests.post(url, headers=headers, json=payload)
         res_data = response.json()
         
-        # --- IN LOG CHI TIẾT KẾT QUẢ TỪ ZALO ---
         print(f"📡 [ZALO API RESPONSE]: {res_data}")
         
         if res_data.get("error") != 0:
             print(f"❌ [ZALO ERROR]: Gửi tin thất bại. Mã lỗi: {res_data.get('error')} - Lý do: {res_data.get('message')}")
         else:
-            print("✨ [ZALO SUCCESS]: Đã bắn tin nhắn thành công tới người dùng!")
+            print("✨ [ZALO SUCCESS]: Đã hiển thị menu nút bấm thành công tới người dùng!")
             
         return res_data
     except Exception as e:
@@ -234,7 +226,7 @@ def send_zalo_message(user_id: str, ai_reply: str):
 def process_zalo_ai_logic(user_id: str, message_text: str):
     print(f"🔄 [AI] Bắt đầu xử lý luồng chạy ngầm cho User: {user_id}")
     ai_reply = "🤖 Trợ lý AI đang bận xử lý hệ thống, bạn vui lòng đợi vài giây rồi nhắn lại nhé!" 
-    if message_text in ["chào", "hi", "hello", "bắt đầu"]:
+    if message_text in ["chào", "xin chào", "hi", "hello", "bắt đầu"]:
         send_zalo_message(user_id, "MENU_CHOICE")
     else:
         try:
