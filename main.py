@@ -177,7 +177,7 @@ def send_zalo_message(user_id: str, ai_reply: str):
     }
     
     # Kiểm tra xem có phải tin nhắn chào hỏi hoặc chứa menu không
-    if message_type == "MENU_CHOICE":
+    if ai_reply == "MENU_CHOICE":
         payload = {
             "recipient": {"user_id": user_id},
             "message": {
