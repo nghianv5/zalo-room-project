@@ -196,8 +196,9 @@ def process_zalo_ai_logic(user_id: str, message_text: str):
         found_rooms = search_rooms_from_db(message_text)
         
         api_key = os.environ.get("GEMINI_API_KEY")
-        # Thay đổi từ gemini-1.5-flash sang gemini-1.5-flash-latest để REST API v1 nhận diện đúng
-        chat_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash-latest:generateContent?key={api_key}"
+        
+        # --- THAY ĐỔI CHÍNH XÁC SANG ENDPOINT 2.5-FLASH ĐỂ HẾT BỊ 404 ---
+        chat_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
         chat_headers = {"Content-Type": "application/json"}
         
         combined_prompt = f"""
