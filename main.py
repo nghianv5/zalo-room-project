@@ -210,7 +210,7 @@ def send_zalo_message(user_id: str, ai_reply: str):
         # Gửi văn bản bình thường
         payload = {
             "recipient": {"user_id": user_id},
-            "message": {"text": content}
+            "message": {"text": ai_reply}
         }
 
     try:
