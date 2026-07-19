@@ -2,7 +2,7 @@ import os
 import json
 import requests
 import uuid
-import logging
+import time
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import HTMLResponse
 from qdrant_client import QdrantClient
@@ -24,14 +24,14 @@ qdrant_client = QdrantClient(
     api_key=os.environ.get("QDRANT_API_KEY")
 )
 
-# Khởi tạo bảng với size=768 (Khớp hoàn toàn với text-embedding-004 tối ưu)
+# Khởi tạo bảng với size=768 (Khớp hoàn toàn với mô hình text-embedding-004)
 try:
     if not qdrant_client.collection_exists(collection_name=COLLECTION_NAME):
         print(f"⚠ Không tìm thấy collection '{COLLECTION_NAME}'. Đang tạo mới...")
         qdrant_client.create_collection(
             collection_name=COLLECTION_NAME,
             vectors_config=VectorParams(
-                size=768,  # Đồng bộ 768 chiều 
+                size=768,  
                 distance=Distance.COSINE
             )
         )
@@ -39,37 +39,50 @@ try:
 except Exception as qdrant_init_error:
     print("❌ Lỗi khi khởi tạo kiểm tra Collection Qdrant:", qdrant_init_error)
 
-# --- 2. HÀM TẠO VECTOR EMBEDDING BẰNG GEMINI API ---
-def get_text_embedding(text: str):
+# --- 2. HÀM TẠO VECTOR EMBEDDING BẰNG GEMINI API VỚI CƠ CHẾ RETRY ---
+def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
+    """
+    Tạo Vector Embedding từ văn bản sử dụng mô hình text-embedding-004 qua API v1 chính thức.
+    Bổ sung cơ chế tự động thử lại nếu gặp lỗi nghẽn hoặc quota tạm thời từ Google.
+    """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
+        print("❌ [EMBEDDING] Thiếu GEMINI_API_KEY trong biến môi trường!")
         return None
-    try:
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={api_key}"
-        headers = {"Content-Type": "application/json"}
-        payload = {
-            "content": {"parts": [{"text": text}]},
-            "outputDimensionality": 768  # Trả về chuẩn 768 chiều
-        }
         
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
-        res_json = response.json()
-        
-        if "embedding" in res_json and "values" in res_json["embedding"]:
-            return res_json["embedding"]["values"]
-        return None
-    except Exception as e:
-        print("❌ Lỗi tạo Embedding trực tiếp:", e)
-        return None
+    url = f"https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key={api_key}"
+    headers = {"Content-Type": "application/json"}
+    payload = {
+        "content": {"parts": [{"text": text}]},
+        "outputDimensionality": 768  
+    }
+    
+    for attempt in range(retries):
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=10)
+            res_json = response.json()
+            
+            if "embedding" in res_json and "values" in res_json["embedding"]:
+                return res_json["embedding"]["values"]
+            
+            print(f"⚠️ [EMBEDDING] Lần thử {attempt + 1} thất bại. Phản hồi API: {res_json}")
+            
+        except Exception as e:
+            print(f"❌ [EMBEDDING] Lỗi kết nối tại lần thử {attempt + 1}: {e}")
+            
+        if attempt < retries - 1:
+            time.sleep(delay) 
+            
+    return None
 
 # --- 3. CÁC HÀM XỬ LÝ DATABASE QDRANT ---
 def search_rooms_from_db(query_text: str):
     query_vector = get_text_embedding(query_text)
     if not query_vector:
+        print("⚠️ [Qdrant Search] Không thể tạo embedding cho nội dung tìm kiếm.")
         return []
         
     try:
-        # Sử dụng API query_points mới và chuẩn nhất của Qdrant Python SDK
         response = qdrant_client.query_points(
             collection_name=COLLECTION_NAME,
             query=query_vector,
@@ -95,7 +108,7 @@ def insert_room_to_db(room_data: dict):
                       
         vector = get_text_embedding(description)
         if not vector:
-            print("❌ [Qdrant] Không thể tạo embedding cho phòng mới, hủy lưu!")
+            print("❌ [Qdrant] Không thể tạo embedding cho phòng mới sau nhiều lần thử, hủy lưu!")
             return False
             
         point_id = str(uuid.uuid4())
@@ -176,47 +189,17 @@ def send_zalo_message(user_id: str, ai_reply: str):
         "access_token": access_token
     }
     
-    # Kiểm tra xem có phải tin nhắn chào hỏi hoặc chứa menu không
-    if "[1]" in ai_reply or "[2]" in ai_reply or "chọn hoặc nhập" in ai_reply.lower():
-        # Sử dụng cấu hình nút bấm Text chuẩn và gọn nhẹ nhất của Zalo
-        payload = {
-            "recipient": {"user_id": user_id},
-            "message": {
-                "text": "Chào mừng bạn đến với Hệ thống tư vấn phòng trọ! Vui lòng chọn nhu cầu của bạn dưới đây để tiếp tục:",
-                "attachment": {
-                    "type": "template",
-                    "payload": {
-                        "template_type": "text",
-                        "buttons": [
-                            {
-                                "title": "🏢 Đăng cho thuê phòng",
-                                "type": "oa.query.show",
-                                "payload": "Tôi muốn đăng cho thuê phòng"
-                            },
-                            {
-                                "title": "🔍 Tìm phòng trọ trống",
-                                "type": "oa.query.show",
-                                "payload": "Tôi muốn tìm phòng trọ"
-                            }
-                        ]
-                    }
-                }
-            }
-        }
-    else:
-        # Gửi tin nhắn văn bản thuần túy cho các hội thoại tư vấn khác
-        payload = {
-            "recipient": {"user_id": user_id},
-            "message": {"text": ai_reply}
-        }
+    # Luôn luôn gửi nội dung văn bản tự nhiên do AI tự soạn thảo
+    payload = {
+        "recipient": {"user_id": user_id},
+        "message": {"text": ai_reply}
+    }
 
     try:
         response = requests.post(url, headers=headers, json=payload)
         res_data = response.json()
         
-        # --- IN LOG CHI TIẾT KẾT QUẢ TỪ ZALO ---
         print(f"📡 [ZALO API RESPONSE]: {res_data}")
-        
         if res_data.get("error") != 0:
             print(f"❌ [ZALO ERROR]: Gửi tin thất bại. Mã lỗi: {res_data.get('error')} - Lý do: {res_data.get('message')}")
         else:
@@ -227,20 +210,19 @@ def send_zalo_message(user_id: str, ai_reply: str):
         print("❌ [ZALO CRITICAL ERROR]: Không thể kết nối đến API Zalo:", e)
         return None
 
-# --- 5. LUỒNG XỬ LÝ CHẠY NGẦM BẰNG GEMINI 1.5-FLASH (HẠN MỨC CAO) ---
+# --- 5. LUỒNG XỬ LÝ CHẠY NGẦM BẰNG GEMINI 2.5-FLASH ---
 def process_zalo_ai_logic(user_id: str, message_text: str):
     print(f"🔄 [AI] Bắt đầu xử lý luồng chạy ngầm cho User: {user_id}")
     ai_reply = "🤖 Trợ lý AI đang bận xử lý hệ thống, bạn vui lòng đợi vài giây rồi nhắn lại nhé!" 
     
     try:
-        # Tìm kiếm phòng thích hợp mớm thông tin trước cho Gemini
-        found_rooms = search_rooms_from_db(message_text)
+        found_rooms = []
+        
+        # Chỉ truy vấn tìm phòng trong database nếu người dùng không nhắn tin chào hỏi thông thường
+        if not any(kw in message_text.lower() for kw in ["chào", "hi", "hello", "bắt đầu"]):
+            found_rooms = search_rooms_from_db(message_text)
         
         api_key = os.environ.get("GEMINI_API_KEY")
-        
-        # --- ĐỔI SANG 1.5 FLASH CỔNG V1BETA ĐỂ CÓ QUOTA NGÀY NHIỀU HƠN ---
-        chat_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
-        # --- THAY ĐỔI CHÍNH XÁC SANG ENDPOINT 2.5-FLASH ĐỂ HẾT BỊ 404 ---
         chat_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
         chat_headers = {"Content-Type": "application/json"}
         
@@ -254,7 +236,7 @@ def process_zalo_ai_logic(user_id: str, message_text: str):
         Hãy thực hiện 2 việc:
         1. Phân loại hành động ("action") thành "ADD_ROOM" (nếu muốn đăng/cho thuê phòng) hoặc "SEARCH_ROOM" (nếu muốn tìm/hỏi phòng).
         2. Soạn nội dung phản hồi ("ai_reply"):
-           - Nếu là "ADD_ROOM": Xác nhận ghi nhận thành công và hiển thị lại các thông số bạn bóc tách được.
+           - Nếu là "ADD_ROOM": Xác nhận ghi nhận thành công và hiển thị lại các thông số bạn bóc tách được (Địa chỉ, Giá, Diện tích, Mô tả).
            - Nếu là "SEARCH_ROOM": Dựa trên danh sách từ database để soạn câu trả lời ngắn gọn, lịch sự, có đầy đủ xuống dòng. Nếu không tìm thấy phòng thích hợp, hãy báo hết phòng khéo léo và xin thông tin để liên hệ lại sau.
 
         HÃY TRẢ VỀ ĐỊNH DẠNG JSON NGHIÊM NGẶT THEO MẪU SAU, KHÔNG ĐƯỢC CHỨA CÁC ĐÁM KÝ TỰ BAO BỌC KIỂU ```json VÀ TUYỆT ĐỐI KHÔNG VIẾT CHỮ NÀO NGOÀI KHỐI JSON:
@@ -271,76 +253,9 @@ def process_zalo_ai_logic(user_id: str, message_text: str):
         }}
         """
         
-        # Cấu hình chuẩn xác camelCase và snake_case lồng nhau của Google REST API v1
-        # BƯỚC 1: Đưa yêu cầu JSON thẳng vào cấu trúc prompt hệ thống của Google
         chat_payload = {
             "contents": [
                 {
                     "parts": [
                         {
-                            "text": combined_prompt + "\n\nTUYỆT ĐỐI CHỈ TRẢ VỀ DỮ LIỆU ĐỊNH DẠNG JSON, KHÔNG CHỨA CÁC ĐÁM KÝ TỰ BAO BỌC KIỂU ```json VÀ KHÔNG VIẾT CHỮ NÀO NGOÀI KHỐI JSON."
-                        }
-                    ]
-                }
-            ]
-            # Đã xóa hoàn toàn khối generation_config gây lỗi 400
-        }
-        
-        print("📡 [AI] Đang gửi yêu cầu sang Gemini 1.5-Flash API...")
-        chat_response = requests.post(chat_url, headers=chat_headers, json=chat_payload, timeout=12)
-        chat_res_json = chat_response.json()
-        
-        if "candidates" in chat_res_json and chat_res_json["candidates"]:
-            raw_text = chat_res_json["candidates"][0]["content"]["parts"][0]["text"]
-            print("📩 [AI] Văn bản thô nhận từ Gemini:", raw_text)
-            
-            try:
-                result_data = json.loads(raw_text.strip())
-                ai_reply = result_data.get("ai_reply", ai_reply)
-                action = result_data.get("action")
-                
-                if action == "ADD_ROOM":
-                    print("-> Nhận diện hành động: THÊM PHÒNG TRỌ.")
-                    extracted = result_data.get("extracted_data", {})
-                    insert_room_to_db(extracted)
-            except Exception as json_parse_err:
-                print("⚠ [AI] Phản hồi lỗi cấu trúc JSON, ép lấy văn bản thuần.")
-                ai_reply = raw_text
-        else:
-            print("❌ [AI] Khối phản hồi Google lỗi hoặc trống rỗng:", chat_res_json)
-            
-    except Exception as general_error:
-        print("❌ [AI] Lỗi tổng quát trong luồng xử lý ngầm:", general_error)
-        
-    print(f"📤 [AI] Tiến hành bắn phản hồi về Zalo: {ai_reply}")
-    send_zalo_message(user_id, ai_reply)
-
-# --- 6. WEBHOOK TIẾP NHẬN CHÍNH ---
-@app.post("/webhook/zalo")
-def zalo_webhook(request_data: dict, background_tasks: BackgroundTasks):
-    try:
-        event_name = str(request_data.get("event_name", "")).strip()
-        
-        # SỰ KIỆN 1: Khách nhấn Quan tâm OA
-        if "user_follow_oa" in event_name:
-            recipient_id = request_data.get("sender", {}).get("id")
-            if recipient_id:
-                welcome_text = "👋 Chào mừng bạn đến với Hệ Thống Tư Vấn Phòng Trọ Tự Động. Hãy gõ nhu cầu phòng trọ hoặc thông tin phòng cho thuê của bạn để trợ lý AI hỗ trợ nhé!"
-                send_pure_text(recipient_id, welcome_text)
-            return {"status": "success"}
-            
-        # SỰ KIỆN 2: Khách nhắn tin chữ / Bấm nút chức năng
-        if "user_send_text" in event_name:
-            user_id = request_data.get("user_id_by_app") or request_data.get("sender", {}).get("id")
-            user_message = request_data.get("message", {}).get("text", "")
-            
-            print(f"📥 -> Nhận tin nhắn từ khách hàng: {user_message}")
-            
-            if user_id and user_message:
-                # Đẩy toàn bộ logic AI và DB vào Background Task để phản hồi webhook Zalo ngay lập tức (< 1 giây)
-                background_tasks.add_task(process_zalo_ai_logic, user_id, user_message)
-                
-    except Exception as e:
-        print("❌ Lỗi tiếp nhận webhook đầu vào:", e)
-        
-    return {"status": "success"}
+                            "text": combined_prompt + "\n\nTUYỆT ĐỐI CHỈ TRẢ VỀ DỮ LIỆU ĐỊNH DẠNG JSON, KHÔNG CHỨA CÁC ĐÁM KÝ TỰ BAO BỌC KIỂU
