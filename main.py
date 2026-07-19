@@ -14,22 +14,9 @@ app = FastAPI()
 
 # --- 1. CẤU HÌNH VÀ KHỞI TẠO GEMINI API ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-if GEMINI_API_KEY:
-    genai.configure(api_key=GEMINI_API_KEY)
-    print("✅ Đã cấu hình thành công Gemini API Key!")
-else:
-    print("❌ Thiếu GEMINI_API_KEY trong biến môi trường!")
 
 # Khởi tạo mô hình Gemini Chat / Bóc tách dữ liệu
 gemini_model = genai.GenerativeModel("gemini-2.5-flash")
-
-
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-
-print("🔍 Danh sách các model hỗ trợ embedContent:")
-for m in genai.list_models():
-    if 'embedContent' in m.supported_generation_methods:
-        print("  ->", m.name)
 
 @app.get("/")
 async def root():
@@ -60,48 +47,51 @@ except Exception as qdrant_init_error:
     print("❌ Lỗi khi khởi tạo kiểm tra Collection Qdrant:", qdrant_init_error)
 
 # --- 3. HÀM TẠO VECTOR EMBEDDING BẰNG GEMINI API ---
-# --- 3. HÀM TẠO VECTOR EMBEDDING QUA REST API (CHỐNG LỖI 404 TRUYỀN KIẾP) ---
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+
 def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
     """
-    Tạo Vector Embedding 768 chiều trực tiếp qua REST API của Gemini.
-    Không dùng SDK genai.embed_content để tránh lỗi 404 version endpoint.
+    Tạo Vector Embedding sử dụng model gemini-embedding-001 chính xác từ API Key.
     """
     if not GEMINI_API_KEY:
         print("❌ [EMBEDDING] Thiếu GEMINI_API_KEY!")
         return None
 
-    # Endpoint chuẩn hóa của Google Gemini Embedding
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={GEMINI_API_KEY}"
+    # Dùng chuẩn model: gemini-embedding-001
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
     
     payload = {
-        "model": "models/text-embedding-004",
+        "model": "models/gemini-embedding-001",
         "content": {
             "parts": [
                 {"text": text}
             ]
-        },
-        "taskType": "RETRIEVAL_DOCUMENT"
+        }
     }
 
     for attempt in range(retries):
         try:
+            if not text or not text.strip():
+                return None
+
             response = requests.post(url, headers=headers, json=payload, timeout=10)
             res_json = response.json()
 
-            # Nếu thành công nhận về danh sách giá trị vector
+            # Lấy danh sách giá trị vector trả về
             if "embedding" in res_json and "values" in res_json["embedding"]:
                 return res_json["embedding"]["values"]
             
-            print(f"⚠️ [EMBEDDING] Lần thử {attempt + 1} phản hồi không như kỳ vọng: {res_json}")
+            print(f"⚠️ [EMBEDDING] Lần thử {attempt + 1} phản hồi: {res_json}")
 
         except Exception as e:
-            print(f"❌ [EMBEDDING] Lỗi kết nối tại lần thử {attempt + 1}: {e}")
+            print(f"❌ [EMBEDDING] Lỗi kết nối lần {attempt + 1}: {e}")
 
         if attempt < retries - 1:
             time.sleep(delay)
 
     return None
+
 
 # --- 4. CÁC HÀM XỬ LÝ DATABASE QDRANT ---
 def search_rooms_from_db(query_text: str):
