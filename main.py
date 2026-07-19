@@ -8,8 +8,17 @@ from fastapi.responses import HTMLResponse
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 from config import Config
+from google import genai
+from google.genai import types
 
 app = FastAPI()
+
+
+# Khởi tạo Client Gemini chính thức bằng API Key từ biến môi trường
+# SDK sẽ tự động cấu hình endpoint tối ưu nhất cho tài khoản trả phí của bạn
+gemini_client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
+
+
 
 @app.get("/")
 async def root():
@@ -40,39 +49,38 @@ except Exception as qdrant_init_error:
     print("❌ Lỗi khi khởi tạo kiểm tra Collection Qdrant:", qdrant_init_error)
 
 # --- 2. HÀM TẠO VECTOR EMBEDDING BẰNG GEMINI API VỚI CƠ CHẾ RETRY ---
+
 def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
     """
-    Tạo Vector Embedding từ văn bản sử dụng mô hình text-embedding-004 qua API v1beta chính thức.
-    Sửa đổi endpoint thành v1beta để tránh lỗi 404 từ Google API.
+    Tạo Vector Embedding từ văn bản sử dụng thư viện google-genai chính thức.
+    Giải quyết triệt để lỗi 404 URL và tự động tối ưu hóa theo tài khoản trả phí.
     """
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
+    if not os.environ.get("GEMINI_API_KEY"):
         print("❌ [EMBEDDING] Thiếu GEMINI_API_KEY trong biến môi trường!")
         return None
-        
-    # ĐỔI THÀNH v1beta để mô hình text-embedding-004 chạy mượt mà trên tài khoản Visa
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={api_key}"
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "content": {"parts": [{"text": text}]},
-        "outputDimensionality": 768  
-    }
-    
+
     for attempt in range(retries):
         try:
-            response = requests.post(url, headers=headers, json=payload, timeout=10)
-            res_json = response.json()
+            # Gọi trực tiếp qua SDK chính thức
+            response = gemini_client.models.embed_content(
+                model="text-embedding-004",
+                contents=text,
+                config=types.EmbedContentConfig(
+                    output_dimensionality=768
+                )
+            )
             
-            if "embedding" in res_json and "values" in res_json["embedding"]:
-                return res_json["embedding"]["values"]
-            
-            print(f"⚠️ [EMBEDDING] Lần thử {attempt + 1} thất bại. Phản hồi API: {res_json}")
+            # SDK trả về object sạch sẽ, lấy trọn vẹn danh sách vector số thực
+            if response.embedding and response.embedding.values:
+                return response.embedding.values
+                
+            print(f"⚠️ [EMBEDDING] Lần thử {attempt + 1} trống dữ liệu. Đang thử lại...")
             
         except Exception as e:
-            print(f"❌ [EMBEDDING] Lỗi kết nối tại lần thử {attempt + 1}: {e}")
+            print(f"❌ [EMBEDDING] Lỗi SDK tại lần thử {attempt + 1}: {e}")
             
         if attempt < retries - 1:
-            time.sleep(delay) 
+            time.sleep(delay)
             
     return None
 
