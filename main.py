@@ -258,4 +258,75 @@ def process_zalo_ai_logic(user_id: str, message_text: str):
                 {
                     "parts": [
                         {
-                            "text": combined_prompt + "\n\nTUYỆT ĐỐI CHỈ TRẢ VỀ DỮ LIỆU ĐỊNH DẠNG JSON, KHÔNG CHỨA CÁC ĐÁM KÝ TỰ BAO BỌC KIỂU
+                            "text": combined_prompt + "\n\nTUYỆT ĐỐI CHỈ TRẢ VỀ DỮ LIỆU ĐỊNH DẠNG JSON, KHÔNG CHỨA CÁC ĐÁM KÝ TỰ BAO BỌC KIỂU ```json VÀ KHÔNG VIẾT CHỮ NÀO NGOÀI KHỐI JSON."
+                        }
+                    ]
+                }
+            ]
+        }
+        
+        print("📡 [AI] Đang gửi yêu cầu sang Gemini 2.5-Flash API...")
+        chat_response = requests.post(chat_url, headers=chat_headers, json=chat_payload, timeout=12)
+        chat_res_json = chat_response.json()
+        
+        if "candidates" in chat_res_json and chat_res_json["candidates"]:
+            raw_text = chat_res_json["candidates"][0]["content"]["parts"][0]["text"]
+            print("📩 [AI] Văn bản thô nhận từ Gemini:", raw_text)
+            
+            try:
+                # Loại bỏ markdown nếu AI trả về sai format yêu cầu
+                clean_text = raw_text.strip()
+                if clean_text.startswith("```json"):
+                    clean_text = clean_text[7:]
+                if clean_text.endswith("```"):
+                    clean_text = clean_text[:-3]
+                
+                result_data = json.loads(clean_text.strip())
+                ai_reply = result_data.get("ai_reply", ai_reply)
+                action = result_data.get("action")
+                
+                if action == "ADD_ROOM":
+                    print("-> Nhận diện hành động: THÊM PHÒNG TRỌ.")
+                    extracted = result_data.get("extracted_data", {})
+                    insert_room_to_db(extracted)
+            except Exception as json_parse_err:
+                print("⚠ [AI] Phản hồi lỗi cấu trúc JSON, ép lấy văn bản thuần.")
+                ai_reply = raw_text
+        else:
+            print("❌ [AI] Khối phản hồi Google lỗi hoặc trống rỗng:", chat_res_json)
+            
+    except Exception as general_error:
+        print("❌ [AI] Lỗi tổng quát trong luồng xử lý ngầm:", general_error)
+        
+    print(f"📤 [AI] Tiến hành bắn phản hồi về Zalo: {ai_reply}")
+    send_zalo_message(user_id, ai_reply)
+
+# --- 6. WEBHOOK TIẾP NHẬN CHÍNH ---
+@app.post("/webhook/zalo")
+def zalo_webhook(request_data: dict, background_tasks: BackgroundTasks):
+    try:
+        event_name = str(request_data.get("event_name", "")).strip()
+        
+        # SỰ KIỆN 1: Khách nhấn Quan tâm OA
+        if "user_follow_oa" in event_name:
+            recipient_id = request_data.get("sender", {}).get("id")
+            if recipient_id:
+                welcome_text = "👋 Chào mừng bạn đến với Hệ Thống Tư Vấn Phòng Trọ Tự Động. Hãy gõ nhu cầu phòng trọ hoặc thông tin phòng cho thuê của bạn để trợ lý AI hỗ trợ nhé!"
+                send_pure_text(recipient_id, welcome_text)
+            return {"status": "success"}
+            
+        # SỰ KIỆN 2: Khách nhắn tin chữ / Bấm nút chức năng
+        if "user_send_text" in event_name:
+            user_id = request_data.get("user_id_by_app") or request_data.get("sender", {}).get("id")
+            user_message = request_data.get("message", {}).get("text", "")
+            
+            print(f"📥 -> Nhận tin nhắn từ khách hàng: {user_message}")
+            
+            if user_id and user_message:
+                # Đẩy thẳng tin nhắn vào Background Task để Gemini phân tích và trò chuyện tự nhiên với khách
+                background_tasks.add_task(process_zalo_ai_logic, user_id, user_message)
+                    
+    except Exception as e:
+        print("❌ Lỗi tiếp nhận webhook đầu vào:", e)
+        
+    return {"status": "success"}
