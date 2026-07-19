@@ -9,23 +9,19 @@ from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 from config import Config
 import google.generativeai as genai
-from google.genai import types
 
 app = FastAPI()
 
-
-# Khởi tạo Client Gemini chính thức bằng API Key từ biến môi trường
-# 1. Cấu hình API Key chuẩn cho google-generativeai (KHÔNG DÙNG genai.Client)
+# --- 1. CẤU HÌNH VÀ KHỞI TẠO GEMINI API ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if GEMINI_API_KEY:
     genai.configure(api_key=GEMINI_API_KEY)
-    
-    
-print("--- DANH SÁCH MODEL KHẢ DỤNG ---")
-for model in gemini_client.models.list():
-    if "embed" in model.name.lower() or "embedding" in model.name.lower():
-        print(f"Name: {model.name} | Supported methods: {model.supported_generation_methods}")
+    print("✅ Đã cấu hình thành công Gemini API Key!")
+else:
+    print("❌ Thiếu GEMINI_API_KEY trong biến môi trường!")
 
+# Khởi tạo mô hình Gemini Chat / Bóc tách dữ liệu
+gemini_model = genai.GenerativeModel("gemini-2.5-flash")
 
 @app.get("/")
 async def root():
@@ -34,13 +30,13 @@ async def root():
 # Tên bảng lưu trữ phòng trọ trên Qdrant
 COLLECTION_NAME = "rooms_v3"
 
-# --- 1. KHỞI TẠO CÁC KẾT NỐI (QDRANT CLOUD) ---
+# --- 2. KHỞI TẠO CÁC KẾT NỐI (QDRANT CLOUD) ---
 qdrant_client = QdrantClient(
     url=os.environ.get("QDRANT_URL"),
     api_key=os.environ.get("QDRANT_API_KEY")
 )
 
-# Khởi tạo bảng với size=768 (Khớp hoàn toàn với mô hình text-embedding-004)
+# Khởi tạo bảng với size=768
 try:
     if not qdrant_client.collection_exists(collection_name=COLLECTION_NAME):
         print(f"⚠ Không tìm thấy collection '{COLLECTION_NAME}'. Đang tạo mới...")
@@ -55,20 +51,19 @@ try:
 except Exception as qdrant_init_error:
     print("❌ Lỗi khi khởi tạo kiểm tra Collection Qdrant:", qdrant_init_error)
 
-# --- 2. HÀM TẠO VECTOR EMBEDDING BẰNG GEMINI API VỚI CƠ CHẾ RETRY ---
-
+# --- 3. HÀM TẠO VECTOR EMBEDDING BẰNG GEMINI API ---
 def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
     """
-    Tạo Vector Embedding 768 chiều cho Qdrant DB.
-    Sử dụng google-generativeai chuẩn hóa.
+    Tạo Vector Embedding 768 chiều cho Qdrant DB sử dụng google-generativeai.
+    Cơ chế thử lại và tự động Fallback linh hoạt.
     """
-    if not os.environ.get("GEMINI_API_KEY"):
+    if not GEMINI_API_KEY:
         print("❌ [EMBEDDING] Thiếu GEMINI_API_KEY trong biến môi trường!")
         return None
 
     for attempt in range(retries):
         try:
-            # Gọi trực tiếp qua genai.embed_content
+            # Thử tạo embedding bằng mô hình text-embedding-004
             response = genai.embed_content(
                 model="models/text-embedding-004",
                 content=text,
@@ -81,9 +76,9 @@ def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
             print(f"⚠️ [EMBEDDING] Lần thử {attempt + 1} trống dữ liệu. Đang thử lại...")
             
         except Exception as e:
-            print(f"❌ [EMBEDDING] Lỗi tại lần thử {attempt + 1}: {e}")
+            print(f"❌ [EMBEDDING] Lần thử {attempt + 1} lỗi ({e}). Đang thử fallback sang embedding-001...")
             
-            # Fallback dự phòng tự động sang embedding-001 nếu model 004 bị từ chối
+            # Fallback tự động sang embedding-001 nếu model 004 bị từ chối
             try:
                 response = genai.embed_content(
                     model="models/embedding-001",
@@ -100,7 +95,7 @@ def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
             
     return None
 
-# --- 3. CÁC HÀM XỬ LÝ DATABASE QDRANT ---
+# --- 4. CÁC HÀM XỬ LÝ DATABASE QDRANT ---
 def search_rooms_from_db(query_text: str):
     query_vector = get_text_embedding(query_text)
     if not query_vector:
@@ -154,7 +149,7 @@ def insert_room_to_db(room_data: dict):
         print("❌ [Qdrant] Lỗi khi thêm phòng trọ vào cơ sở dữ liệu:", e)
         return False
 
-# --- 4. CÁC HÀM GIA HẠN VÀ GỬI TIN NHẮN ZALO ---
+# --- 5. CÁC HÀM GIA HẠN VÀ GỬI TIN NHẮN ZALO ---
 def refresh_zalo_access_token():
     url = "https://oauth.zalo.me/v3.0/oa/access_token"
     headers = {
@@ -214,7 +209,6 @@ def send_zalo_message(user_id: str, ai_reply: str):
         "access_token": access_token
     }
     
-    # Luôn luôn gửi nội dung văn bản tự nhiên do AI tự soạn thảo
     payload = {
         "recipient": {"user_id": user_id},
         "message": {"text": ai_reply}
@@ -235,7 +229,7 @@ def send_zalo_message(user_id: str, ai_reply: str):
         print("❌ [ZALO CRITICAL ERROR]: Không thể kết nối đến API Zalo:", e)
         return None
 
-# --- 5. LUỒNG XỬ LÝ CHẠY NGẦM BẰNG GEMINI 2.5-FLASH ---
+# --- 6. LUỒNG XỬ LÝ CHẠY NGẦM BẰNG GEMINI SDK CHUẨN ---
 def process_zalo_ai_logic(user_id: str, message_text: str):
     print(f"🔄 [AI] Bắt đầu xử lý luồng chạy ngầm cho User: {user_id}")
     ai_reply = "🤖 Trợ lý AI đang bận xử lý hệ thống, bạn vui lòng đợi vài giây rồi nhắn lại nhé!" 
@@ -243,90 +237,74 @@ def process_zalo_ai_logic(user_id: str, message_text: str):
     try:
         found_rooms = []
         
-        # Chỉ truy vấn tìm phòng trong database nếu người dùng không nhắn tin chào hỏi thông thường
+        # Chỉ truy vấn tìm phòng nếu tin nhắn không phải chào hỏi thông thường
         if not any(kw in message_text.lower() for kw in ["chào", "hi", "hello", "bắt đầu"]):
             found_rooms = search_rooms_from_db(message_text)
         
-        api_key = os.environ.get("GEMINI_API_KEY")
-        chat_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
-        chat_headers = {"Content-Type": "application/json"}
-        
         combined_prompt = f"""
-        Bạn là trợ lý ảo thông minh của Hệ thống Zalo OA Tư vấn phòng trọ. 
-        Nhiệm vụ của bạn là phân tích tin nhắn của khách và chuẩn bị phản hồi phù hợp.
+Bạn là trợ lý ảo thông minh của Hệ thống Zalo OA Tư vấn phòng trọ. 
+Nhiệm vụ của bạn là phân tích tin nhắn của khách và chuẩn bị phản hồi phù hợp.
 
-        Tin nhắn của khách: "{message_text}"
-        Dữ liệu phòng tìm thấy trong Database (nếu có): {json.dumps(found_rooms, ensure_ascii=False)}
+Tin nhắn của khách: "{message_text}"
+Dữ liệu phòng tìm thấy trong Database (nếu có): {json.dumps(found_rooms, ensure_ascii=False)}
 
-        Hãy thực hiện 2 việc:
-        1. Phân loại hành động ("action") thành "ADD_ROOM" (nếu muốn đăng/cho thuê phòng) hoặc "SEARCH_ROOM" (nếu muốn tìm/hỏi phòng).
-        2. Soạn nội dung phản hồi ("ai_reply"):
-           - Nếu là "ADD_ROOM": Xác nhận ghi nhận thành công và hiển thị lại các thông số bạn bóc tách được (Địa chỉ, Giá, Diện tích, Mô tả).
-           - Nếu là "SEARCH_ROOM": Dựa trên danh sách từ database để soạn câu trả lời ngắn gọn, lịch sự, có đầy đủ xuống dòng. Nếu không tìm thấy phòng thích hợp, hãy báo hết phòng khéo léo và xin thông tin để liên hệ lại sau.
+Hãy thực hiện 2 việc:
+1. Phân loại hành động ("action") thành "ADD_ROOM" (nếu muốn đăng/cho thuê phòng) hoặc "SEARCH_ROOM" (nếu muốn tìm/hỏi phòng).
+2. Soạn nội dung phản hồi ("ai_reply"):
+   - Nếu là "ADD_ROOM": Xác nhận ghi nhận thành công và hiển thị lại các thông số bạn bóc tách được (Địa chỉ, Giá, Diện tích, Mô tả).
+   - Nếu là "SEARCH_ROOM": Dựa trên danh sách từ database để soạn câu trả lời ngắn gọn, lịch sự, có đầy đủ xuống dòng. Nếu không tìm thấy phòng thích hợp, hãy báo hết phòng khéo léo và xin thông tin để liên hệ lại sau.
 
-        HÃY TRẢ VỀ ĐỊNH DẠNG JSON NGHIÊM NGẶT THEO MẪU SAU, KHÔNG ĐƯỢC CHỨA CÁC ĐÁM KÝ TỰ BAO BỌC KIỂU ```json VÀ TUYỆT ĐỐI KHÔNG VIẾT CHỮ NÀO NGOÀI KHỐI JSON:
-        {{
-            "action": "ADD_ROOM" hoặc "SEARCH_ROOM",
-            "extracted_data": {{
-                "title": "Tiêu đề phòng",
-                "price": "Giá",
-                "address": "Địa chỉ",
-                "area": "Diện tích số m2",
-                "description": "Mô tả chi tiết"
-            }},
-            "ai_reply": "Nội dung tin nhắn bạn đã soạn để gửi trực tiếp cho khách hàng"
-        }}
-        """
+HÃY TRẢ VỀ ĐỊNH DẠNG JSON NGHIÊM NGẶT THEO MẪU SAU, KHÔNG ĐƯỢC CHỨA CÁC ĐÁM KÝ TỰ BAO BỌC KIỂU ```json VÀ TUYỆT ĐỐI KHÔNG VIẾT CHỮ NÀO NGOÀI KHỐI JSON:
+{{
+    "action": "ADD_ROOM" hoặc "SEARCH_ROOM",
+    "extracted_data": {{
+        "title": "Tiêu đề phòng",
+        "price": "Giá",
+        "address": "Địa chỉ",
+        "area": "Diện tích số m2",
+        "description": "Mô tả chi tiết"
+    }},
+    "ai_reply": "Nội dung tin nhắn bạn đã soạn để gửi trực tiếp cho khách hàng"
+}}
+"""
         
-        chat_payload = {
-            "contents": [
-                {
-                    "parts": [
-                        {
-                            "text": combined_prompt + "\n\nTUYỆT ĐỐI CHỈ TRẢ VỀ DỮ LIỆU ĐỊNH DẠNG JSON, KHÔNG CHỨA CÁC ĐÁM KÝ TỰ BAO BỌC KIỂU ```json VÀ KHÔNG VIẾT CHỮ NÀO NGOÀI KHỐI JSON."
-                        }
-                    ]
-                }
-            ]
-        }
+        print("📡 [AI] Đang gửi yêu cầu sang Gemini API...")
         
-        print("📡 [AI] Đang gửi yêu cầu sang Gemini 2.5-Flash API...")
-        chat_response = requests.post(chat_url, headers=chat_headers, json=chat_payload, timeout=12)
-        chat_res_json = chat_response.json()
+        # Gọi Gemini qua SDK chính thức thay vì dùng requests.post thủ công
+        response = gemini_model.generate_content(
+            combined_prompt,
+            generation_config={"response_mime_type": "application/json"}
+        )
         
-        if "candidates" in chat_res_json and chat_res_json["candidates"]:
-            raw_text = chat_res_json["candidates"][0]["content"]["parts"][0]["text"]
-            print("📩 [AI] Văn bản thô nhận từ Gemini:", raw_text)
+        raw_text = response.text
+        print("📩 [AI] Văn bản thô nhận từ Gemini:", raw_text)
+        
+        try:
+            clean_text = raw_text.strip()
+            if clean_text.startswith("```json"):
+                clean_text = clean_text[7:]
+            if clean_text.endswith("```"):
+                clean_text = clean_text[:-3]
             
-            try:
-                # Loại bỏ markdown nếu AI trả về sai format yêu cầu
-                clean_text = raw_text.strip()
-                if clean_text.startswith("```json"):
-                    clean_text = clean_text[7:]
-                if clean_text.endswith("```"):
-                    clean_text = clean_text[:-3]
-                
-                result_data = json.loads(clean_text.strip())
-                ai_reply = result_data.get("ai_reply", ai_reply)
-                action = result_data.get("action")
-                
-                if action == "ADD_ROOM":
-                    print("-> Nhận diện hành động: THÊM PHÒNG TRỌ.")
-                    extracted = result_data.get("extracted_data", {})
-                    insert_room_to_db(extracted)
-            except Exception as json_parse_err:
-                print("⚠ [AI] Phản hồi lỗi cấu trúc JSON, ép lấy văn bản thuần.")
-                ai_reply = raw_text
-        else:
-            print("❌ [AI] Khối phản hồi Google lỗi hoặc trống rỗng:", chat_res_json)
+            result_data = json.loads(clean_text.strip())
+            ai_reply = result_data.get("ai_reply", ai_reply)
+            action = result_data.get("action")
             
+            if action == "ADD_ROOM":
+                print("-> Nhận diện hành động: THÊM PHÒNG TRỌ.")
+                extracted = result_data.get("extracted_data", {})
+                insert_room_to_db(extracted)
+        except Exception as json_parse_err:
+            print("⚠ [AI] Phản hồi lỗi cấu trúc JSON, ép lấy văn bản thuần:", json_parse_err)
+            ai_reply = raw_text
+
     except Exception as general_error:
         print("❌ [AI] Lỗi tổng quát trong luồng xử lý ngầm:", general_error)
         
     print(f"📤 [AI] Tiến hành bắn phản hồi về Zalo: {ai_reply}")
     send_zalo_message(user_id, ai_reply)
 
-# --- 6. WEBHOOK TIẾP NHẬN CHÍNH ---
+# --- 7. WEBHOOK TIẾP NHẬN CHÍNH ---
 @app.post("/webhook/zalo")
 def zalo_webhook(request_data: dict, background_tasks: BackgroundTasks):
     try:
@@ -348,7 +326,6 @@ def zalo_webhook(request_data: dict, background_tasks: BackgroundTasks):
             print(f"📥 -> Nhận tin nhắn từ khách hàng: {user_message}")
             
             if user_id and user_message:
-                # Đẩy thẳng tin nhắn vào Background Task để Gemini phân tích và trò chuyện tự nhiên với khách
                 background_tasks.add_task(process_zalo_ai_logic, user_id, user_message)
                     
     except Exception as e:
