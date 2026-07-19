@@ -15,9 +15,12 @@ app = FastAPI()
 
 
 # Khởi tạo Client Gemini chính thức bằng API Key từ biến môi trường
-# SDK sẽ tự động cấu hình endpoint tối ưu nhất cho tài khoản trả phí của bạn
-gemini_client = genai.Client(api_key=os.environ.get("GEMINI_API_KEY"))
-
+# 1. Cấu hình API Key chuẩn cho google-generativeai (KHÔNG DÙNG genai.Client)
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+if GEMINI_API_KEY:
+    genai.configure(api_key=GEMINI_API_KEY)
+    
+    
 print("--- DANH SÁCH MODEL KHẢ DỤNG ---")
 for model in gemini_client.models.list():
     if "embed" in model.name.lower() or "embedding" in model.name.lower():
@@ -56,7 +59,8 @@ except Exception as qdrant_init_error:
 
 def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
     """
-    Tạo Vector Embedding 768 chiều sử dụng SDK google-generativeai cực kỳ ổn định.
+    Tạo Vector Embedding 768 chiều cho Qdrant DB.
+    Sử dụng google-generativeai chuẩn hóa.
     """
     if not os.environ.get("GEMINI_API_KEY"):
         print("❌ [EMBEDDING] Thiếu GEMINI_API_KEY trong biến môi trường!")
@@ -64,21 +68,22 @@ def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
 
     for attempt in range(retries):
         try:
-            # Dùng tên model đầy đủ 'models/text-embedding-004'
+            # Gọi trực tiếp qua genai.embed_content
             response = genai.embed_content(
                 model="models/text-embedding-004",
                 content=text,
-                task_type="retrieval_document" # Tối ưu hóa riêng cho việc lưu DB tìm kiếm
+                task_type="retrieval_document"
             )
             
             if "embedding" in response and response["embedding"]:
                 return response["embedding"]
                 
-            print(f"⚠️ [EMBEDDING] Lần thử {attempt + 1} không nhận được vector. Đang thử lại...")
+            print(f"⚠️ [EMBEDDING] Lần thử {attempt + 1} trống dữ liệu. Đang thử lại...")
             
         except Exception as e:
             print(f"❌ [EMBEDDING] Lỗi tại lần thử {attempt + 1}: {e}")
-            # Nếu text-embedding-004 vẫn lỗi 404, thử fallback sang models/embedding-001 ngay lập tức
+            
+            # Fallback dự phòng tự động sang embedding-001 nếu model 004 bị từ chối
             try:
                 response = genai.embed_content(
                     model="models/embedding-001",
