@@ -23,6 +23,14 @@ else:
 # Khởi tạo mô hình Gemini Chat / Bóc tách dữ liệu
 gemini_model = genai.GenerativeModel("gemini-2.5-flash")
 
+
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+
+print("🔍 Danh sách các model hỗ trợ embedContent:")
+for m in genai.list_models():
+    if 'embedContent' in m.supported_generation_methods:
+        print("  ->", m.name)
+
 @app.get("/")
 async def root():
     return {"status": "running", "message": "Zalo Room Chatbot AI is active!"}
