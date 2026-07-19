@@ -53,7 +53,7 @@ except Exception as qdrant_init_error:
 def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
     """
     Tạo Vector Embedding từ văn bản sử dụng thư viện google-genai chính thức.
-    Giải quyết triệt để lỗi 404 URL và tự động tối ưu hóa theo tài khoản trả phí.
+    Chuyển đổi sang mô hình ổn định 'embedding-001' (768 chiều) để fix triệt để lỗi 404.
     """
     if not os.environ.get("GEMINI_API_KEY"):
         print("❌ [EMBEDDING] Thiếu GEMINI_API_KEY trong biến môi trường!")
@@ -61,16 +61,15 @@ def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
 
     for attempt in range(retries):
         try:
-            # Gọi trực tiếp qua SDK chính thức
+            # Thay đổi tên model từ 'text-embedding-004' thành 'embedding-001'
             response = gemini_client.models.embed_content(
-                model="text-embedding-004",
+                model="embedding-001", 
                 contents=text,
                 config=types.EmbedContentConfig(
                     output_dimensionality=768
                 )
             )
             
-            # SDK trả về object sạch sẽ, lấy trọn vẹn danh sách vector số thực
             if response.embedding and response.embedding.values:
                 return response.embedding.values
                 
