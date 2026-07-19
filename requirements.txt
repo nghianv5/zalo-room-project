@@ -1,7 +1,7 @@
 fastapi
 uvicorn
-pydantic
+qdrant-client
 google-genai
 requests
-qdrant-client
-google-generativeai
+cloudinary
+aiofiles
