@@ -60,45 +60,47 @@ except Exception as qdrant_init_error:
     print("❌ Lỗi khi khởi tạo kiểm tra Collection Qdrant:", qdrant_init_error)
 
 # --- 3. HÀM TẠO VECTOR EMBEDDING BẰNG GEMINI API ---
-# --- 3. HÀM TẠO VECTOR EMBEDDING BẰNG GEMINI API ---
+# --- 3. HÀM TẠO VECTOR EMBEDDING QUA REST API (CHỐNG LỖI 404 TRUYỀN KIẾP) ---
 def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
     """
-    Tạo Vector Embedding 768 chiều cho Qdrant DB sử dụng google-generativeai.
+    Tạo Vector Embedding 768 chiều trực tiếp qua REST API của Gemini.
+    Không dùng SDK genai.embed_content để tránh lỗi 404 version endpoint.
     """
     if not GEMINI_API_KEY:
-        print("❌ [EMBEDDING] Thiếu GEMINI_API_KEY trong biến môi trường!")
+        print("❌ [EMBEDDING] Thiếu GEMINI_API_KEY!")
         return None
+
+    # Endpoint chuẩn hóa của Google Gemini Embedding
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={GEMINI_API_KEY}"
+    headers = {"Content-Type": "application/json"}
+    
+    payload = {
+        "model": "models/text-embedding-004",
+        "content": {
+            "parts": [
+                {"text": text}
+            ]
+        },
+        "taskType": "RETRIEVAL_DOCUMENT"
+    }
 
     for attempt in range(retries):
         try:
-            # 1. Thử với model chính: text-embedding-004 (Bỏ tiền tố "models/")
-            response = genai.embed_content(
-                model="text-embedding-004",
-                content=text,
-                task_type="retrieval_document"
-            )
+            response = requests.post(url, headers=headers, json=payload, timeout=10)
+            res_json = response.json()
+
+            # Nếu thành công nhận về danh sách giá trị vector
+            if "embedding" in res_json and "values" in res_json["embedding"]:
+                return res_json["embedding"]["values"]
             
-            if "embedding" in response and response["embedding"]:
-                return response["embedding"]
-                
+            print(f"⚠️ [EMBEDDING] Lần thử {attempt + 1} phản hồi không như kỳ vọng: {res_json}")
+
         except Exception as e:
-            print(f"❌ [EMBEDDING] Lần thử {attempt + 1} lỗi ({e}). Đang thử fallback sang embedding-001...")
-            
-            # 2. Fallback sang embedding-001 nếu lỗi
-            try:
-                response = genai.embed_content(
-                    model="embedding-001",
-                    content=text,
-                    task_type="retrieval_document"
-                )
-                if "embedding" in response and response["embedding"]:
-                    return response["embedding"]
-            except Exception as inner_e:
-                print(f"❌ [EMBEDDING Fallback] Lỗi: {inner_e}")
-            
+            print(f"❌ [EMBEDDING] Lỗi kết nối tại lần thử {attempt + 1}: {e}")
+
         if attempt < retries - 1:
             time.sleep(delay)
-            
+
     return None
 
 # --- 4. CÁC HÀM XỬ LÝ DATABASE QDRANT ---
