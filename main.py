@@ -321,61 +321,57 @@ def add_pending_media(user_id: str, new_urls: list):
 
 # --- 6. LUỒNG XỬ LÝ CHÍNH VỚI AI ---
 def process_zalo_ai_logic(user_id: str, message_text: str, media_items: list):
-    # Bước 1: Lưu vĩnh viễn các file đính kèm đợt này (nếu có)
     incoming_media_urls = []
     for item in media_items:
         saved_url = save_media_file(item["url"], is_video=item.get("is_video", False))
         if saved_url:
             incoming_media_urls.append(saved_url)
 
-    # Bước 2: Kiểm tra và gộp với danh sách ảnh đang chờ trong cache
     pending_urls = get_and_clear_pending_media(user_id)
     all_current_media = list(dict.fromkeys(pending_urls + incoming_media_urls))
 
-    # Trường hợp 1: Người dùng CHỈ GỬI ẢNH/VIDEO (không có văn bản địa chỉ)
+    # Trường hợp 1: Chỉ gửi ảnh lẻ
     if not message_text.strip() and all_current_media:
         add_pending_media(user_id, all_current_media)
-        reply = f"📸 Em đã nhận {len(all_current_media)} hình ảnh/video của bạn rồi ạ!\n\n👉 Bạn vui lòng gửi thêm địa chỉ cụ thể (và thông tin giá, tiện ích...) để em hoàn tất đăng bài nhé!"
-        # TRUYỀN media_urls ĐỂ KHÁCH HÀNG THẤY LẠI KHUNG XEM TRƯỚC VỪA GỬI
+        reply = f"📸 Em đã nhận {len(all_current_media)} hình ảnh/video của bạn rồi ạ!\n\n👉 Bạn vui lòng gửi thêm địa chỉ cụ thể để em hoàn tất đăng bài nhé!"
         send_zalo_message(user_id, reply, media_urls=all_current_media)
         return
 
-    # Trường hợp 2: Có tin nhắn văn bản
-    ai_reply = "🤖 Trợ lý AI đang xử lý thông tin, vui lòng chờ giây lát!"
-    urls_to_send = all_current_media  # Mặc định gửi danh sách media vừa gửi
+    urls_to_send = all_current_media
 
     try:
+        # 1. Tìm kiếm phòng trong CSDL Qdrant trước
         found_rooms = []
         is_greeting = any(kw in message_text.lower() for kw in ["chào", "hi", "hello", "bắt đầu"])
         if not is_greeting and message_text.strip():
             found_rooms = search_rooms_from_db(message_text)
 
+        # 2. Xây dựng Prompt chi tiết cho Gemini
         system_prompt = f"""
 Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ trên Zalo.
 Hãy phân tích tin nhắn người dùng và dữ liệu liên quan để trả về kết quả JSON.
 
-Tin nhắn gửi tới: "{message_text}"
-Danh sách URL hình ảnh/video đính kèm (gồm cả ảnh vừa gửi và ảnh gửi trước đó): {json.dumps(all_current_media)}
-Dữ liệu phòng tìm thấy trong CSDL: {json.dumps(found_rooms, ensure_ascii=False)}
+Tin nhắn người dùng: "{message_text}"
+Hình ảnh kèm theo: {json.dumps(all_current_media)}
+Dữ liệu phòng tìm thấy trong CSDL (Khớp nhất): {json.dumps(found_rooms, ensure_ascii=False)}
 
 YÊU CẦU XỬ LÝ:
-1. Xác định "action": 
-   - "ADD_ROOM": Người dùng đăng/cập nhật tin cho thuê phòng.
-   - "SEARCH_ROOM": Người dùng đi tìm phòng trọ.
+1. Phân loại "action":
+   - "ADD_ROOM": Người dùng muốn ĐĂNG/CHO THUÊ phòng mới.
+   - "SEARCH_ROOM": Người dùng ĐI TÌM/HỎI THÔNG TIN phòng trọ.
 
-2. Nếu là "ADD_ROOM":
-   - Trích xuất "address": Địa chỉ cụ thể. Nếu không có địa chỉ rõ ràng trong tin nhắn, đặt là null.
-   - Trích xuất các trường thông tin: room_name, floor, price, is_closed (bool), has_air_conditioner (bool), has_water_heater (bool), has_washing_machine (bool), allow_pets (bool), available_date, has_balcony (bool), has_window (bool), description.
+2. Nếu "action" == "SEARCH_ROOM":
+   - Nếu tìm thấy dữ liệu trong CSDL (`found_rooms` có dữ liệu): Soạn `ai_reply` trình bày CHI TIẾT thông tin phòng (Giá, Tầng, Tiện ích, Cho nuôi thú cưng không,...).
+   - Nếu KHÔNG tìm thấy dữ liệu: Soạn `ai_reply` báo chưa tìm thấy phòng phù hợp tại khu vực/địa chỉ đó và hẹn hỗ trợ sau.
 
-3. Soạn "ai_reply":
-   - Thân thiện, ngắn gọn, kèm emoji.
-   - Với "ADD_ROOM": Nếu trích xuất được địa chỉ, báo đã đăng thành công kèm tóm tắt và số lượng ảnh nhận được. Nếu THIẾU ĐỊA CHỈ, nhắn tin nhắc người dùng cung cấp địa chỉ cụ thể.
+3. Nếu "action" == "ADD_ROOM":
+   - Trích xuất "address". Nếu có địa chỉ -> báo đã lưu thành công. Nếu thiếu địa chỉ -> nhắc khách bổ sung.
 
 ĐỊNH DẠNG TRẢ VỀ (DUY NHẤT 1 CHUỖI JSON):
 {{
     "action": "ADD_ROOM" hoặc "SEARCH_ROOM",
     "extracted_data": {{ ... }},
-    "ai_reply": "Câu trả lời soạn sẵn cho khách"
+    "ai_reply": "Nội dung trả lời CHI TIẾT gửi cho khách"
 }}
 """
 
@@ -386,29 +382,21 @@ YÊU CẦU XỬ LÝ:
         )
 
         raw_text = response.text.strip()
-        if raw_text.startswith("```json"):
-            raw_text = raw_text[7:]
-        if raw_text.endswith("```"):
-            raw_text = raw_text[:-3]
-
-        result_data = json.loads(raw_text.strip())
-        ai_reply = result_data.get("ai_reply", ai_reply)
+        result_data = json.loads(raw_text)
+        
+        ai_reply = result_data.get("ai_reply", "Dạ em đã ghi nhận thông tin, em sẽ kiểm tra và báo lại ngay ạ!")
         action = result_data.get("action")
 
         if action == "ADD_ROOM":
             extracted = result_data.get("extracted_data", {})
             address = extracted.get("address")
-
-            # Nếu có địa chỉ -> Lưu vào CSDL
             if address and address.strip().lower() not in ["null", "none", "chưa rõ địa chỉ", "chưa rõ"]:
                 upsert_room_to_db(extracted, all_current_media)
-            else:
-                # Nếu AI xác nhận là đăng phòng nhưng vẫn chưa có địa chỉ -> Cất toàn bộ media lại vào Cache
-                if all_current_media:
-                    add_pending_media(user_id, all_current_media)
+            elif all_current_media:
+                add_pending_media(user_id, all_current_media)
 
         elif action == "SEARCH_ROOM" and found_rooms:
-            # Nếu khách tìm phòng và có kết quả -> Ưu tiên lấy media từ phòng tìm được trong CSDL để phản hồi
+            # Lấy danh sách ảnh của các phòng tìm được trong CSDL để gửi đính kèm Zalo
             db_media = []
             for room in found_rooms:
                 db_media.extend(room.get("media_urls", []))
@@ -417,43 +405,7 @@ YÊU CẦU XỬ LÝ:
 
     except Exception as err:
         print("❌ [AI Logic Error]:", err)
+        ai_reply = "Dạ hệ thống đang bận một chút, bạn vui lòng đợi trong giây lát hoặc nhắn lại giúp em nhé!"
 
-    # TRUYỀN DỮ LIỆU MEDIA ĐÃ QUA LỌC VÀO HÀM GỬI ZALO
+    # Gửi tin nhắn trả lời hoàn chỉnh kèm hình ảnh (nếu có)
     send_zalo_message(user_id, ai_reply, media_urls=urls_to_send)
-
-# --- 7. WEBHOOK RECEIVER ---
-@app.post("/webhook/zalo")
-async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
-    try:
-        data = await request.json()
-        event_name = str(data.get("event_name", "")).strip()
-        sender_id = data.get("user_id_by_app") or data.get("sender", {}).get("id")
-
-        if not sender_id:
-            return {"status": "ignored"}
-
-        if "user_follow_oa" in event_name:
-            send_zalo_message(sender_id, "👋 Chào mừng bạn! Gửi thông tin hoặc hình ảnh phòng trọ để bắt đầu nhé!")
-            return {"status": "success"}
-
-        if event_name in ["user_send_text", "user_send_image", "user_send_file", "user_send_video"]:
-            message_obj = data.get("message", {})
-            text = message_obj.get("text", "")
-
-            attachments = message_obj.get("attachments", [])
-            media_items = []
-            for item in attachments:
-                payload = item.get("payload", {})
-                media_url = payload.get("url") or payload.get("thumbnailUrl")
-                if media_url:
-                    media_items.append({
-                        "url": media_url,
-                        "is_video": (item.get("type") == "video") or ("user_send_video" in event_name)
-                    })
-
-            background_tasks.add_task(process_zalo_ai_logic, sender_id, text, media_items)
-
-    except Exception as e:
-        print("❌ [Webhook Error]:", e)
-
-    return {"status": "success"}
