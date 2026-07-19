@@ -164,129 +164,156 @@ def send_pure_text(recipient_id: str, text: str):
         print("Lỗi gửi text thuần:", e)
         return None
 
-def send_zalo_message(user_id: str, text_or_menu: str):
+def send_zalo_message(user_id: str, ai_reply: str):
     access_token = os.environ.get("ZALO_ACCESS_TOKEN")
+    if not access_token:
+        print("❌ [ZALO] Thiếu Zalo Access Token trong biến môi trường!")
+        return None
+        
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
-    
     headers = {
         "Content-Type": "application/json",
         "access_token": access_token
     }
-
-    if text_or_menu == "MENU_CHOICE":
-        # Menu bằng text kèm Emoji cực kỳ chuyên nghiệp, không bao giờ bị Zalo ẩn
-        menu_text = (
-            "🤖 CHÀO MỪNG BẠN ĐẾN VỚI HỆ THỐNG PHÒNG TRỌ AI!\n\n"
-            "Vui lòng phản hồi bằng cách chọn hoặc gõ một trong các lựa chọn dưới đây:\n\n"
-            "👉 Gõ [1] hoặc: Tôi muốn ĐĂNG PHÒNG TRỌ\n"
-            "👉 Gõ [2] hoặc: Tôi muốn TÌM PHÒNG TRỌ\n\n"
-            "Trợ lý AI sẵn sàng hỗ trợ bạn 24/7!"
-        )
+    
+    # Kiểm tra xem có phải tin nhắn chào hỏi hoặc chứa menu không
+    if "[1]" in ai_reply or "[2]" in ai_reply or "chọn hoặc nhập" in ai_reply.lower():
+        # Sử dụng cấu hình nút bấm Text chuẩn và gọn nhẹ nhất của Zalo
         payload = {
             "recipient": {"user_id": user_id},
-            "message": {"text": menu_text}
+            "message": {
+                "text": "Chào mừng bạn đến với Hệ thống tư vấn phòng trọ! Vui lòng chọn nhu cầu của bạn dưới đây để tiếp tục:",
+                "attachment": {
+                    "type": "template",
+                    "payload": {
+                        "template_type": "text",
+                        "buttons": [
+                            {
+                                "title": "🏢 Đăng cho thuê phòng",
+                                "type": "oa.query.show",
+                                "payload": "Tôi muốn đăng cho thuê phòng"
+                            },
+                            {
+                                "title": "🔍 Tìm phòng trọ trống",
+                                "type": "oa.query.show",
+                                "payload": "Tôi muốn tìm phòng trọ"
+                            }
+                        ]
+                    }
+                }
+            }
         }
     else:
+        # Gửi tin nhắn văn bản thuần túy cho các hội thoại tư vấn khác
         payload = {
             "recipient": {"user_id": user_id},
-            "message": {"text": text_or_menu}
+            "message": {"text": ai_reply}
         }
 
     try:
-        res = requests.post(url, headers=headers, json=payload)
-        print(f"📡 [ZALO API RESPONSE]: {res.json()}")
+        response = requests.post(url, headers=headers, json=payload)
+        res_data = response.json()
+        
+        # --- IN LOG CHI TIẾT KẾT QUẢ TỪ ZALO ---
+        print(f"📡 [ZALO API RESPONSE]: {res_data}")
+        
+        if res_data.get("error") != 0:
+            print(f"❌ [ZALO ERROR]: Gửi tin thất bại. Mã lỗi: {res_data.get('error')} - Lý do: {res_data.get('message')}")
+        else:
+            print("✨ [ZALO SUCCESS]: Đã bắn tin nhắn thành công tới người dùng!")
+            
+        return res_data
     except Exception as e:
-        print(f"❌ Lỗi gửi tin Zalo: {e}")
+        print("❌ [ZALO CRITICAL ERROR]: Không thể kết nối đến API Zalo:", e)
+        return None
 
 # --- 5. LUỒNG XỬ LÝ CHẠY NGẦM BẰNG GEMINI 1.5-FLASH (HẠN MỨC CAO) ---
 def process_zalo_ai_logic(user_id: str, message_text: str):
     print(f"🔄 [AI] Bắt đầu xử lý luồng chạy ngầm cho User: {user_id}")
     ai_reply = "🤖 Trợ lý AI đang bận xử lý hệ thống, bạn vui lòng đợi vài giây rồi nhắn lại nhé!" 
-    if message_text in ["chào", "xin chào", "hi", "hello", "bắt đầu"]:
-        send_zalo_message(user_id, "MENU_CHOICE")
-    else:
-        try:
-             
-            # Tìm kiếm phòng thích hợp mớm thông tin trước cho Gemini
-            found_rooms = search_rooms_from_db(message_text)
-            
-            api_key = os.environ.get("GEMINI_API_KEY")
-            
-            # --- THAY ĐỔI CHÍNH XÁC SANG ENDPOINT 2.5-FLASH ĐỂ HẾT BỊ 404 ---
-            chat_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
-            chat_headers = {"Content-Type": "application/json"}
-            
-            combined_prompt = f"""
-            Bạn là trợ lý ảo thông minh của Hệ thống Zalo OA Tư vấn phòng trọ. 
-            Nhiệm vụ của bạn là phân tích tin nhắn của khách và chuẩn bị phản hồi phù hợp.
+    
+    try:
+        # Tìm kiếm phòng thích hợp mớm thông tin trước cho Gemini
+        found_rooms = search_rooms_from_db(message_text)
+        
+        api_key = os.environ.get("GEMINI_API_KEY")
+        
+        # --- ĐỔI SANG 1.5 FLASH CỔNG V1BETA ĐỂ CÓ QUOTA NGÀY NHIỀU HƠN ---
+        chat_url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={api_key}"
+        # --- THAY ĐỔI CHÍNH XÁC SANG ENDPOINT 2.5-FLASH ĐỂ HẾT BỊ 404 ---
+        chat_url = f"https://generativelanguage.googleapis.com/v1/models/gemini-2.5-flash:generateContent?key={api_key}"
+        chat_headers = {"Content-Type": "application/json"}
+        
+        combined_prompt = f"""
+        Bạn là trợ lý ảo thông minh của Hệ thống Zalo OA Tư vấn phòng trọ. 
+        Nhiệm vụ của bạn là phân tích tin nhắn của khách và chuẩn bị phản hồi phù hợp.
 
-            Tin nhắn của khách: "{message_text}"
-            Dữ liệu phòng tìm thấy trong Database (nếu có): {json.dumps(found_rooms, ensure_ascii=False)}
+        Tin nhắn của khách: "{message_text}"
+        Dữ liệu phòng tìm thấy trong Database (nếu có): {json.dumps(found_rooms, ensure_ascii=False)}
 
-            Hãy thực hiện 2 việc:
-            1. Phân loại hành động ("action") thành "ADD_ROOM" (nếu muốn đăng/cho thuê phòng) hoặc "SEARCH_ROOM" (nếu muốn tìm/hỏi phòng).
-            2. Soạn nội dung phản hồi ("ai_reply"):
-               - Nếu là "ADD_ROOM": Xác nhận ghi nhận thành công và hiển thị lại các thông số bạn bóc tách được.
-               - Nếu là "SEARCH_ROOM": Dựa trên danh sách từ database để soạn câu trả lời ngắn gọn, lịch sự, có đầy đủ xuống dòng. Nếu không tìm thấy phòng thích hợp, hãy báo hết phòng khéo léo và xin thông tin để liên hệ lại sau.
+        Hãy thực hiện 2 việc:
+        1. Phân loại hành động ("action") thành "ADD_ROOM" (nếu muốn đăng/cho thuê phòng) hoặc "SEARCH_ROOM" (nếu muốn tìm/hỏi phòng).
+        2. Soạn nội dung phản hồi ("ai_reply"):
+           - Nếu là "ADD_ROOM": Xác nhận ghi nhận thành công và hiển thị lại các thông số bạn bóc tách được.
+           - Nếu là "SEARCH_ROOM": Dựa trên danh sách từ database để soạn câu trả lời ngắn gọn, lịch sự, có đầy đủ xuống dòng. Nếu không tìm thấy phòng thích hợp, hãy báo hết phòng khéo léo và xin thông tin để liên hệ lại sau.
 
-            HÃY TRẢ VỀ ĐỊNH DẠNG JSON NGHIÊM NGẶT THEO MẪU SAU, KHÔNG ĐƯỢC CHỨA CÁC ĐÁM KÝ TỰ BAO BỌC KIỂU ```json VÀ TUYỆT ĐỐI KHÔNG VIẾT CHỮ NÀO NGOÀI KHỐI JSON:
-            {{
-                "action": "ADD_ROOM" hoặc "SEARCH_ROOM",
-                "extracted_data": {{
-                    "title": "Tiêu đề phòng",
-                    "price": "Giá",
-                    "address": "Địa chỉ",
-                    "area": "Diện tích số m2",
-                    "description": "Mô tả chi tiết"
-                }},
-                "ai_reply": "Nội dung tin nhắn bạn đã soạn để gửi trực tiếp cho khách hàng"
-            }}
-            """
+        HÃY TRẢ VỀ ĐỊNH DẠNG JSON NGHIÊM NGẶT THEO MẪU SAU, KHÔNG ĐƯỢC CHỨA CÁC ĐÁM KÝ TỰ BAO BỌC KIỂU ```json VÀ TUYỆT ĐỐI KHÔNG VIẾT CHỮ NÀO NGOÀI KHỐI JSON:
+        {{
+            "action": "ADD_ROOM" hoặc "SEARCH_ROOM",
+            "extracted_data": {{
+                "title": "Tiêu đề phòng",
+                "price": "Giá",
+                "address": "Địa chỉ",
+                "area": "Diện tích số m2",
+                "description": "Mô tả chi tiết"
+            }},
+            "ai_reply": "Nội dung tin nhắn bạn đã soạn để gửi trực tiếp cho khách hàng"
+        }}
+        """
+        
+        # Cấu hình chuẩn xác camelCase và snake_case lồng nhau của Google REST API v1
+        # BƯỚC 1: Đưa yêu cầu JSON thẳng vào cấu trúc prompt hệ thống của Google
+        chat_payload = {
+            "contents": [
+                {
+                    "parts": [
+                        {
+                            "text": combined_prompt + "\n\nTUYỆT ĐỐI CHỈ TRẢ VỀ DỮ LIỆU ĐỊNH DẠNG JSON, KHÔNG CHỨA CÁC ĐÁM KÝ TỰ BAO BỌC KIỂU ```json VÀ KHÔNG VIẾT CHỮ NÀO NGOÀI KHỐI JSON."
+                        }
+                    ]
+                }
+            ]
+            # Đã xóa hoàn toàn khối generation_config gây lỗi 400
+        }
+        
+        print("📡 [AI] Đang gửi yêu cầu sang Gemini 1.5-Flash API...")
+        chat_response = requests.post(chat_url, headers=chat_headers, json=chat_payload, timeout=12)
+        chat_res_json = chat_response.json()
+        
+        if "candidates" in chat_res_json and chat_res_json["candidates"]:
+            raw_text = chat_res_json["candidates"][0]["content"]["parts"][0]["text"]
+            print("📩 [AI] Văn bản thô nhận từ Gemini:", raw_text)
             
-            # Cấu hình chuẩn xác camelCase và snake_case lồng nhau của Google REST API v1
-            # BƯỚC 1: Đưa yêu cầu JSON thẳng vào cấu trúc prompt hệ thống của Google
-            chat_payload = {
-                "contents": [
-                    {
-                        "parts": [
-                            {
-                                "text": combined_prompt + "\n\nTUYỆT ĐỐI CHỈ TRẢ VỀ DỮ LIỆU ĐỊNH DẠNG JSON, KHÔNG CHỨA CÁC ĐÁM KÝ TỰ BAO BỌC KIỂU ```json VÀ KHÔNG VIẾT CHỮ NÀO NGOÀI KHỐI JSON."
-                            }
-                        ]
-                    }
-                ]
-                # Đã xóa hoàn toàn khối generation_config gây lỗi 400
-            }
-            
-            print("📡 [AI] Đang gửi yêu cầu sang Gemini 1.5-Flash API...")
-            chat_response = requests.post(chat_url, headers=chat_headers, json=chat_payload, timeout=12)
-            chat_res_json = chat_response.json()
-            
-            if "candidates" in chat_res_json and chat_res_json["candidates"]:
-                raw_text = chat_res_json["candidates"][0]["content"]["parts"][0]["text"]
-                print("📩 [AI] Văn bản thô nhận từ Gemini:", raw_text)
+            try:
+                result_data = json.loads(raw_text.strip())
+                ai_reply = result_data.get("ai_reply", ai_reply)
+                action = result_data.get("action")
                 
-                try:
-                    result_data = json.loads(raw_text.strip())
-                    ai_reply = result_data.get("ai_reply", ai_reply)
-                    action = result_data.get("action")
-                    
-                    if action == "ADD_ROOM":
-                        print("-> Nhận diện hành động: THÊM PHÒNG TRỌ.")
-                        extracted = result_data.get("extracted_data", {})
-                        insert_room_to_db(extracted)
-                except Exception as json_parse_err:
-                    print("⚠ [AI] Phản hồi lỗi cấu trúc JSON, ép lấy văn bản thuần.")
-                    ai_reply = raw_text
-            else:
-                print("❌ [AI] Khối phản hồi Google lỗi hoặc trống rỗng:", chat_res_json)
-                
-        except Exception as general_error:
-            print("❌ [AI] Lỗi tổng quát trong luồng xử lý ngầm:", general_error)
+                if action == "ADD_ROOM":
+                    print("-> Nhận diện hành động: THÊM PHÒNG TRỌ.")
+                    extracted = result_data.get("extracted_data", {})
+                    insert_room_to_db(extracted)
+            except Exception as json_parse_err:
+                print("⚠ [AI] Phản hồi lỗi cấu trúc JSON, ép lấy văn bản thuần.")
+                ai_reply = raw_text
+        else:
+            print("❌ [AI] Khối phản hồi Google lỗi hoặc trống rỗng:", chat_res_json)
             
-        print(f"📤 [AI] Tiến hành bắn phản hồi về Zalo: {ai_reply}")
-
-        send_zalo_message(user_id, ai_reply)
+    except Exception as general_error:
+        print("❌ [AI] Lỗi tổng quát trong luồng xử lý ngầm:", general_error)
+        
+    print(f"📤 [AI] Tiến hành bắn phản hồi về Zalo: {ai_reply}")
+    send_zalo_message(user_id, ai_reply)
 
 # --- 6. WEBHOOK TIẾP NHẬN CHÍNH ---
 @app.post("/webhook/zalo")
