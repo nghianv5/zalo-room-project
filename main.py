@@ -391,9 +391,11 @@ YÊU CẦU XỬ LÝ:
             extracted = result_data.get("extracted_data", {})
             address = extracted.get("address")
             if address and address.strip().lower() not in ["null", "none", "chưa rõ địa chỉ", "chưa rõ"]:
+                print("upsert_room_to_db")
                 upsert_room_to_db(extracted, all_current_media)
             elif all_current_media:
                 add_pending_media(user_id, all_current_media)
+                print("add_pending_media")
 
         elif action == "SEARCH_ROOM" and found_rooms:
             # Lấy danh sách ảnh của các phòng tìm được trong CSDL để gửi đính kèm Zalo
