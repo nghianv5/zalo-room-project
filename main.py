@@ -52,10 +52,10 @@ except Exception as qdrant_init_error:
     print("❌ Lỗi khi khởi tạo kiểm tra Collection Qdrant:", qdrant_init_error)
 
 # --- 3. HÀM TẠO VECTOR EMBEDDING BẰNG GEMINI API ---
+# --- 3. HÀM TẠO VECTOR EMBEDDING BẰNG GEMINI API ---
 def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
     """
     Tạo Vector Embedding 768 chiều cho Qdrant DB sử dụng google-generativeai.
-    Cơ chế thử lại và tự động Fallback linh hoạt.
     """
     if not GEMINI_API_KEY:
         print("❌ [EMBEDDING] Thiếu GEMINI_API_KEY trong biến môi trường!")
@@ -63,9 +63,9 @@ def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
 
     for attempt in range(retries):
         try:
-            # Thử tạo embedding bằng mô hình text-embedding-004
+            # 1. Thử với model chính: text-embedding-004 (Bỏ tiền tố "models/")
             response = genai.embed_content(
-                model="models/text-embedding-004",
+                model="text-embedding-004",
                 content=text,
                 task_type="retrieval_document"
             )
@@ -73,15 +73,13 @@ def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
             if "embedding" in response and response["embedding"]:
                 return response["embedding"]
                 
-            print(f"⚠️ [EMBEDDING] Lần thử {attempt + 1} trống dữ liệu. Đang thử lại...")
-            
         except Exception as e:
             print(f"❌ [EMBEDDING] Lần thử {attempt + 1} lỗi ({e}). Đang thử fallback sang embedding-001...")
             
-            # Fallback tự động sang embedding-001 nếu model 004 bị từ chối
+            # 2. Fallback sang embedding-001 nếu lỗi
             try:
                 response = genai.embed_content(
-                    model="models/embedding-001",
+                    model="embedding-001",
                     content=text,
                     task_type="retrieval_document"
                 )
