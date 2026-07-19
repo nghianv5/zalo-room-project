@@ -42,15 +42,16 @@ except Exception as qdrant_init_error:
 # --- 2. HÀM TẠO VECTOR EMBEDDING BẰNG GEMINI API VỚI CƠ CHẾ RETRY ---
 def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
     """
-    Tạo Vector Embedding từ văn bản sử dụng mô hình text-embedding-004 qua API v1 chính thức.
-    Bổ sung cơ chế tự động thử lại nếu gặp lỗi nghẽn hoặc quota tạm thời từ Google.
+    Tạo Vector Embedding từ văn bản sử dụng mô hình text-embedding-004 qua API v1beta chính thức.
+    Sửa đổi endpoint thành v1beta để tránh lỗi 404 từ Google API.
     """
     api_key = os.environ.get("GEMINI_API_KEY")
     if not api_key:
         print("❌ [EMBEDDING] Thiếu GEMINI_API_KEY trong biến môi trường!")
         return None
         
-    url = f"https://generativelanguage.googleapis.com/v1/models/text-embedding-004:embedContent?key={api_key}"
+    # ĐỔI THÀNH v1beta để mô hình text-embedding-004 chạy mượt mà trên tài khoản Visa
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={api_key}"
     headers = {"Content-Type": "application/json"}
     payload = {
         "content": {"parts": [{"text": text}]},
