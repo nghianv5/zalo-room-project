@@ -17,8 +17,6 @@ import cloudinary.uploader
 app = FastAPI()
 
 # --- 0. BỘ NHỚ ĐỆM TẠM THỜI (PENDING MEDIA CACHE) ---
-# Dùng để lưu vết ảnh/video mà người dùng gửi trước nhưng chưa kèm địa chỉ.
-# Cấu trúc: { "user_id_123": { "urls": [...], "timestamp": 1710000000 } }
 PENDING_MEDIA_CACHE = {}
 CACHE_TTL_SECONDS = 600  # Bộ nhớ đệm tự hủy sau 10 phút nếu người dùng không nhắn tiếp
 
@@ -84,7 +82,6 @@ def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
 
-            # Lấy SERVER_DOMAIN từ Render hoặc biến môi trường
             server_domain = os.environ.get("SERVER_DOMAIN", "http://localhost:8000").rstrip("/")
             return f"{server_domain}/static/media/{filename}"
     except Exception as e:
@@ -140,7 +137,6 @@ def search_rooms_from_db(query_text: str):
 
 def upsert_room_to_db(room_data: dict, media_urls: list):
     address = room_data.get("address")
-    # Không lưu nếu bài đăng không có địa chỉ rõ ràng
     if not address or address.strip().lower() in ["chưa rõ địa chỉ", "chưa rõ", "none", "null"]:
         print("⚠️ [Qdrant] Hủy lưu phòng do thiếu địa chỉ cụ thể.")
         return False
@@ -204,20 +200,101 @@ def upsert_room_to_db(room_data: dict, media_urls: list):
         return False
 
 # --- 4. TƯƠNG TÁC ZALO OA API ---
-def send_zalo_message(user_id: str, ai_reply: str):
+def upload_image_to_zalo(image_url_or_path: str) -> str:
+    """
+    Tải file ảnh lên Zalo Server để lấy attachment_id dùng cho tin nhắn Media.
+    """
+    access_token = os.environ.get("ZALO_ACCESS_TOKEN")
+    if not access_token or not image_url_or_path:
+        return ""
+
+    url = "https://openapi.zalo.me/v2.0/oa/upload/image"
+    headers = {"access_token": access_token}
+
+    try:
+        if image_url_or_path.startswith("http"):
+            res = requests.get(image_url_or_path, timeout=10)
+            img_bytes = res.content
+        else:
+            with open(image_url_or_path, "rb") as f:
+                img_bytes = f.read()
+
+        files = {'file': ('image.jpg', img_bytes, 'image/jpeg')}
+        response = requests.post(url, headers=headers, files=files, timeout=15)
+        res_data = response.json()
+
+        if res_data.get("error") == 0:
+            attachment_id = res_data.get("data", {}).get("attachment_id", "")
+            print(f"✅ [ZALO UPLOAD] Thành công attachment_id: {attachment_id}")
+            return attachment_id
+        else:
+            print(f"❌ [ZALO UPLOAD ERROR]: {res_data.get('message')}")
+    except Exception as e:
+        print("❌ [ZALO UPLOAD EXCEPTION]:", e)
+
+    return ""
+
+def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
+    """
+    Gửi tin nhắn Zalo:
+    - Nếu không có media_urls: Gửi tin nhắn văn bản thông thường.
+    - Nếu có media_urls: Tải ảnh đầu tiên lên Zalo và gửi tin nhắn đính kèm hiển thị khung ảnh trực tiếp.
+    """
     access_token = os.environ.get("ZALO_ACCESS_TOKEN")
     if not access_token:
         return False
 
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
-    headers = {"Content-Type": "application/json", "access_token": access_token}
-    payload = {"recipient": {"user_id": user_id}, "message": {"text": ai_reply}}
+    headers = {
+        "Content-Type": "application/json",
+        "access_token": access_token
+    }
+
+    # Kiểm tra xem có hình ảnh để gửi đính kèm không
+    attachment_id = None
+    if media_urls and len(media_urls) > 0:
+        # Lấy hình ảnh đầu tiên để hiển thị làm khung đính kèm
+        attachment_id = upload_image_to_zalo(media_urls[0])
+
+    # Nếu upload ảnh thành công, gửi theo cấu trúc Template Media
+    if attachment_id:
+        payload = {
+            "recipient": {"user_id": user_id},
+            "message": {
+                "text": ai_reply,
+                "attachment": {
+                    "type": "template",
+                    "payload": {
+                        "template_type": "media",
+                        "elements": [
+                            {
+                                "media_type": "image",
+                                "attachment_id": attachment_id
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    else:
+        # Nếu không có ảnh hoặc upload thất bại, gửi tin nhắn văn bản thông thường
+        payload = {
+            "recipient": {"user_id": user_id},
+            "message": {"text": ai_reply}
+        }
 
     try:
-        res = requests.post(url, headers=headers, json=payload, timeout=10).json()
-        return res.get("error") == 0
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        res_data = response.json()
+
+        if res_data.get("error") == 0:
+            print("✨ [ZALO SUCCESS]: Đã gửi tin nhắn thành công!")
+            return True
+        else:
+            print(f"❌ [ZALO ERROR]: {res_data.get('message')}")
+            return False
     except Exception as e:
-        print("❌ [Zalo Send Error]:", e)
+        print("❌ [ZALO CRITICAL ERROR]:", e)
         return False
 
 # --- 5. HÀM QUẢN LÝ PENDING MEDIA CACHE ---
@@ -225,7 +302,6 @@ def get_and_clear_pending_media(user_id: str) -> list:
     """Lấy danh sách media đang chờ của user và xóa bộ nhớ đệm."""
     if user_id in PENDING_MEDIA_CACHE:
         cached_data = PENDING_MEDIA_CACHE.pop(user_id)
-        # Nếu chưa quá 10 phút thì nhận
         if time.time() - cached_data["timestamp"] <= CACHE_TTL_SECONDS:
             return cached_data["urls"]
     return []
@@ -260,11 +336,13 @@ def process_zalo_ai_logic(user_id: str, message_text: str, media_items: list):
     if not message_text.strip() and all_current_media:
         add_pending_media(user_id, all_current_media)
         reply = f"📸 Em đã nhận {len(all_current_media)} hình ảnh/video của bạn rồi ạ!\n\n👉 Bạn vui lòng gửi thêm địa chỉ cụ thể (và thông tin giá, tiện ích...) để em hoàn tất đăng bài nhé!"
-        send_zalo_message(user_id, reply)
+        # TRUYỀN media_urls ĐỂ KHÁCH HÀNG THẤY LẠI KHUNG XEM TRƯỚC VỪA GỬI
+        send_zalo_message(user_id, reply, media_urls=all_current_media)
         return
 
     # Trường hợp 2: Có tin nhắn văn bản
     ai_reply = "🤖 Trợ lý AI đang xử lý thông tin, vui lòng chờ giây lát!"
+    urls_to_send = all_current_media  # Mặc định gửi danh sách media vừa gửi
 
     try:
         found_rooms = []
@@ -329,10 +407,19 @@ YÊU CẦU XỬ LÝ:
                 if all_current_media:
                     add_pending_media(user_id, all_current_media)
 
+        elif action == "SEARCH_ROOM" and found_rooms:
+            # Nếu khách tìm phòng và có kết quả -> Ưu tiên lấy media từ phòng tìm được trong CSDL để phản hồi
+            db_media = []
+            for room in found_rooms:
+                db_media.extend(room.get("media_urls", []))
+            if db_media:
+                urls_to_send = db_media
+
     except Exception as err:
         print("❌ [AI Logic Error]:", err)
 
-    send_zalo_message(user_id, ai_reply)
+    # TRUYỀN DỮ LIỆU MEDIA ĐÃ QUA LỌC VÀO HÀM GỬI ZALO
+    send_zalo_message(user_id, ai_reply, media_urls=urls_to_send)
 
 # --- 7. WEBHOOK RECEIVER ---
 @app.post("/webhook/zalo")
