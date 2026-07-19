@@ -217,10 +217,12 @@ def send_zalo_message(user_id: str, ai_reply: str):
         res_data = response.json()
         
         print(f"📡 [ZALO API RESPONSE]: {res_data}")
-        if res_data.get("error") != 0:
-            print(f"❌ [ZALO ERROR]: Gửi tin thất bại. Mã lỗi: {res_data.get('error')} - Lý do: {res_data.get('message')}")
-        else:
+        if response_json.get("error") == 0:
             print("✨ [ZALO SUCCESS]: Đã bắn tin nhắn thành công tới người dùng!")
+            return True
+        else:
+            print(f"❌ [ZALO ERROR]: Gửi tin nhắn thất bại! Lỗi: {response_json.get('message')}")
+            return False
             
         return res_data
     except Exception as e:
