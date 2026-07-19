@@ -340,3 +340,34 @@ def zalo_webhook(request_data: dict, background_tasks: BackgroundTasks):
         print("❌ Lỗi tiếp nhận webhook đầu vào:", e)
         
     return {"status": "success"}
+    
+@app.get("/check-models")
+def check_gemini_models():
+    api_key = os.environ.get("GEMINI_API_KEY")
+    if not api_key:
+        return {"error": "Thiếu GEMINI_API_KEY"}
+    
+    # Gọi trực tiếp REST API hỏi Google xem Key này dùng được những Model nào
+    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
+    try:
+        res = requests.get(url, timeout=10)
+        data = res.json()
+        
+        # Lọc ra danh sách các model hỗ trợ embedContent
+        embed_models = []
+        if "models" in data:
+            for m in data["models"]:
+                methods = m.get("supportedGenerationMethods", [])
+                if "embedContent" in methods or "batchEmbedContents" in methods:
+                    embed_models.append({
+                        "name": m.get("name"),
+                        "displayName": m.get("displayName"),
+                        "methods": methods
+                    })
+        return {
+            "total_models_found": len(data.get("models", [])),
+            "available_embedding_models": embed_models,
+            "raw_response": data
+        }
+    except Exception as e:
+        return {"error": str(e)}
