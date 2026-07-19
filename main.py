@@ -409,3 +409,40 @@ YÊU CẦU XỬ LÝ:
 
     # Gửi tin nhắn trả lời hoàn chỉnh kèm hình ảnh (nếu có)
     send_zalo_message(user_id, ai_reply, media_urls=urls_to_send)
+
+# --- 7. WEBHOOK RECEIVER ---
+@app.post("/webhook/zalo")
+async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
+    try:
+        data = await request.json()
+        event_name = str(data.get("event_name", "")).strip()
+        sender_id = data.get("user_id_by_app") or data.get("sender", {}).get("id")
+
+        if not sender_id:
+            return {"status": "ignored"}
+
+        if "user_follow_oa" in event_name:
+            send_zalo_message(sender_id, "👋 Chào mừng bạn! Gửi thông tin hoặc hình ảnh phòng trọ để bắt đầu nhé!")
+            return {"status": "success"}
+
+        if event_name in ["user_send_text", "user_send_image", "user_send_file", "user_send_video"]:
+            message_obj = data.get("message", {})
+            text = message_obj.get("text", "")
+
+            attachments = message_obj.get("attachments", [])
+            media_items = []
+            for item in attachments:
+                payload = item.get("payload", {})
+                media_url = payload.get("url") or payload.get("thumbnailUrl")
+                if media_url:
+                    media_items.append({
+                        "url": media_url,
+                        "is_video": (item.get("type") == "video") or ("user_send_video" in event_name)
+                    })
+
+            background_tasks.add_task(process_zalo_ai_logic, sender_id, text, media_items)
+
+    except Exception as e:
+        print("❌ [Webhook Error]:", e)
+
+    return {"status": "success"}
