@@ -150,7 +150,7 @@ def upsert_room_to_db(room_data: dict, media_urls: list):
         if existing_points and len(existing_points) > 0:
             existing_media = existing_points[0].payload.get("media_urls", [])
     except Exception:
-        pass
+        print("❌ [Qdrant Upsert Error]:", Exception)
 
     all_media_urls = list(dict.fromkeys(existing_media + media_urls))
 
