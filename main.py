@@ -3,87 +3,133 @@ import json
 import requests
 import uuid
 import time
+import urllib.parse
 from fastapi import FastAPI, Request, BackgroundTasks
-from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
-from config import Config
-import google.generativeai as genai
+from google import genai
+from google.genai import types
+
+# Tích hợp Cloudinary để lưu media vĩnh viễn
+import cloudinary
+import cloudinary.uploader
 
 app = FastAPI()
 
-# --- 1. CẤU HÌNH VÀ KHỞI TẠO GEMINI API ---
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+# --- 0. TẠO THƯ MỤC VÀ MOUNT STATIC FILES (LƯU VĨNH VIỄN NỘI BỘ NẾU KHÔNG DÙNG CLOUD) ---
+MEDIA_DIR = "static/media"
+os.makedirs(MEDIA_DIR, exist_ok=True)
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# Khởi tạo mô hình Gemini Chat / Bóc tách dữ liệu
-gemini_model = genai.GenerativeModel("gemini-2.5-flash")
+# Cấu hình Cloudinary nếu có biến môi trường CLOUDINARY_URL
+CLOUDINARY_URL = os.environ.get("CLOUDINARY_URL")
+if CLOUDINARY_URL:
+    cloudinary.config(cloudinary_url=CLOUDINARY_URL)
+    print("✅ [MEDIA] Đã cấu hình Cloudinary thành công!")
+else:
+    print("⚠️ [MEDIA] Không tìm thấy CLOUDINARY_URL. Sử dụng lưu trữ nội bộ (/static/media/).")
+
+# --- 1. CẤU HÌNH VÀ KHỞI TẠO SDK GEMINI MỚI ---
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+
+COLLECTION_NAME = "rooms_v5"
 
 @app.get("/")
 async def root():
-    return {"status": "running", "message": "Zalo Room Chatbot AI is active!"}
+    return {"status": "running", "message": "Zalo Property Management Chatbot is active!"}
 
-# Tên bảng lưu trữ phòng trọ trên Qdrant
-COLLECTION_NAME = "rooms_v3"
-
-# --- 2. KHỞI TẠO CÁC KẾT NỐI (QDRANT CLOUD) ---
+# --- 2. KHỞI TẠO CẤU TRÚC KẾT NỐI QDRANT CLOUD ---
 qdrant_client = QdrantClient(
     url=os.environ.get("QDRANT_URL"),
     api_key=os.environ.get("QDRANT_API_KEY")
 )
 
-# Khởi tạo bảng với size=768
 try:
     if not qdrant_client.collection_exists(collection_name=COLLECTION_NAME):
-        print(f"⚠ Không tìm thấy collection '{COLLECTION_NAME}'. Đang tạo mới...")
+        print(f"⚠️ Không tìm thấy collection '{COLLECTION_NAME}'. Đang tạo mới...")
         qdrant_client.create_collection(
             collection_name=COLLECTION_NAME,
             vectors_config=VectorParams(
-                size=768,  
+                size=768,
                 distance=Distance.COSINE
             )
         )
         print(f"✅ Tạo thành công collection '{COLLECTION_NAME}' (768 dims)!")
 except Exception as qdrant_init_error:
-    print("❌ Lỗi khi khởi tạo kiểm tra Collection Qdrant:", qdrant_init_error)
+    print("❌ Lỗi khi khởi tạo Collection Qdrant:", qdrant_init_error)
 
-# --- 3. HÀM TẠO VECTOR EMBEDDING BẰNG GEMINI API ---
-GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
+# --- 3. HÀM TẢI VÀ LƯU HÌNH CỐ ĐỊNH (PERMANENT MEDIA STORAGE) ---
+def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
+    """
+    Tải file từ link Zalo tạm thời và lưu lên Cloudinary hoặc Server nội bộ.
+    Trả về URL cố định vĩnh viễn.
+    """
+    if not zalo_media_url:
+        return ""
 
+    resource_type = "video" if is_video else "image"
+
+    # Cách 1: Upload thẳng lên Cloudinary nếu đã cấu hình
+    if CLOUDINARY_URL:
+        try:
+            res = cloudinary.uploader.upload(
+                zalo_media_url,
+                resource_type=resource_type,
+                folder="zalo_room_media"
+            )
+            permanent_url = res.get("secure_url")
+            print(f"☁️ [Cloudinary Upload] Thành công: {permanent_url}")
+            return permanent_url
+        except Exception as e:
+            print(f"❌ [Cloudinary Error] Lỗi upload lên Cloud, chuyển sang lưu nội bộ: {e}")
+
+    # Cách 2: Tải về và lưu trữ tại Server cục bộ (Static folder)
+    try:
+        response = requests.get(zalo_media_url, timeout=15, stream=True)
+        if response.status_code == 200:
+            ext = ".mp4" if is_video else ".jpg"
+            filename = f"{uuid.uuid4().hex}{ext}"
+            filepath = os.path.join(MEDIA_DIR, filename)
+
+            with open(filepath, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+            # Thay SERVER_DOMAIN bằng domain public của bạn (ví dụ: ngrok hoặc domain VPS)
+            server_domain = os.environ.get("SERVER_DOMAIN", "http://localhost:8000")
+            local_url = f"{server_domain}/static/media/{filename}"
+            print(f"💾 [Local Saved] Thành công: {local_url}")
+            return local_url
+    except Exception as e:
+        print(f"❌ [Local Save Error] Không thể tải file từ Zalo: {e}")
+
+    # Fallback: Trả về URL Zalo nguyên bản nếu cả 2 phương án thất bại
+    return zalo_media_url
+
+# --- 4. HÀM EMBEDDING VÀ DATABASE QDRANT ---
 def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
-    """
-    Tạo Vector Embedding sử dụng model gemini-embedding-001 chính xác từ API Key.
-    """
-    if not GEMINI_API_KEY:
-        print("❌ [EMBEDDING] Thiếu GEMINI_API_KEY!")
+    if not GEMINI_API_KEY or not text or not text.strip():
         return None
 
-    # Dùng chuẩn model: gemini-embedding-001
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
-    
     payload = {
         "model": "models/gemini-embedding-001",
-        "content": {
-            "parts": [
-                {"text": text}
-            ]
-        }
+        "content": {"parts": [{"text": text}]}
     }
 
     for attempt in range(retries):
         try:
-            if not text or not text.strip():
-                return None
-
             response = requests.post(url, headers=headers, json=payload, timeout=10)
             res_json = response.json()
 
-            # Lấy danh sách giá trị vector trả về
             if "embedding" in res_json and "values" in res_json["embedding"]:
                 return res_json["embedding"]["values"]
-            
-            print(f"⚠️ [EMBEDDING] Lần thử {attempt + 1} phản hồi: {res_json}")
-
+            if "embeddings" in res_json and len(res_json["embeddings"]) > 0:
+                if "values" in res_json["embeddings"][0]:
+                    return res_json["embeddings"][0]["values"]
         except Exception as e:
             print(f"❌ [EMBEDDING] Lỗi kết nối lần {attempt + 1}: {e}")
 
@@ -92,274 +138,263 @@ def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
 
     return None
 
+def generate_room_id(address: str, room_name: str) -> str:
+    unique_string = f"addr:{address.strip().lower()}_room:{room_name.strip().lower()}"
+    return str(uuid.uuid5(uuid.NAMESPACE_DNS, unique_string))
 
-# --- 4. CÁC HÀM XỬ LÝ DATABASE QDRANT ---
 def search_rooms_from_db(query_text: str):
     query_vector = get_text_embedding(query_text)
     if not query_vector:
-        print("⚠️ [Qdrant Search] Không thể tạo embedding cho nội dung tìm kiếm.")
         return []
-        
+
     try:
         response = qdrant_client.query_points(
             collection_name=COLLECTION_NAME,
             query=query_vector,
-            limit=3
+            limit=4
         )
-        
-        rooms = []
-        for point in response.points:
-            if point.payload:
-                rooms.append(point.payload)
-        return rooms
+        return [point.payload for point in response.points if point.payload]
     except Exception as e:
         print("❌ Lỗi khi truy vấn Qdrant:", e)
         return []
 
-def insert_room_to_db(room_data: dict):
-    print(f"📥 [Qdrant] Tiến hành thêm phòng mới vào DB: {room_data}")
+def upsert_room_to_db(room_data: dict, media_urls: list):
+    address = room_data.get("address") or "Chưa rõ địa chỉ"
+    room_name = room_data.get("room_name") or "Phòng mặc định"
+
+    point_id = generate_room_id(address, room_name)
+
+    # Nếu phòng đã tồn tại, ghép thêm các media_urls mới vào danh sách cũ
+    existing_media = []
     try:
-        description = f"Phòng trọ tại {room_data.get('address', 'Chưa rõ địa chỉ')}. " \
-                      f"Giá: {room_data.get('price', 'Chưa rõ giá')}. " \
-                      f"Diện tích: {room_data.get('area', 'Chưa rõ')} m2. " \
-                      f"Mô tả chi tiết: {room_data.get('description', '')}"
-                      
-        vector = get_text_embedding(description)
-        if not vector:
-            print("❌ [Qdrant] Không thể tạo embedding cho phòng mới sau nhiều lần thử, hủy lưu!")
-            return False
-            
-        point_id = str(uuid.uuid4())
-        
+        existing_points = qdrant_client.retrieve(collection_name=COLLECTION_NAME, ids=[point_id])
+        if existing_points and len(existing_points) > 0:
+            existing_media = existing_points[0].payload.get("media_urls", [])
+    except Exception:
+        pass
+
+    # Gộp danh sách ảnh/video không trùng lặp
+    all_media_urls = list(dict.fromkeys(existing_media + media_urls))
+
+    search_context = (
+        f"Phòng {room_name} tại địa chỉ {address}. "
+        f"Giá thuê: {room_data.get('price', 'Chưa rõ')}. "
+        f"Tầng: {room_data.get('floor', 'Chưa rõ')}. "
+        f"Khép kín: {room_data.get('is_closed')}. "
+        f"Tiện ích: Điều hòa ({room_data.get('has_air_conditioner')}), Nóng lạnh ({room_data.get('has_water_heater')}), Máy giặt ({room_data.get('has_washing_machine')}). "
+        f"Cho nuôi chó mèo: {room_data.get('allow_pets')}. "
+        f"Ban công: {room_data.get('has_balcony')}, Cửa sổ: {room_data.get('has_window')}. "
+        f"Ngày vào ở: {room_data.get('available_date')}. "
+        f"Mô tả thêm: {room_data.get('description', '')}"
+    )
+
+    vector = get_text_embedding(search_context)
+    if not vector:
+        print("❌ [Qdrant] Hủy cập nhật do không tạo được vector embedding!")
+        return False
+
+    payload = {
+        "address": address,
+        "room_name": room_name,
+        "floor": room_data.get("floor"),
+        "price": room_data.get("price"),
+        "is_closed": room_data.get("is_closed"),
+        "amenities": {
+            "has_air_conditioner": room_data.get("has_air_conditioner", False),
+            "has_water_heater": room_data.get("has_water_heater", False),
+            "has_washing_machine": room_data.get("has_washing_machine", False)
+        },
+        "allow_pets": room_data.get("allow_pets"),
+        "media_urls": all_media_urls,
+        "available_date": room_data.get("available_date"),
+        "has_balcony": room_data.get("has_balcony"),
+        "has_window": room_data.get("has_window"),
+        "description": room_data.get("description", ""),
+        "updated_at": int(time.time())
+    }
+
+    try:
         qdrant_client.upsert(
             collection_name=COLLECTION_NAME,
             points=[
                 PointStruct(
                     id=point_id,
                     vector=vector,
-                    payload=room_data
+                    payload=payload
                 )
             ]
         )
-        print(f"✅ [Qdrant] Đã lưu phòng mới thành công với ID: {point_id}")
+        print(f"✅ [Qdrant] Upsert thành công phòng '{room_name}' - Tổng media: {len(all_media_urls)}")
         return True
     except Exception as e:
-        print("❌ [Qdrant] Lỗi khi thêm phòng trọ vào cơ sở dữ liệu:", e)
+        print("❌ [Qdrant] Lỗi khi Upsert phòng trọ:", e)
         return False
 
-# --- 5. CÁC HÀM GIA HẠN VÀ GỬI TIN NHẮN ZALO ---
-def refresh_zalo_access_token():
-    url = "https://oauth.zalo.me/v3.0/oa/access_token"
-    headers = {
-        "Content-Type": "application/x-www-form-urlencoded",
-        "secret_key": Config.SECRET_KEY
-    }
-    payload = {
-        "app_id": Config.APP_ID,
-        "grant_type": "refresh_token",
-        "refresh_token": os.environ.get("ZALO_REFRESH_TOKEN")
-    }
-    try:
-        response = requests.post(url, headers=headers, data=payload)
-        try:
-            res_data = response.json()
-        except Exception:
-            print(f"❌ Zalo OAuth không trả về JSON. Mã: {response.status_code}.")
-            return None
-
-        if "access_token" in res_data:
-            os.environ["ZALO_ACCESS_TOKEN"] = res_data["access_token"]
-            if "refresh_token" in res_data:
-                os.environ["ZALO_REFRESH_TOKEN"] = res_data["refresh_token"]
-            print("🔄 Tự động gia hạn Zalo Access Token thành công!")
-            return res_data["access_token"]
-        else:
-            print("❌ Lỗi từ Zalo OAuth JSON:", res_data)
-            return None
-    except Exception as e:
-        print("❌ Lỗi kết nối khi cố gắng gia hạn Token:", e)
-        return None
-
-def send_pure_text(recipient_id: str, text: str):
-    token = os.environ.get("ZALO_ACCESS_TOKEN")
-    url = "https://openapi.zalo.me/v3.0/oa/message/cs"
-    headers = {"access_token": token, "Content-Type": "application/json"}
-    payload = {
-        "recipient": {"user_id": recipient_id},
-        "message": {"text": text}
-    }
-    try:
-        response = requests.post(url, headers=headers, json=payload)
-        return response.json()
-    except Exception as e:
-        print("Lỗi gửi text thuần:", e)
-        return None
-
+# --- 5. TƯƠNG TÁC ZALO OA API ---
 def send_zalo_message(user_id: str, ai_reply: str):
     access_token = os.environ.get("ZALO_ACCESS_TOKEN")
     if not access_token:
-        print("❌ [ZALO] Thiếu Zalo Access Token trong biến môi trường!")
-        return None
-        
+        print("❌ [ZALO] Thiếu ZALO_ACCESS_TOKEN!")
+        return False
+
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
     headers = {
         "Content-Type": "application/json",
         "access_token": access_token
     }
-    
     payload = {
         "recipient": {"user_id": user_id},
         "message": {"text": ai_reply}
     }
 
     try:
-        response = requests.post(url, headers=headers, json=payload)
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
         res_data = response.json()
-        
-        print(f"📡 [ZALO API RESPONSE]: {res_data}")
-        if response_json.get("error") == 0:
-            print("✨ [ZALO SUCCESS]: Đã bắn tin nhắn thành công tới người dùng!")
+
+        if res_data.get("error") == 0:
+            print("✨ [ZALO SUCCESS]: Đã nhắn tin cho người dùng thành công!")
             return True
         else:
-            print(f"❌ [ZALO ERROR]: Gửi tin nhắn thất bại! Lỗi: {response_json.get('message')}")
+            print(f"❌ [ZALO ERROR]: Gửi tin thất bại: {res_data.get('message')}")
             return False
-            
-        return res_data
     except Exception as e:
-        print("❌ [ZALO CRITICAL ERROR]: Không thể kết nối đến API Zalo:", e)
-        return None
+        print("❌ [ZALO CRITICAL ERROR]: Lỗi kết nối API Zalo:", e)
+        return False
 
-# --- 6. LUỒNG XỬ LÝ CHẠY NGẦM BẰNG GEMINI SDK CHUẨN ---
-def process_zalo_ai_logic(user_id: str, message_text: str):
-    print(f"🔄 [AI] Bắt đầu xử lý luồng chạy ngầm cho User: {user_id}")
-    ai_reply = "🤖 Trợ lý AI đang bận xử lý hệ thống, bạn vui lòng đợi vài giây rồi nhắn lại nhé!" 
-    
+# --- 6. LUỒNG XỬ LÝ AI ---
+def process_zalo_ai_logic(user_id: str, message_text: str, media_items: list):
+    """
+    media_items: Danh sách dict chứa {'url': ..., 'is_video': True/False}
+    """
+    print(f"🔄 [AI processing] User: {user_id} | Text: '{message_text}' | Raw Media Items: {len(media_items)}")
+
+    # Bước 1: Tải và lưu vĩnh viễn tất cả file Media
+    permanent_media_urls = []
+    for item in media_items:
+        saved_url = save_media_file(item["url"], is_video=item.get("is_video", False))
+        if saved_url:
+            permanent_media_urls.append(saved_url)
+
+    ai_reply = "🤖 Trợ lý AI đang xử lý thông tin, vui lòng chờ trong giây lát!"
+
     try:
         found_rooms = []
-        
-        # Chỉ truy vấn tìm phòng nếu tin nhắn không phải chào hỏi thông thường
-        if not any(kw in message_text.lower() for kw in ["chào", "hi", "hello", "bắt đầu"]):
+        is_greeting = any(kw in message_text.lower() for kw in ["chào", "hi", "hello", "bắt đầu"])
+
+        if not is_greeting and message_text.strip():
             found_rooms = search_rooms_from_db(message_text)
-        
-        combined_prompt = f"""
-Bạn là trợ lý ảo thông minh của Hệ thống Zalo OA Tư vấn phòng trọ. 
-Nhiệm vụ của bạn là phân tích tin nhắn của khách và chuẩn bị phản hồi phù hợp.
 
-Tin nhắn của khách: "{message_text}"
-Dữ liệu phòng tìm thấy trong Database (nếu có): {json.dumps(found_rooms, ensure_ascii=False)}
+        system_prompt = f"""
+Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ chuyên nghiệp trên Zalo.
+Hãy phân tích tin nhắn người dùng và dữ liệu liên quan để trả về kết quả JSON.
 
-Hãy thực hiện 2 việc:
-1. Phân loại hành động ("action") thành "ADD_ROOM" (nếu muốn đăng/cho thuê phòng) hoặc "SEARCH_ROOM" (nếu muốn tìm/hỏi phòng).
-2. Soạn nội dung phản hồi ("ai_reply"):
-   - Nếu là "ADD_ROOM": Xác nhận ghi nhận thành công và hiển thị lại các thông số bạn bóc tách được (Địa chỉ, Giá, Diện tích, Mô tả).
-   - Nếu là "SEARCH_ROOM": Dựa trên danh sách từ database để soạn câu trả lời ngắn gọn, lịch sự, có đầy đủ xuống dòng. Nếu không tìm thấy phòng thích hợp, hãy báo hết phòng khéo léo và xin thông tin để liên hệ lại sau.
+Tin nhắn gửi tới: "{message_text}"
+Danh sách URL đính kèm (Hình ảnh/Video đã lưu vĩnh viễn): {json.dumps(permanent_media_urls)}
+Dữ liệu phòng tìm thấy trong CSDL: {json.dumps(found_rooms, ensure_ascii=False)}
 
-HÃY TRẢ VỀ ĐỊNH DẠNG JSON NGHIÊM NGẶT THEO MẪU SAU, KHÔNG ĐƯỢC CHỨA CÁC ĐÁM KÝ TỰ BAO BỌC KIỂU ```json VÀ TUYỆT ĐỐI KHÔNG VIẾT CHỮ NÀO NGOÀI KHỐI JSON:
+YÊU CẦU XỬ LÝ:
+1. Xác định "action": 
+   - "ADD_ROOM": Nếu người dùng đăng bài phòng trọ, cho thuê hoặc bổ sung thêm ảnh/video/thông tin phòng.
+   - "SEARCH_ROOM": Nếu người dùng đang đi tìm phòng, hỏi thông tin phòng trọ.
+
+2. Nếu là "ADD_ROOM", trích xuất đủ 11 thông số sau vào object "extracted_data":
+   - "address": Địa chỉ cụ thể (String)
+   - "room_name": Tên phòng / Mã phòng / Tên tòa nhà (String)
+   - "floor": Tầng số mấy (String/Null)
+   - "price": Giá thuê (String)
+   - "is_closed": Phòng khép kín có WC riêng không (Boolean)
+   - "has_air_conditioner": Có điều hòa không (Boolean)
+   - "has_water_heater": Có bình nóng lạnh không (Boolean)
+   - "has_washing_machine": Có máy giặt không (Boolean)
+   - "allow_pets": Cho phép nuôi chó mèo không (Boolean)
+   - "available_date": Thời gian khách vào ở được (String/Null)
+   - "has_balcony": Có ban công không (Boolean)
+   - "has_window": Có cửa sổ không (Boolean)
+   - "description": Tóm tắt các mô tả thêm khác (String)
+
+3. Soạn nội dung "ai_reply":
+   - Ngắn gọn, dùng emoji sinh động.
+   - Với "ADD_ROOM": Xác nhận đã đăng/cập nhật thông tin phòng thành công, tóm tắt thông số và thông báo đã nhận đủ ảnh/video.
+   - Với "SEARCH_ROOM": Tổng hợp danh sách phòng tìm thấy trong CSDL kèm địa chỉ, giá, các tiện ích nổi bật và các link ảnh/video xem phòng.
+
+ĐỊNH DẠNG BẮT BUỘC TRẢ VỀ (JSON duy nhất):
 {{
     "action": "ADD_ROOM" hoặc "SEARCH_ROOM",
-    "extracted_data": {{
-        "title": "Tiêu đề phòng",
-        "price": "Giá",
-        "address": "Địa chỉ",
-        "area": "Diện tích số m2",
-        "description": "Mô tả chi tiết"
-    }},
-    "ai_reply": "Nội dung tin nhắn bạn đã soạn để gửi trực tiếp cho khách hàng"
+    "extracted_data": {{ ... các trường thuộc tính ... }},
+    "ai_reply": "Câu trả lời soạn sẵn cho khách"
 }}
 """
-        
-        print("📡 [AI] Đang gửi yêu cầu sang Gemini API...")
-        
-        # Gọi Gemini qua SDK chính thức thay vì dùng requests.post thủ công
-        response = gemini_model.generate_content(
-            combined_prompt,
-            generation_config={"response_mime_type": "application/json"}
-        )
-        
-        raw_text = response.text
-        print("📩 [AI] Văn bản thô nhận từ Gemini:", raw_text)
-        
-        try:
-            clean_text = raw_text.strip()
-            if clean_text.startswith("```json"):
-                clean_text = clean_text[7:]
-            if clean_text.endswith("```"):
-                clean_text = clean_text[:-3]
-            
-            result_data = json.loads(clean_text.strip())
-            ai_reply = result_data.get("ai_reply", ai_reply)
-            action = result_data.get("action")
-            
-            if action == "ADD_ROOM":
-                print("-> Nhận diện hành động: THÊM PHÒNG TRỌ.")
-                extracted = result_data.get("extracted_data", {})
-                insert_room_to_db(extracted)
-        except Exception as json_parse_err:
-            print("⚠ [AI] Phản hồi lỗi cấu trúc JSON, ép lấy văn bản thuần:", json_parse_err)
-            ai_reply = raw_text
 
-    except Exception as general_error:
-        print("❌ [AI] Lỗi tổng quát trong luồng xử lý ngầm:", general_error)
-        
-    print(f"📤 [AI] Tiến hành bắn phản hồi về Zalo: {ai_reply}")
+        response = gemini_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=system_prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json"
+            )
+        )
+
+        raw_text = response.text.strip()
+        if raw_text.startswith("```json"):
+            raw_text = raw_text[7:]
+        if raw_text.endswith("```"):
+            raw_text = raw_text[:-3]
+
+        result_data = json.loads(raw_text.strip())
+        ai_reply = result_data.get("ai_reply", ai_reply)
+        action = result_data.get("action")
+
+        if action == "ADD_ROOM":
+            extracted = result_data.get("extracted_data", {})
+            upsert_room_to_db(extracted, permanent_media_urls)
+
+    except Exception as err:
+        print("❌ [AI Logic Error]:", err)
+
     send_zalo_message(user_id, ai_reply)
 
-# --- 7. WEBHOOK TIẾP NHẬN CHÍNH ---
+# --- 7. WEBHOOK RECEIVER CHÍNH ---
 @app.post("/webhook/zalo")
-def zalo_webhook(request_data: dict, background_tasks: BackgroundTasks):
+async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
     try:
-        event_name = str(request_data.get("event_name", "")).strip()
-        
-        # SỰ KIỆN 1: Khách nhấn Quan tâm OA
+        data = await request.json()
+        event_name = str(data.get("event_name", "")).strip()
+        sender_id = data.get("user_id_by_app") or data.get("sender", {}).get("id")
+
+        if not sender_id:
+            return {"status": "ignored", "reason": "No sender ID"}
+
+        # SỰ KIỆN 1: Quan tâm OA
         if "user_follow_oa" in event_name:
-            recipient_id = request_data.get("sender", {}).get("id")
-            if recipient_id:
-                welcome_text = "👋 Chào mừng bạn đến với Hệ Thống Tư Vấn Phòng Trọ Tự Động. Hãy gõ nhu cầu phòng trọ hoặc thông tin phòng cho thuê của bạn để trợ lý AI hỗ trợ nhé!"
-                send_pure_text(recipient_id, welcome_text)
+            welcome_text = "👋 Chào mừng bạn! Trợ lý AI sẵn sàng hỗ trợ bạn tìm phòng trọ hoặc đăng bài cho thuê phòng kèm ảnh/video nhé!"
+            send_zalo_message(sender_id, welcome_text)
             return {"status": "success"}
-            
-        # SỰ KIỆN 2: Khách nhắn tin chữ / Bấm nút chức năng
-        if "user_send_text" in event_name:
-            user_id = request_data.get("user_id_by_app") or request_data.get("sender", {}).get("id")
-            user_message = request_data.get("message", {}).get("text", "")
-            
-            print(f"📥 -> Nhận tin nhắn từ khách hàng: {user_message}")
-            
-            if user_id and user_message:
-                background_tasks.add_task(process_zalo_ai_logic, user_id, user_message)
-                    
-    except Exception as e:
-        print("❌ Lỗi tiếp nhận webhook đầu vào:", e)
-        
-    return {"status": "success"}
-    
-@app.get("/check-models")
-def check_gemini_models():
-    api_key = os.environ.get("GEMINI_API_KEY")
-    if not api_key:
-        return {"error": "Thiếu GEMINI_API_KEY"}
-    
-    # Gọi trực tiếp REST API hỏi Google xem Key này dùng được những Model nào
-    url = f"https://generativelanguage.googleapis.com/v1beta/models?key={api_key}"
-    try:
-        res = requests.get(url, timeout=10)
-        data = res.json()
-        
-        # Lọc ra danh sách các model hỗ trợ embedContent
-        embed_models = []
-        if "models" in data:
-            for m in data["models"]:
-                methods = m.get("supportedGenerationMethods", [])
-                if "embedContent" in methods or "batchEmbedContents" in methods:
-                    embed_models.append({
-                        "name": m.get("name"),
-                        "displayName": m.get("displayName"),
-                        "methods": methods
+
+        # SỰ KIỆN 2: Nhắn tin văn bản hoặc đính kèm Ảnh / Video / File
+        if event_name in ["user_send_text", "user_send_image", "user_send_file", "user_send_video"]:
+            message_obj = data.get("message", {})
+            text = message_obj.get("text", "")
+
+            # Bóc tách danh sách Media items
+            attachments = message_obj.get("attachments", [])
+            media_items = []
+
+            for item in attachments:
+                payload = item.get("payload", {})
+                media_url = payload.get("url") or payload.get("thumbnailUrl")
+                msg_type = item.get("type", "")
+
+                is_video = (msg_type == "video") or ("user_send_video" in event_name)
+
+                if media_url:
+                    media_items.append({
+                        "url": media_url,
+                        "is_video": is_video
                     })
-        return {
-            "total_models_found": len(data.get("models", [])),
-            "available_embedding_models": embed_models,
-            "raw_response": data
-        }
+
+            # Đưa công việc vào Background Tasks để tránh timeout Webhook
+            background_tasks.add_task(process_zalo_ai_logic, sender_id, text, media_items)
+
     except Exception as e:
-        return {"error": str(e)}
+        print("❌ [Webhook Error]:", e)
+
+    return {"status": "success"}
