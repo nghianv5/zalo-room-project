@@ -388,6 +388,7 @@ YÊU CẦU XỬ LÝ:
         action = result_data.get("action")
 
         if action == "ADD_ROOM":
+            print("action ADD_ROOM")
             extracted = result_data.get("extracted_data", {})
             address = extracted.get("address")
             if address and address.strip().lower() not in ["null", "none", "chưa rõ địa chỉ", "chưa rõ"]:
@@ -398,6 +399,7 @@ YÊU CẦU XỬ LÝ:
                 print("add_pending_media")
 
         elif action == "SEARCH_ROOM" and found_rooms:
+            print("action SEARCH_ROOM")
             # Lấy danh sách ảnh của các phòng tìm được trong CSDL để gửi đính kèm Zalo
             db_media = []
             for room in found_rooms:
