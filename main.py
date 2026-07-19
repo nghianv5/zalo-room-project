@@ -34,7 +34,7 @@ else:
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-COLLECTION_NAME = "rooms_v5"
+COLLECTION_NAME = "rooms_v6"
 
 @app.get("/")
 async def root():
@@ -52,11 +52,11 @@ try:
         qdrant_client.create_collection(
             collection_name=COLLECTION_NAME,
             vectors_config=VectorParams(
-                size=768,
+                size=3072,  # ĐỔI THÀNH 3072 chiều để khớp hoàn toàn với Gemini Embedding
                 distance=Distance.COSINE
             )
         )
-        print(f"✅ Tạo thành công collection '{COLLECTION_NAME}' (768 dims)!")
+        print(f"✅ Tạo thành công collection '{COLLECTION_NAME}' (3072 dims)!")
 except Exception as qdrant_init_error:
     print("❌ Lỗi khi khởi tạo Collection Qdrant:", qdrant_init_error)
 
