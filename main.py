@@ -90,30 +90,35 @@ def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
     return zalo_media_url
 
 # --- 3. VECTOR EMBEDDING & TƯƠNG TÁC QDRANT ---
-def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
-    if not GEMINI_API_KEY or not text or not text.strip():
-        return None
-
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/text-embedding-004:embedContent?key={GEMINI_API_KEY}"
-    headers = {"Content-Type": "application/json"}
-    payload = {
-        "model": "models/text-embedding-004",
-        "content": {"parts": [{"text": text}]}
-    }
-
-    for attempt in range(retries):
-        try:
-            response = requests.post(url, headers=headers, json=payload, timeout=10)
-            res_json = response.json()
-            if "embedding" in res_json and "values" in res_json["embedding"]:
-                return res_json["embedding"]["values"]
-            if "embeddings" in res_json and len(res_json["embeddings"]) > 0:
-                return res_json["embeddings"][0]["values"]
-        except Exception as e:
-            print(f"❌ [EMBEDDING Error]: {e}")
-        time.sleep(delay)
-
-    return None
+def get_text_embedding(text: str) -> list:
+    """Hàm bổ trợ lấy Vector Embedding chuẩn 3072-dim từ Gemini"""
+    try:
+        # Cách 1: Thử gọi với model text-embedding-004 chuẩn + output_dimensionality
+        emb_res = gemini_client.models.embed_content(
+            model="text-embedding-004",
+            contents=text,
+            config=types.EmbedContentConfig(output_dimensionality=3072)
+        )
+        
+        if hasattr(emb_res, 'embedding') and hasattr(emb_res.embedding, 'values'):
+            return [float(x) for x in emb_res.embedding.values]
+            
+    except Exception as e:
+        print(f"⚠️ [EMBEDDING FALLBACK]: Lỗi lần 1 ({e}), thử cấu hình fallback...")
+        
+    try:
+        # Cách 2: Fallback nếu endpoint yêu cầu prefix 'models/'
+        emb_res = gemini_client.models.embed_content(
+            model="models/text-embedding-004",
+            contents=text,
+            config=types.EmbedContentConfig(output_dimensionality=3072)
+        )
+        if hasattr(emb_res, 'embedding') and hasattr(emb_res.embedding, 'values'):
+            return [float(x) for x in emb_res.embedding.values]
+    except Exception as e2:
+        print(f"❌ [EMBEDDING ERROR]: Tất cả phương án lấy vector đều thất bại: {e2}")
+        
+    return []
 
 def generate_room_id(address: str, room_name: str) -> str:
     unique_string = f"addr:{address.strip().lower()}_room:{room_name.strip().lower()}"
@@ -139,31 +144,20 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list) -> bool:
     try:
         address = extracted_data.get("address", "")
         room_name = extracted_data.get("room_name") or extracted_data.get("room_number") or "Phòng"
-        
-        # 1. Tạo chuỗi văn bản để tạo vector embedding
         price = extracted_data.get("price", "")
         desc = extracted_data.get("description", "")
+
+        # 1. Tạo text để vectorize
         text_to_vector = f"Địa chỉ: {address}. Phòng: {room_name}. Giá: {price}. Chi tiết: {desc}"
         
-        # Force xuất ra đúng 3072 dimension nếu Collection Qdrant của bạn là 3072
-        emb_res = gemini_client.models.embed_content(
-            model="text-embedding-004",
-            contents=text_to_vector,
-            config=types.EmbedContentConfig(output_dimensionality=3072)
-        )
-
-        # 3. Lấy đúng danh sách float vector (Trích xuất chuẩn cho SDK google-genai mới)
-        vector = None
-        if hasattr(emb_res, 'embedding') and hasattr(emb_res.embedding, 'values'):
-            vector = [float(x) for x in emb_res.embedding.values]
-        elif isinstance(emb_res, dict) and "embedding" in emb_res:
-            vector = [float(x) for x in emb_res["embedding"]["values"]]
+        # 2. Lấy vector embedding (3072 dims)
+        vector = get_text_embedding(text_to_vector)
 
         if not vector:
-            print("❌ [QDRANT UPSERT ERROR]: Không trích xuất được chuỗi Vector từ Gemini Embedding response!")
+            print("❌ [QDRANT UPSERT CANCELED]: Không tạo được vector embedding!")
             return False
 
-        # 4. Tạo ID duy nhất (Deterministic UUIDv5)
+        # 3. Tạo Deterministic UUIDv5
         point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{address}_{room_name}"))
 
         payload = {
@@ -175,18 +169,18 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list) -> bool:
             "raw_data": extracted_data
         }
 
-        # 5. Lưu vào Qdrant DB
+        # 4. Upsert vào Qdrant DB
         qdrant_client.upsert(
             collection_name=COLLECTION_NAME,
             points=[
                 PointStruct(
                     id=point_id,
-                    vector=vector,  # Đã bảo đảm là List[float] chuẩn
+                    vector=vector,
                     payload=payload
                 )
             ]
         )
-        print(f"✅ [QDRANT UPSERTED]: Đã lưu ID = {point_id} | Địa chỉ = {address}")
+        print(f"✅ [QDRANT UPSERTED SUCCESS]: ID = {point_id} | Địa chỉ = {address}")
         return True
 
     except Exception as e:
