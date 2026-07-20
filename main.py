@@ -135,69 +135,62 @@ def search_rooms_from_db(query_text: str):
         print("❌ Lỗi khi truy vấn Qdrant:", e)
         return []
 
-def upsert_room_to_db(room_data: dict, media_urls: list):
-    address = room_data.get("address")
-    if not address or address.strip().lower() in ["chưa rõ địa chỉ", "chưa rõ", "none", "null"]:
-        print("⚠️ [Qdrant] Hủy lưu phòng do thiếu địa chỉ cụ thể.")
-        return False
-
-    room_name = room_data.get("room_name") or "Phòng mặc định"
-    point_id = generate_room_id(address, room_name)
-
-    existing_media = []
+def upsert_room_to_db(extracted_data: dict, media_urls: list) -> bool:
     try:
-        existing_points = qdrant_client.retrieve(collection_name=COLLECTION_NAME, ids=[point_id])
-        if existing_points and len(existing_points) > 0:
-            existing_media = existing_points[0].payload.get("media_urls", [])
-    except Exception:
-        print("❌ [Qdrant Upsert Error]:", Exception)
+        address = extracted_data.get("address", "")
+        room_name = extracted_data.get("room_name") or extracted_data.get("room_number") or "Phòng"
+        
+        # 1. Tạo chuỗi văn bản để tạo vector embedding
+        price = extracted_data.get("price", "")
+        desc = extracted_data.get("description", "")
+        text_to_vector = f"Địa chỉ: {address}. Phòng: {room_name}. Giá: {price}. Chi tiết: {desc}"
+        
+        # Force xuất ra đúng 3072 dimension nếu Collection Qdrant của bạn là 3072
+        emb_res = gemini_client.models.embed_content(
+            model="text-embedding-004",
+            contents=text_to_vector,
+            config=types.EmbedContentConfig(output_dimensionality=3072)
+        )
 
-    all_media_urls = list(dict.fromkeys(existing_media + media_urls))
+        # 3. Lấy đúng danh sách float vector (Trích xuất chuẩn cho SDK google-genai mới)
+        vector = None
+        if hasattr(emb_res, 'embedding') and hasattr(emb_res.embedding, 'values'):
+            vector = [float(x) for x in emb_res.embedding.values]
+        elif isinstance(emb_res, dict) and "embedding" in emb_res:
+            vector = [float(x) for x in emb_res["embedding"]["values"]]
 
-    search_context = (
-        f"Phòng {room_name} tại địa chỉ {address}. "
-        f"Giá thuê: {room_data.get('price', 'Chưa rõ')}. "
-        f"Tầng: {room_data.get('floor', 'Chưa rõ')}. "
-        f"Khép kín: {room_data.get('is_closed')}. "
-        f"Tiện ích: Điều hòa ({room_data.get('has_air_conditioner')}), Nóng lạnh ({room_data.get('has_water_heater')}), Máy giặt ({room_data.get('has_washing_machine')}). "
-        f"Cho nuôi chó mèo: {room_data.get('allow_pets')}. "
-        f"Mô tả thêm: {room_data.get('description', '')}"
-    )
+        if not vector:
+            print("❌ [QDRANT UPSERT ERROR]: Không trích xuất được chuỗi Vector từ Gemini Embedding response!")
+            return False
 
-    vector = get_text_embedding(search_context)
-    if not vector:
-        print("❌ not vector:")
-        return False
+        # 4. Tạo ID duy nhất (Deterministic UUIDv5)
+        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{address}_{room_name}"))
 
-    payload = {
-        "address": address,
-        "room_name": room_name,
-        "floor": room_data.get("floor"),
-        "price": room_data.get("price"),
-        "is_closed": room_data.get("is_closed"),
-        "amenities": {
-            "has_air_conditioner": room_data.get("has_air_conditioner", False),
-            "has_water_heater": room_data.get("has_water_heater", False),
-            "has_washing_machine": room_data.get("has_washing_machine", False)
-        },
-        "allow_pets": room_data.get("allow_pets"),
-        "media_urls": all_media_urls,
-        "available_date": room_data.get("available_date"),
-        "has_balcony": room_data.get("has_balcony"),
-        "has_window": room_data.get("has_window"),
-        "description": room_data.get("description", ""),
-        "updated_at": int(time.time())
-    }
+        payload = {
+            "address": address,
+            "room_name": room_name,
+            "price": price,
+            "description": desc,
+            "media_urls": media_urls,
+            "raw_data": extracted_data
+        }
 
-    try:
+        # 5. Lưu vào Qdrant DB
         qdrant_client.upsert(
             collection_name=COLLECTION_NAME,
-            points=[PointStruct(id=point_id, vector=vector, payload=payload)]
+            points=[
+                PointStruct(
+                    id=point_id,
+                    vector=vector,  # Đã bảo đảm là List[float] chuẩn
+                    payload=payload
+                )
+            ]
         )
-        print(f"✅ [Qdrant Success] Đã lưu phòng '{room_name}' tại '{address}' - Media: {len(all_media_urls)}")
+        print(f"✅ [QDRANT UPSERTED]: Đã lưu ID = {point_id} | Địa chỉ = {address}")
         return True
+
     except Exception as e:
-        print("❌ [Qdrant Upsert Error]:", e)
+        print("❌ [QDRANT UPSERT EXCEPTION]:", e)
         return False
 
 # --- 4. TƯƠNG TÁC ZALO OA API ---
