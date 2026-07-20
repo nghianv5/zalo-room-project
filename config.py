@@ -17,3 +17,5 @@ class Config:
 #   ZALO_REFRESH_TOKEN = ""
 
 #DATABASE_URL = "postgresql://root:T2CxUeUzz8Mb6w13Jbpu2jqd5pPZFDW8@dpg-d952v1uq1p3s73cgn5q0-a.oregon-postgres.render.com/zalo_search_room"
+
+#CLOUDINARY_URL=cloudinary://<API_KEY>:<API_SECRET>@<CLOUD_NAME>
