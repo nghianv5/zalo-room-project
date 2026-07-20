@@ -131,11 +131,6 @@ def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
             # Lấy danh sách giá trị vector trả về
             if "embedding" in res_json and "values" in res_json["embedding"]:
                 return res_json["embedding"]["values"]
-            
-    except Exception as e:
-        print(f"⚠️ [EMBEDDING FALLBACK]: Lỗi lần 1 ({e}), thử cấu hình fallback...")
-        
-            print(f"⚠️ [EMBEDDING] Lần thử {attempt + 1} phản hồi: {res_json}")
 
         except Exception as e:
             print(f"❌ [EMBEDDING] Lỗi kết nối lần {attempt + 1}: {e}")
