@@ -95,7 +95,7 @@ def get_text_embedding(text: str) -> list:
     try:
         # Cách 1: Thử gọi với model text-embedding-004 chuẩn + output_dimensionality
         emb_res = gemini_client.models.embed_content(
-            model="text-embedding-004",
+            model="models/gemini-embedding-001",
             contents=text,
             config=types.EmbedContentConfig(output_dimensionality=3072)
         )
@@ -106,36 +106,31 @@ def get_text_embedding(text: str) -> list:
     except Exception as e:
         print(f"⚠️ [EMBEDDING FALLBACK]: Lỗi lần 1 ({e}), thử cấu hình fallback...")
         
-    try:
-        # Cách 2: Fallback nếu endpoint yêu cầu prefix 'models/'
-        emb_res = gemini_client.models.embed_content(
-            model="models/text-embedding-004",
-            contents=text,
-            config=types.EmbedContentConfig(output_dimensionality=3072)
-        )
-        if hasattr(emb_res, 'embedding') and hasattr(emb_res.embedding, 'values'):
-            return [float(x) for x in emb_res.embedding.values]
-    except Exception as e2:
-        print(f"❌ [EMBEDDING ERROR]: Tất cả phương án lấy vector đều thất bại: {e2}")
-        
-    return []
+
 
 def generate_room_id(address: str, room_name: str) -> str:
     unique_string = f"addr:{address.strip().lower()}_room:{room_name.strip().lower()}"
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, unique_string))
 
+# --- 4. CÁC HÀM XỬ LÝ DATABASE QDRANT ---
 def search_rooms_from_db(query_text: str):
     query_vector = get_text_embedding(query_text)
     if not query_vector:
+        print("⚠️ [Qdrant Search] Không thể tạo embedding cho nội dung tìm kiếm.")
         return []
-
+        
     try:
         response = qdrant_client.query_points(
             collection_name=COLLECTION_NAME,
             query=query_vector,
-            limit=4
+            limit=3
         )
-        return [point.payload for point in response.points if point.payload]
+        
+        rooms = []
+        for point in response.points:
+            if point.payload:
+                rooms.append(point.payload)
+        return rooms
     except Exception as e:
         print("❌ Lỗi khi truy vấn Qdrant:", e)
         return []
