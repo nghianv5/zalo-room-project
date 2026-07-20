@@ -90,22 +90,48 @@ def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
     return zalo_media_url
 
 # --- 3. VECTOR EMBEDDING & TƯƠNG TÁC QDRANT ---
-def get_text_embedding(text: str) -> list:
-    """Hàm bổ trợ lấy Vector Embedding chuẩn 3072-dim từ Gemini"""
-    try:
-        # Cách 1: Thử gọi với model text-embedding-004 chuẩn + output_dimensionality
-        emb_res = gemini_client.models.embed_content(
-            model="models/gemini-embedding-001",
-            contents=text,
-            config=types.EmbedContentConfig(output_dimensionality=3072)
-        )
-        
-        if hasattr(emb_res, 'embedding') and hasattr(emb_res.embedding, 'values'):
-            return [float(x) for x in emb_res.embedding.values]
+def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
+    """
+    Tạo Vector Embedding sử dụng model gemini-embedding-001 chính xác từ API Key.
+    """
+    if not GEMINI_API_KEY:
+        print("❌ [EMBEDDING] Thiếu GEMINI_API_KEY!")
+        return None
+
+    # Dùng chuẩn model: gemini-embedding-001
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key={GEMINI_API_KEY}"
+    headers = {"Content-Type": "application/json"}
+    
+    payload = {
+        "model": "models/gemini-embedding-001",
+        "content": {
+            "parts": [
+                {"text": text}
+            ]
+        }
+    }
+
+    for attempt in range(retries):
+        try:
+            if not text or not text.strip():
+                return None
+
+            response = requests.post(url, headers=headers, json=payload, timeout=10)
+            res_json = response.json()
+
+            # Lấy danh sách giá trị vector trả về
+            if "embedding" in res_json and "values" in res_json["embedding"]:
+                return res_json["embedding"]["values"]
             
-    except Exception as e:
-        print(f"⚠️ [EMBEDDING FALLBACK]: Lỗi lần 1 ({e}), thử cấu hình fallback...")
-        
+            print(f"⚠️ [EMBEDDING] Lần thử {attempt + 1} phản hồi: {res_json}")
+
+        except Exception as e:
+            print(f"❌ [EMBEDDING] Lỗi kết nối lần {attempt + 1}: {e}")
+
+        if attempt < retries - 1:
+            time.sleep(delay)
+
+    return None
 
 
 def generate_room_id(address: str, room_name: str) -> str:
