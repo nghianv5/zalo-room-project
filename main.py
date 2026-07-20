@@ -3,6 +3,7 @@ import json
 import requests
 import uuid
 import time
+from typing import Dict, List
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from qdrant_client import QdrantClient
@@ -17,8 +18,9 @@ import cloudinary.uploader
 app = FastAPI()
 
 # --- 0. BỘ NHỚ ĐỆM TẠM THỜI (PENDING MEDIA CACHE) ---
-PENDING_MEDIA_CACHE = {}
-CACHE_TTL_SECONDS = 600  # Bộ nhớ đệm tự hủy sau 10 phút nếu người dùng không nhắn tiếp
+# Bộ nhớ đệm lưu ảnh/video đang chờ ghép với thông tin phòng: {user_id: {"urls": [...], "timestamp": float}}
+PENDING_MEDIA_CACHE: Dict[str, dict] = {}
+CACHE_TTL_SECONDS = 600  # Bộ nhớ đệm tự hủy sau 10 phút (600 giây) nếu không có tin nhắn text đi kèm
 
 MEDIA_DIR = "static/media"
 os.makedirs(MEDIA_DIR, exist_ok=True)
@@ -52,6 +54,7 @@ try:
 except Exception as e:
     print("❌ Lỗi khởi tạo Qdrant:", e)
 
+
 # --- 2. HÀM LƯU FILE MEDIA VĨNH VIỄN ---
 def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
     if not zalo_media_url:
@@ -66,9 +69,12 @@ def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
                 resource_type=resource_type,
                 folder="zalo_room_media"
             )
-            return res.get("secure_url", "")
+            url = res.get("secure_url", "")
+            if url:
+                print(f"✅ [Cloudinary Upload Success]: {url}")
+                return url
         except Exception as e:
-            print(f"❌ [Cloudinary Error]: {e}")
+            print(f"❌ [Cloudinary Error]: {e}, chuyển sang lưu local...")
 
     # Fallback lưu tại server nội bộ
     try:
@@ -83,60 +89,89 @@ def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
                     f.write(chunk)
 
             server_domain = os.environ.get("SERVER_DOMAIN", "http://localhost:8000").rstrip("/")
-            return f"{server_domain}/static/media/{filename}"
+            local_url = f"{server_domain}/static/media/{filename}"
+            print(f"✅ [Local Media Saved]: {local_url}")
+            return local_url
     except Exception as e:
         print(f"❌ [Local Save Error]: {e}")
 
     return zalo_media_url
 
+
 # --- 3. VECTOR EMBEDDING & TƯƠNG TÁC QDRANT ---
-def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
+def get_text_embedding(text: str) -> list:
     """
-    Tạo Vector Embedding sử dụng model gemini-embedding-001 chính xác từ API Key.
+    Tạo Vector Embedding chuẩn 3072-dim tương thích với Qdrant collection rooms_v6
     """
-    if not GEMINI_API_KEY:
-        print("❌ [EMBEDDING] Thiếu GEMINI_API_KEY!")
-        return None
+    if not gemini_client or not text or not text.strip():
+        return []
 
-    # Dùng chuẩn model: gemini-embedding-001
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key={GEMINI_API_KEY}"
-    headers = {"Content-Type": "application/json"}
-    
-    payload = {
-        "model": "models/gemini-embedding-001",
-        "content": {
-            "parts": [
-                {"text": text}
-            ]
-        }
-    }
+    # Cách 1: Thử model text-embedding-004 chuẩn với output_dimensionality=3072
+    try:
+        emb_res = gemini_client.models.embed_content(
+            model="text-embedding-004",
+            contents=text,
+            config=types.EmbedContentConfig(output_dimensionality=3072)
+        )
+        if hasattr(emb_res, 'embedding') and hasattr(emb_res.embedding, 'values'):
+            return [float(x) for x in emb_res.embedding.values]
+    except Exception as e:
+        print(f"⚠️ [EMBEDDING FALLBACK]: Lỗi gọi model ngắn ({e}), thử prefix models/...")
 
-    for attempt in range(retries):
-        try:
-            if not text or not text.strip():
-                return None
+    # Cách 2: Fallback thêm prefix 'models/'
+    try:
+        emb_res = gemini_client.models.embed_content(
+            model="models/text-embedding-004",
+            contents=text,
+            config=types.EmbedContentConfig(output_dimensionality=3072)
+        )
+        if hasattr(emb_res, 'embedding') and hasattr(emb_res.embedding, 'values'):
+            return [float(x) for x in emb_res.embedding.values]
+    except Exception as e2:
+        print(f"❌ [EMBEDDING ERROR]: Lỗi tạo vector embedding hoàn toàn: {e2}")
 
-            response = requests.post(url, headers=headers, json=payload, timeout=10)
-            res_json = response.json()
-
-            # Lấy danh sách giá trị vector trả về
-            if "embedding" in res_json and "values" in res_json["embedding"]:
-                return res_json["embedding"]["values"]
-            
-            print(f"⚠️ [EMBEDDING] Lần thử {attempt + 1} phản hồi: {res_json}")
-
-        except Exception as e:
-            print(f"❌ [EMBEDDING] Lỗi kết nối lần {attempt + 1}: {e}")
-
-        if attempt < retries - 1:
-            time.sleep(delay)
-
-    return None
+    return []
 
 
-def generate_room_id(address: str, room_name: str) -> str:
-    unique_string = f"addr:{address.strip().lower()}_room:{room_name.strip().lower()}"
-    return str(uuid.uuid5(uuid.NAMESPACE_DNS, unique_string))
+def generate_content_with_retry(prompt: str, mime_type: str = "application/json", retries: int = 3) -> str:
+    """
+    Hàm gọi Gemini API an toàn chống lỗi 503 UNAVAILABLE / 429 Quá tải.
+    Tự động retry với exponential backoff và chuyển sang model dự phòng.
+    """
+    if not gemini_client:
+        return ""
+
+    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+
+    for model_name in models_to_try:
+        for attempt in range(retries):
+            try:
+                config = types.GenerateContentConfig()
+                if mime_type:
+                    config.response_mime_type = mime_type
+
+                response = gemini_client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=config
+                )
+                if response and response.text:
+                    return response.text.strip()
+
+            except Exception as e:
+                err_msg = str(e)
+                if "503" in err_msg or "429" in err_msg or "UNAVAILABLE" in err_msg:
+                    wait_time = 2 ** attempt
+                    print(f"⚠️ [GEMINI 503/429]: Model '{model_name}' đang quá tải. Thử lại lần {attempt + 1}/{retries} sau {wait_time}s...")
+                    time.sleep(wait_time)
+                else:
+                    print(f"❌ [GEMINI ERROR]: Model '{model_name}' gặp lỗi không phải 503: {e}")
+                    break
+
+        print(f"🔄 [GEMINI FALLBACK]: Model '{model_name}' thất bại. Chuyển sang model tiếp theo...")
+
+    return ""
+
 
 # --- 4. CÁC HÀM XỬ LÝ DATABASE QDRANT ---
 def search_rooms_from_db(query_text: str):
@@ -144,14 +179,14 @@ def search_rooms_from_db(query_text: str):
     if not query_vector:
         print("⚠️ [Qdrant Search] Không thể tạo embedding cho nội dung tìm kiếm.")
         return []
-        
+
     try:
         response = qdrant_client.query_points(
             collection_name=COLLECTION_NAME,
             query=query_vector,
             limit=3
         )
-        
+
         rooms = []
         for point in response.points:
             if point.payload:
@@ -160,6 +195,7 @@ def search_rooms_from_db(query_text: str):
     except Exception as e:
         print("❌ Lỗi khi truy vấn Qdrant:", e)
         return []
+
 
 def upsert_room_to_db(extracted_data: dict, media_urls: list) -> bool:
     try:
@@ -170,7 +206,7 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list) -> bool:
 
         # 1. Tạo text để vectorize
         text_to_vector = f"Địa chỉ: {address}. Phòng: {room_name}. Giá: {price}. Chi tiết: {desc}"
-        
+
         # 2. Lấy vector embedding (3072 dims)
         vector = get_text_embedding(text_to_vector)
 
@@ -179,7 +215,7 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list) -> bool:
             return False
 
         # 3. Tạo Deterministic UUIDv5
-        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{address}_{room_name}"))
+        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{address.strip().lower()}_{room_name.strip().lower()}"))
 
         payload = {
             "address": address,
@@ -201,17 +237,19 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list) -> bool:
                 )
             ]
         )
-        print(f"✅ [QDRANT UPSERTED SUCCESS]: ID = {point_id} | Địa chỉ = {address}")
+        print(f"✅ [QDRANT UPSERTED SUCCESS]: ID = {point_id} | Địa chỉ = {address} | Tổng media = {len(media_urls)}")
         return True
 
     except Exception as e:
         print("❌ [QDRANT UPSERT EXCEPTION]:", e)
         return False
 
-# --- 4. TƯƠNG TÁC ZALO OA API ---
+
+# --- 5. TƯƠNG TÁC ZALO OA API ---
 def upload_image_to_zalo(image_url_or_path: str) -> str:
     """
     Tải file ảnh lên Zalo Server để lấy attachment_id dùng cho tin nhắn Media.
+    Chống lỗi Connection Refused do tự gọi về localhost.
     """
     access_token = os.environ.get("ZALO_ACCESS_TOKEN")
     if not access_token or not image_url_or_path:
@@ -221,12 +259,28 @@ def upload_image_to_zalo(image_url_or_path: str) -> str:
     headers = {"access_token": access_token}
 
     try:
-        if image_url_or_path.startswith("http"):
+        img_bytes = None
+
+        # Trường hợp 1: URL công khai bên ngoài (Cloudinary, S3...)
+        if image_url_or_path.startswith("http") and "localhost" not in image_url_or_path and "127.0.0.1" not in image_url_or_path:
             res = requests.get(image_url_or_path, timeout=10)
-            img_bytes = res.content
+            if res.status_code == 200:
+                img_bytes = res.content
+
+        # Trường hợp 2: File local hoặc URL chứa localhost/static -> Đọc trực tiếp từ ổ cứng
         else:
-            with open(image_url_or_path, "rb") as f:
-                img_bytes = f.read()
+            filename = os.path.basename(image_url_or_path)
+            local_filepath = os.path.join(MEDIA_DIR, filename)
+
+            if os.path.exists(local_filepath):
+                with open(local_filepath, "rb") as f:
+                    img_bytes = f.read()
+            else:
+                print(f"❌ [ZALO UPLOAD]: File không tìm thấy tại ổ cứng local: {local_filepath}")
+                return ""
+
+        if not img_bytes:
+            return ""
 
         files = {'file': ('image.jpg', img_bytes, 'image/jpeg')}
         response = requests.post(url, headers=headers, files=files, timeout=15)
@@ -234,21 +288,18 @@ def upload_image_to_zalo(image_url_or_path: str) -> str:
 
         if res_data.get("error") == 0:
             attachment_id = res_data.get("data", {}).get("attachment_id", "")
-            print(f"✅ [ZALO UPLOAD] Thành công attachment_id: {attachment_id}")
+            print(f"✅ [ZALO UPLOAD SUCCESS]: attachment_id = {attachment_id}")
             return attachment_id
         else:
             print(f"❌ [ZALO UPLOAD ERROR]: {res_data.get('message')}")
+
     except Exception as e:
         print("❌ [ZALO UPLOAD EXCEPTION]:", e)
 
     return ""
 
+
 def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
-    """
-    Gửi tin nhắn Zalo:
-    - Nếu không có media_urls: Gửi tin nhắn văn bản thông thường.
-    - Nếu có media_urls: Tải ảnh đầu tiên lên Zalo và gửi tin nhắn đính kèm hiển thị khung ảnh trực tiếp.
-    """
     access_token = os.environ.get("ZALO_ACCESS_TOKEN")
     if not access_token:
         return False
@@ -259,13 +310,10 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
         "access_token": access_token
     }
 
-    # Kiểm tra xem có hình ảnh để gửi đính kèm không
     attachment_id = None
     if media_urls and len(media_urls) > 0:
-        # Lấy hình ảnh đầu tiên để hiển thị làm khung đính kèm
         attachment_id = upload_image_to_zalo(media_urls[0])
 
-    # Nếu upload ảnh thành công, gửi theo cấu trúc Template Media
     if attachment_id:
         payload = {
             "recipient": {"user_id": user_id},
@@ -286,7 +334,6 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
             }
         }
     else:
-        # Nếu không có ảnh hoặc upload thất bại, gửi tin nhắn văn bản thông thường
         payload = {
             "recipient": {"user_id": user_id},
             "message": {"text": ai_reply}
@@ -306,17 +353,25 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
         print("❌ [ZALO CRITICAL ERROR]:", e)
         return False
 
-# --- 5. HÀM QUẢN LÝ PENDING MEDIA CACHE ---
+
+# --- 6. HÀM QUẢN LÝ PENDING MEDIA CACHE ---
 def get_and_clear_pending_media(user_id: str) -> list:
-    """Lấy danh sách media đang chờ của user và xóa bộ nhớ đệm."""
+    """Lấy toàn bộ danh sách media đang chờ của user và giải phóng bộ nhớ đệm."""
     if user_id in PENDING_MEDIA_CACHE:
         cached_data = PENDING_MEDIA_CACHE.pop(user_id)
         if time.time() - cached_data["timestamp"] <= CACHE_TTL_SECONDS:
+            print(f"🚚 [CACHE RETRIEVED]: Lấy thành công {len(cached_data['urls'])} media chờ cho user {user_id}")
             return cached_data["urls"]
+        else:
+            print(f"⏳ [CACHE EXPIRED]: Media chờ của user {user_id} đã hết hạn TTL 10 phút.")
     return []
 
+
 def add_pending_media(user_id: str, new_urls: list):
-    """Lưu tạm danh sách media của user vào bộ nhớ đệm."""
+    """Lưu thêm danh sách media của user vào bộ nhớ đệm tạm thời."""
+    if not new_urls:
+        return
+
     current_urls = []
     if user_id in PENDING_MEDIA_CACHE:
         if time.time() - PENDING_MEDIA_CACHE[user_id]["timestamp"] <= CACHE_TTL_SECONDS:
@@ -327,42 +382,48 @@ def add_pending_media(user_id: str, new_urls: list):
         "urls": merged_urls,
         "timestamp": time.time()
     }
+    print(f"📦 [CACHE STORED]: Đã lưu tạm {len(new_urls)} media cho user {user_id}. Tổng đang chờ: {len(merged_urls)}")
 
-# --- 6. LUỒNG XỬ LÝ CHÍNH VỚI AI ---
+
+# --- 7. LUỒNG XỬ LÝ CHÍNH VỚI AI ---
 def process_zalo_ai_logic(user_id: str, message_text: str, media_items: list):
+    # Step 1: Lưu và chuyển đổi tất cả media nhận được ở lượt nhắn này
     incoming_media_urls = []
     for item in media_items:
         saved_url = save_media_file(item["url"], is_video=item.get("is_video", False))
         if saved_url:
             incoming_media_urls.append(saved_url)
 
+    # Step 2: Trường hợp KHÔNG CÓ TEXT (Chủ phòng chỉ gửi ảnh/video lẻ)
+    if not message_text.strip() and incoming_media_urls:
+        add_pending_media(user_id, incoming_media_urls)
+        # Đếm tổng số ảnh đang chờ hiện tại để báo lại cho chủ phòng
+        total_pending = len(PENDING_MEDIA_CACHE.get(user_id, {}).get("urls", []))
+        reply = f"📸 Em đã nhận {len(incoming_media_urls)} hình ảnh/video! (Tổng đã nhận: {total_pending} file)\n\n👉 Anh/Chị nhắn thêm địa chỉ cụ thể, tên phòng và giá thuê để em hoàn tất đăng bài nhé!"
+        send_zalo_message(user_id, reply, media_urls=incoming_media_urls)
+        return
+
+    # Step 3: Lấy toàn bộ ảnh đang chờ từ các lượt nhắn trước ra để gộp chung với tin nhắn text này
     pending_urls = get_and_clear_pending_media(user_id)
     all_current_media = list(dict.fromkeys(pending_urls + incoming_media_urls))
-
-    # Trường hợp 1: Chỉ gửi ảnh lẻ
-    if not message_text.strip() and all_current_media:
-        add_pending_media(user_id, all_current_media)
-        reply = f"📸 Em đã nhận {len(all_current_media)} hình ảnh/video của bạn rồi ạ!\n\n👉 Bạn vui lòng gửi thêm địa chỉ cụ thể để em hoàn tất đăng bài nhé!"
-        send_zalo_message(user_id, reply, media_urls=all_current_media)
-        return
 
     urls_to_send = all_current_media
 
     try:
-        # 1. Tìm kiếm phòng trong CSDL Qdrant trước
+        # 1. Tìm kiếm phòng trong CSDL Qdrant
         found_rooms = []
         is_greeting = any(kw in message_text.lower() for kw in ["chào", "hi", "hello", "bắt đầu"])
         if not is_greeting and message_text.strip():
             found_rooms = search_rooms_from_db(message_text)
 
-        # 2. Xây dựng Prompt chi tiết cho Gemini
+        # 2. Xây dựng System Prompt chuẩn cho Gemini
         system_prompt = f"""
-Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ trên Zalo.
+Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ chuyên nghiệp trên Zalo.
 Hãy phân tích tin nhắn người dùng và dữ liệu liên quan để trả về kết quả JSON.
 
 Tin nhắn người dùng: "{message_text}"
-Hình ảnh kèm theo: {json.dumps(all_current_media)}
-Dữ liệu phòng tìm thấy trong CSDL (Khớp nhất): {json.dumps(found_rooms, ensure_ascii=False)}
+Hình ảnh/Video kèm theo (đã lưu): {json.dumps(all_current_media)}
+Dữ liệu phòng tìm thấy trong CSDL: {json.dumps(found_rooms, ensure_ascii=False)}
 
 YÊU CẦU XỬ LÝ:
 1. Phân loại "action":
@@ -370,46 +431,54 @@ YÊU CẦU XỬ LÝ:
    - "SEARCH_ROOM": Người dùng ĐI TÌM/HỎI THÔNG TIN phòng trọ.
 
 2. Nếu "action" == "SEARCH_ROOM":
-   - Nếu tìm thấy dữ liệu trong CSDL (`found_rooms` có dữ liệu): Soạn `ai_reply` trình bày CHI TIẾT thông tin phòng (Giá, Tầng, Tiện ích, Cho nuôi thú cưng không,...).
-   - Nếu KHÔNG tìm thấy dữ liệu: Soạn `ai_reply` báo chưa tìm thấy phòng phù hợp tại khu vực/địa chỉ đó và hẹn hỗ trợ sau.
+   - Nếu tìm thấy dữ liệu (`found_rooms` có dữ liệu): Soạn `ai_reply` trình bày CHI TIẾT thông tin phòng (Giá, Địa chỉ, Tiện ích...).
+   - Nếu KHÔNG tìm thấy dữ liệu: Soạn `ai_reply` báo chưa tìm thấy phòng phù hợp tại khu vực đó.
 
 3. Nếu "action" == "ADD_ROOM":
-   - Trích xuất "address". Nếu có địa chỉ -> báo đã lưu thành công. Nếu thiếu địa chỉ -> nhắc khách bổ sung.
+   - Trích xuất thông tin vào object `extracted_data` gồm: `address`, `room_name`, `price`, `description`.
+   - Nếu có địa chỉ rõ ràng -> `ai_reply` xác nhận đã lưu phòng thành công kèm số lượng ảnh.
+   - Nếu THIẾU địa chỉ -> `ai_reply` nhắc khách bổ sung thêm địa chỉ cụ thể.
 
-ĐỊNH DẠNG TRẢ VỀ (DUY NHẤT 1 CHUỖI JSON):
+ĐỊNH DẠNG TRẢ VỀ (DUY NHẤT 1 CHUỖI JSON, KHÔNG DÙNG FENCE CODE BLOCK):
 {{
     "action": "ADD_ROOM" hoặc "SEARCH_ROOM",
-    "extracted_data": {{ ... }},
-    "ai_reply": "Nội dung trả lời CHI TIẾT gửi cho khách"
+    "extracted_data": {{
+        "address": "Địa chỉ phòng",
+        "room_name": "Tên hoặc số phòng",
+        "price": "Giá thuê",
+        "description": "Mô tả tiện ích"
+    }},
+    "ai_reply": "Nội dung trả lời gửi lại cho khách"
 }}
 """
 
-        response = gemini_client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=system_prompt,
-            config=types.GenerateContentConfig(response_mime_type="application/json")
-        )
+        # 3. Gọi Gemini với cơ chế Retry & Fallback
+        raw_text = generate_content_with_retry(system_prompt, mime_type="application/json")
 
-        raw_text = response.text.strip()
+        if not raw_text:
+            raise Exception("Gemini không phản hồi dữ liệu sau khi retry.")
+
         result_data = json.loads(raw_text)
-        
-        ai_reply = result_data.get("ai_reply", "Dạ em đã ghi nhận thông tin, em sẽ kiểm tra và báo lại ngay ạ!")
+        ai_reply = result_data.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
         action = result_data.get("action")
 
+        # 4. Xử lý Logic sau khi AI phân tích
         if action == "ADD_ROOM":
-            print("action ADD_ROOM")
             extracted = result_data.get("extracted_data", {})
-            address = extracted.get("address")
-            if address and address.strip().lower() not in ["null", "none", "chưa rõ địa chỉ", "chưa rõ"]:
-                print("upsert_room_to_db")
+            address = str(extracted.get("address", "")).strip().lower()
+
+            # Kiểm tra xem có địa chỉ hợp lệ không
+            if address and address not in ["null", "none", "chưa rõ địa chỉ", "chưa rõ", ""]:
+                print("✅ [ADD_ROOM]: Tiến hành Upsert vào Qdrant...")
                 upsert_room_to_db(extracted, all_current_media)
-            elif all_current_media:
-                add_pending_media(user_id, all_current_media)
-                print("add_pending_media")
+            else:
+                # Nếu thiếu địa chỉ, trả toàn bộ ảnh lại cache chờ khách nhắn địa chỉ bổ sung
+                if all_current_media:
+                    add_pending_media(user_id, all_current_media)
+                    print("⚠️ [ADD_ROOM MISSING ADDRESS]: Đưa ảnh quay lại cache chờ địa chỉ bổ sung.")
 
         elif action == "SEARCH_ROOM" and found_rooms:
-            print("action SEARCH_ROOM")
-            # Lấy danh sách ảnh của các phòng tìm được trong CSDL để gửi đính kèm Zalo
+            # Lấy danh sách media của các phòng tìm được trong DB để gửi lại đính kèm cho khách
             db_media = []
             for room in found_rooms:
                 db_media.extend(room.get("media_urls", []))
@@ -417,13 +486,14 @@ YÊU CẦU XỬ LÝ:
                 urls_to_send = db_media
 
     except Exception as err:
-        print("❌ [AI Logic Error]:", err)
-        ai_reply = "Dạ hệ thống đang bận một chút, bạn vui lòng đợi trong giây lát hoặc nhắn lại giúp em nhé!"
+        print("❌ [AI Logic Exception]:", err)
+        ai_reply = "Dạ hệ thống đang xử lý một chút, bạn chờ em vài giây rồi nhắn lại giúp em nhé!"
 
-    # Gửi tin nhắn trả lời hoàn chỉnh kèm hình ảnh (nếu có)
+    # Gửi câu trả lời hoàn chỉnh lại cho người dùng trên Zalo
     send_zalo_message(user_id, ai_reply, media_urls=urls_to_send)
 
-# --- 7. WEBHOOK RECEIVER ---
+
+# --- 8. WEBHOOK RECEIVER ---
 @app.post("/webhook/zalo")
 async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
     try:
@@ -434,10 +504,12 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
         if not sender_id:
             return {"status": "ignored"}
 
+        # Sự kiện người dùng quan tâm OA
         if "user_follow_oa" in event_name:
-            send_zalo_message(sender_id, "👋 Chào mừng bạn! Gửi thông tin hoặc hình ảnh phòng trọ để bắt đầu nhé!")
+            send_zalo_message(sender_id, "👋 Chào mừng bạn! Hãy gửi thông tin hoặc hình ảnh phòng trọ để bắt đầu nhé!")
             return {"status": "success"}
 
+        # Các sự kiện tin nhắn từ người dùng
         if event_name in ["user_send_text", "user_send_image", "user_send_file", "user_send_video"]:
             message_obj = data.get("message", {})
             text = message_obj.get("text", "")
@@ -453,9 +525,10 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
                         "is_video": (item.get("type") == "video") or ("user_send_video" in event_name)
                     })
 
+            # Đưa xử lý AI vào Background Task để phản hồi webhook ngay lập tức (HTTP 200)
             background_tasks.add_task(process_zalo_ai_logic, sender_id, text, media_items)
 
     except Exception as e:
-        print("❌ [Webhook Error]:", e)
+        print("❌ [Webhook Exception]:", e)
 
     return {"status": "success"}
