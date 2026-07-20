@@ -41,16 +41,19 @@ qdrant_client = QdrantClient(
     api_key=os.environ.get("QDRANT_API_KEY")
 )
 
+# Đổi tên collection để Qdrant tạo mới cấu hình 768 dimensions
+COLLECTION_NAME = "rooms_v6" 
+
 try:
     if not qdrant_client.collection_exists(collection_name=COLLECTION_NAME):
         qdrant_client.create_collection(
             collection_name=COLLECTION_NAME,
             vectors_config=VectorParams(
-                size=3072,  # Chuẩn 3072 dimensions cho model text-embedding-004
+                size=768,  # SỬA THÀNH 768 DIMENSIONS CHUẨN CỦA GEMINI EMBEDDING
                 distance=Distance.COSINE
             )
         )
-        print(f"✅ Tạo mới collection '{COLLECTION_NAME}' (3072 dims) thành công!")
+        print(f"✅ Tạo mới collection '{COLLECTION_NAME}' (768 dims) thành công!")
 except Exception as e:
     print("❌ Lỗi khởi tạo Qdrant:", e)
 
