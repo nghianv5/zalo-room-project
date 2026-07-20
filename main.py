@@ -166,6 +166,7 @@ def upsert_room_to_db(room_data: dict, media_urls: list):
 
     vector = get_text_embedding(search_context)
     if not vector:
+        print("❌ not vector:")
         return False
 
     payload = {
