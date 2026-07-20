@@ -105,8 +105,9 @@ def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
 
     for attempt in range(retries):
         try:
+            # SỬA TẠI ĐÂY: Thêm tiền tố 'models/' hoặc dùng tên đầy đủ
             response = gemini_client.models.embed_content(
-                model="text-embedding-004",
+                model="models/text-embedding-004",  # <-- Thêm 'models/' vào trước
                 contents=text,
             )
             if response and response.embedding and response.embedding.values:
@@ -124,6 +125,7 @@ def generate_content_with_retry(prompt: str, mime_type: str = "application/json"
     if not gemini_client:
         return ""
 
+    # SỬA TẠI ĐÂY: Dùng tên model chuẩn
     models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
 
     for model_name in models_to_try:
