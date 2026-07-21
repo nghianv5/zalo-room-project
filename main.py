@@ -34,7 +34,7 @@ if CLOUDINARY_URL:
 # --- 1. CẤU HÌNH GEMINI & QDRANT --
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 if GEMINI_API_KEY:
-    genai_legacy.configure(api_key=GEMINI_API_KEY)
+    gemini_client = genai_legacy.configure(api_key=GEMINI_API_KEY)
 
 COLLECTION_NAME = "rooms_v7"  # Nâng cấp phiên bản collection cho 12 trường mới
 
