@@ -498,25 +498,35 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
         action = result_data.get("action")
         extracted = result_data.get("extracted_data", {})
 
+        # 1. Lấy ID phòng khớp nhất từ kết quả Vector Search (nếu có)
+        existing_point_id = None
+        if relevant_rooms and len(relevant_rooms) > 0:
+            existing_point_id = relevant_rooms[0].get("id")
+
+        # 2. Xử lý theo Action
         if action == "ADD_ROOM":
             address = str(extracted.get("address", "")).strip()
-            
-            # Tìm ID phòng cũ khớp nhất (nếu có)
-            existing_point_id = None
-            if relevant_rooms and len(relevant_rooms) > 0:
-                existing_point_id = relevant_rooms[0].get("id")  # Lấy ID của kết quả Vector Search gần nhất
-
             if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
-                # Truyền existing_point_id vào
-                upsert_room_to_db(extracted, all_current_media, existing_point_id=existing_point_id)
+                # Truyền existing_point_id vào để ghi đè (UPDATE) đúng phòng vừa tìm được
+                upsert_room_to_db(extracted, all_current_media, point_id=existing_point_id)
+            else:
+                if all_current_media:
+                    add_pending_media(user_id, all_current_media)
 
         elif action == "SEARCH_ROOM" and relevant_rooms:
-            # Lấy ảnh phòng đầu tiên trong CSDL để đính kèm lên tin nhắn Zalo
             for room in relevant_rooms:
                 m_urls = room.get("8_media_urls") or room.get("media_urls")
                 if m_urls and len(m_urls) > 0:
                     urls_to_send = m_urls
                     break
+
+        elif action == "UPDATE_STATUS":
+            new_status = extracted.get("status", "ĐÃ CHO THUÊ")
+            if existing_point_id:
+                # Dùng ID thực tế từ DB để update trạng thái
+                update_room_status_in_db(point_id=existing_point_id, new_status=new_status)
+            else:
+                print("⚠️ Không tìm thấy phòng tương ứng trong DB để cập nhật trạng thái.")
 
         elif action == "UPDATE_STATUS":
             address = extracted.get("address", "")
