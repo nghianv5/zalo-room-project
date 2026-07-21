@@ -33,13 +33,13 @@ if CLOUDINARY_URL:
     cloudinary.config(cloudinary_url=CLOUDINARY_URL)
 
 
-# --- 1. CẤU HÌNH GEMINI & QDRANT ---
+# --- 1. CẤU HÌNH GEMINI & QDRANT (ĐÃ ÉP CỐ ĐỊNH 768 DIMENSIONS) ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-# Sử dụng Qdrant Collection vố véc-tơ 768 chiều chuẩn với gemini-embedding-001
+# Đổi sang Collection mới để tránh đụng độ cấu hình cũ trên Qdrant Cloud
+COLLECTION_NAME = "rooms_v15_fixed_dim768"
 VECTOR_SIZE = 768
-COLLECTION_NAME = "rooms_v13_dim768" 
 
 qdrant_client = QdrantClient(
     url=os.environ.get("QDRANT_URL"),
@@ -102,14 +102,13 @@ def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
     return zalo_media_url
 
 
-# --- 3. TẠO VECTOR EMBEDDING CHUẨN ---
-# --- 3. TẠO VECTOR EMBEDDING CHUẨN 768 DIMENSIONS ---
+# --- 3. TẠO VECTOR EMBEDDING ÉP CHUẨN 768 CHIỀU ---
 def get_text_embedding(text: str, retries: int = 3) -> List[float]:
     """Tạo Vector Embedding luôn ép chuẩn 768 chiều"""
     if not text or not text.strip():
         return []
 
-    # 1. Thử gọi qua SDK Google GenAI với tham số output_dimensionality=768
+    # 1. Gọi qua SDK Google GenAI với output_dimensionality=768
     if gemini_client:
         for attempt in range(retries):
             try:
@@ -178,9 +177,8 @@ def generate_content_with_retry(prompt: str, mime_type: str = "application/json"
     return ""
 
 
-# --- 5. TƯƠNG TÁC DATABASE QDRANT CHUẨN 12 TRƯỜNG ---
+# --- 5. TƯƠNG TÁC DATABASE QDRANT (CẬP NHẬT QUERY_POINTS) ---
 def search_rooms_by_vector(query_text: str, top_k: int = 5) -> List[dict]:
-    """Tìm kiếm véc-tơ trong Qdrant bằng query_points"""
     query_vector = get_text_embedding(query_text)
     
     if not query_vector:
@@ -206,19 +204,17 @@ def search_rooms_by_vector(query_text: str, top_k: int = 5) -> List[dict]:
 
 
 def upsert_room_to_db(extracted_data: dict, media_urls: list) -> bool:
-    """Đăng mới / Cập nhật phòng với đầy đủ 12 trường thông tin"""
     try:
         address = extracted_data.get("address", "")
         room_name = extracted_data.get("room_name", "Phòng trọ")
 
-        # 1. Tạo chuỗi văn bản tổng hợp phục vụ Vector Search
         text_to_embed = f"""
         Địa chỉ: {address}
         Tên/Số phòng: {room_name}
         Tầng: {extracted_data.get('floor', '')}
         Giá thuê: {extracted_data.get('price', '')}
         Khép kín: {extracted_data.get('is_private_bathroom', '')}
-        Thiết bị (Điều hòa, nóng lạnh, máy giặt): {extracted_data.get('appliances', '')}
+        Thiết bị: {extracted_data.get('appliances', '')}
         Cho nuôi chó mèo: {extracted_data.get('allow_pets', '')}
         Thời gian vào ở: {extracted_data.get('move_in_date', '')}
         Ban công: {extracted_data.get('has_balcony', '')}
@@ -231,22 +227,20 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list) -> bool:
             print("❌ Không thể tạo vector cho phòng mới, hủy upsert.")
             return False
 
-        # Định danh duy nhất theo (địa chỉ + tên phòng)
         point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{address.strip().lower()}_{str(room_name).strip().lower()}"))
 
-        # Payload lưu giữ chuẩn 12 trường thông tin
         payload = {
             "1_address": address,
             "2_room_name": room_name,
-            "3_floor": extracted_data.get("floor", "Không xác định"),
-            "4_price": extracted_data.get("price", "Chưa rõ"),
-            "5_is_private_bathroom": extracted_data.get("is_private_bathroom", "Chưa rõ"),
-            "6_appliances": extracted_data.get("appliances", "Chưa rõ"),
-            "7_allow_pets": extracted_data.get("allow_pets", "Chưa rõ"),
+            "3_floor": extracted_data.get("floor", "[Chưa cập nhật]"),
+            "4_price": extracted_data.get("price", "[Chưa cập nhật]"),
+            "5_is_private_bathroom": extracted_data.get("is_private_bathroom", "[Chưa cập nhật]"),
+            "6_appliances": extracted_data.get("appliances", "[Chưa cập nhật]"),
+            "7_allow_pets": extracted_data.get("allow_pets", "[Chưa cập nhật]"),
             "8_media_urls": media_urls,
-            "9_move_in_date": extracted_data.get("move_in_date", "Vào ở ngay"),
-            "10_has_balcony": extracted_data.get("has_balcony", "Chưa rõ"),
-            "11_has_window": extracted_data.get("has_window", "Chưa rõ"),
+            "9_move_in_date": extracted_data.get("move_in_date", "[Chưa cập nhật]"),
+            "10_has_balcony": extracted_data.get("has_balcony", "[Chưa cập nhật]"),
+            "11_has_window": extracted_data.get("has_window", "[Chưa cập nhật]"),
             "12_status": extracted_data.get("status", "TRỐNG"),
             "raw_data": extracted_data
         }
@@ -270,7 +264,6 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list) -> bool:
 
 
 def update_room_status_in_db(address: str, room_name: str, new_status: str = "ĐÃ CHO THUÊ") -> bool:
-    """Cập nhật trạng thái phòng sang ĐÃ CHO THUÊ"""
     try:
         point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{address.strip().lower()}_{str(room_name).strip().lower()}"))
         qdrant_client.set_payload(
@@ -285,8 +278,9 @@ def update_room_status_in_db(address: str, room_name: str, new_status: str = "Đ
         return False
 
 
-# --- 6. TƯƠNG TÁC ZALO OA API ---
+# --- 6. TƯƠNG TÁC ZALO OA API (HIỂN THỊ HÌNH ẢNH TRỰC TIẾP LÊN KHUNG CHÁT) ---
 def upload_image_to_zalo(image_url_or_path: str) -> str:
+    """Upload ảnh lên Zalo Server để lấy attachment_id giúp hiển thị trực tiếp ảnh trên khung chat Zalo"""
     access_token = os.environ.get("ZALO_ACCESS_TOKEN")
     if not access_token or not image_url_or_path:
         return ""
@@ -314,7 +308,11 @@ def upload_image_to_zalo(image_url_or_path: str) -> str:
         response = requests.post(url, headers=headers, files=files, timeout=15)
         res_data = response.json()
         if res_data.get("error") == 0:
-            return res_data.get("data", {}).get("attachment_id", "")
+            attachment_id = res_data.get("data", {}).get("attachment_id", "")
+            print(f"✅ [ZALO UPLOAD SUCCESS]: attachment_id = {attachment_id}")
+            return attachment_id
+        else:
+            print(f"❌ [ZALO UPLOAD FAILED]: {res_data.get('message')}")
     except Exception as e:
         print("❌ [ZALO UPLOAD EXCEPTION]:", e)
     return ""
@@ -333,8 +331,10 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
 
     attachment_id = None
     if media_urls and len(media_urls) > 0:
+        # Lấy URL ảnh đầu tiên upload lên Zalo
         attachment_id = upload_image_to_zalo(media_urls[0])
 
+    # Gửi tin nhắn dạng Media Template để Zalo tự render ảnh ra màn hình
     if attachment_id:
         payload = {
             "recipient": {"user_id": user_id},
@@ -344,7 +344,12 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
                     "type": "template",
                     "payload": {
                         "template_type": "media",
-                        "elements": [{"media_type": "image", "attachment_id": attachment_id}]
+                        "elements": [
+                            {
+                                "media_type": "image",
+                                "attachment_id": attachment_id
+                            }
+                        ]
                     }
                 }
             }
@@ -387,7 +392,7 @@ def add_pending_media(user_id: str, new_urls: list):
     }
 
 
-# --- 8. LUỒNG XỬ LÝ AI ĐẦY ĐỦ 12 TRƯỜNG & LOGIC TRẠNG THÁI ---
+# --- 8. LUỒNG XỬ LÝ AI VÀ LOGIC DỮ LIỆU PHÒNG ---
 def process_zalo_ai_logic(user_id: str, message_text: str, media_items: list):
     incoming_media_urls = []
     for item in media_items:
@@ -398,7 +403,7 @@ def process_zalo_ai_logic(user_id: str, message_text: str, media_items: list):
     if not message_text.strip() and incoming_media_urls:
         add_pending_media(user_id, incoming_media_urls)
         total_pending = len(PENDING_MEDIA_CACHE.get(user_id, {}).get("urls", []))
-        reply = f"📸 Em đã nhận {len(incoming_media_urls)} ảnh/video! (Tổng đã nhận: {total_pending} file)\n\n👉 Anh/Chị gửi thêm thông tin phòng (Địa chỉ đường/phường/quận/thành phố, tầng, giá thuê, tiện nghi...) để em cập nhật nhé!"
+        reply = f"📸 Em đã nhận {len(incoming_media_urls)} ảnh/video! (Tổng đã nhận: {total_pending} file)\n\n👉 Anh/Chị gửi thêm thông tin phòng để em tạo bài nhé!"
         send_zalo_message(user_id, reply, media_urls=incoming_media_urls)
         return
 
@@ -411,60 +416,47 @@ def process_zalo_ai_logic(user_id: str, message_text: str, media_items: list):
 
         system_prompt = f"""
 Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ thông minh trên Zalo.
-Nhiệm vụ của bạn là phân tích tin nhắn người dùng và trích xuất/xử lý chính xác 12 trường thông tin sau:
+Phân tích tin nhắn người dùng và trích xuất đúng 12 trường thông tin:
 
-1. `address`: Địa chỉ đầy đủ dạng: [Số nhà, Đường/Phố], [Phường/Xã], [Quận/Huyện], [Tỉnh/Thành phố].
-2. `room_name`: Tên hoặc số phòng (Ví dụ: Phòng 301, Phòng tầng 2...).
-3. `floor`: Tầng bao nhiêu (Ví dụ: Tầng 3).
-4. `price`: Giá thuê (Ví dụ: 3.5 triệu/tháng).
-5. `is_private_bathroom`: Khép kín hay dùng chung? (Ví dụ: Khép kín / Chung vệ sinh).
-6. `appliances`: Có Điều hòa, Nóng lạnh, Máy giặt không?
-7. `allow_pets`: Có được nuôi chó mèo không? (Ví dụ: Cho phép / Không cho phép / Thỏa thuận).
-8. `media_urls`: Ảnh/video phòng.
-9. `move_in_date`: Thời gian khách vào ở được (Ví dụ: Ở ngay, Đầu tháng sau...).
-10. `has_balcony`: Có ban công không? (Ví dụ: Có ban công / Không ban công).
-11. `has_window`: Có cửa sổ không? (Ví dụ: Có cửa sổ thoáng / Không cửa sổ).
+1. `address`: Địa chỉ 4 cấp đầy đủ (Số nhà/Đường, Phường/Xã, Quận/Huyện, Tỉnh/Thành phố).
+2. `room_name`: Tên hoặc số phòng (VD: Phòng 301, Phòng tầng 2...).
+3. `floor`: Tầng bao nhiêu.
+4. `price`: Giá thuê.
+5. `is_private_bathroom`: Khép kín hay không.
+6. `appliances`: Có điều hòa, nóng lạnh, máy giặt không.
+7. `allow_pets`: Cho nuôi chó mèo không.
+8. `media_urls`: Danh sách ảnh/video.
+9. `move_in_date`: Thời gian vào ở được.
+10. `has_balcony`: Có ban công không.
+11. `has_window`: Có cửa sổ không.
 12. `status`: Trạng thái phòng ("TRỐNG" hoặc "ĐÃ CHO THUÊ").
 
 DỮ LIỆU ĐẦU VÀO:
-- Tin nhắn người dùng: "{message_text}"
-- Ảnh/Video đính kèm: {json.dumps(all_current_media)}
-- Dữ liệu phòng khớp trong CSDL Qdrant: {json.dumps(relevant_rooms, ensure_ascii=False)}
+- Tin nhắn: "{message_text}"
+- Media kèm theo: {json.dumps(all_current_media)}
+- Phòng khớp từ Vector Search: {json.dumps(relevant_rooms, ensure_ascii=False)}
 
-QUY TRÌNH PHÂN LOẠI "action":
-- "ADD_ROOM": Người dùng đăng/cho thuê phòng mới.
-- "SEARCH_ROOM": Người dùng tìm phòng trọ.
-- "UPDATE_STATUS": Người dùng báo phòng ĐÃ CHO THUÊ / ĐÃ CÓ KHÁCH THUÊ / CÓ KHÁCH CỌC RỒI.
+YÊU CẦU TRẢ VỀ JSON:
+- Nếu thiếu thông tin trường nào, đặt giá trị là "[Chưa cập nhật]".
+- Trình bày `ai_reply` đẹp mắt, sạch sẽ để gửi lại trên Zalo cho người dùng. ĐỪNG ĐÂM ĐƯỜNG LINK HÌNH ÁNH VÀO CÂU TRẢ LỜI, hình ảnh sẽ được hệ thống hiển thị đính kèm tự động.
 
-QUY TRẮC TRẢ VỀ JSON CHI TIẾT:
-1. Nếu `action` == "ADD_ROOM":
-   - Mặc định `status` = "TRỐNG".
-   - Yêu cầu `address` phải rõ ràng (Đường, Phường, Quận, Tỉnh/Thành phố). Nếu thiếu, nhắc người dùng bổ sung địa chỉ trong `ai_reply`.
-
-2. Nếu `action` == "SEARCH_ROOM":
-   - Chỉ lọc những phòng có `12_status` == "TRỐNG" từ CSDL Qdrant gửi cho khách. Nếu phòng đã báo "ĐÃ CHO THUÊ", phải ghi rõ phòng đó đã có khách thuê để người tìm biết.
-   - Soạn `ai_reply` đầy đủ 12 thông tin rõ ràng.
-
-3. Nếu `action` == "UPDATE_STATUS":
-   - Xác định rõ địa chỉ và tên phòng được báo đã thuê từ tin nhắn người dùng hoặc từ dữ liệu CSDL Qdrant. Đặt `status` = "ĐÃ CHO THUÊ".
-
-TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC (KHÔNG DÙNG BLOCK CODE MARKDOWN):
+TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
 {{
     "action": "ADD_ROOM" | "SEARCH_ROOM" | "UPDATE_STATUS",
     "extracted_data": {{
-        "address": "Địa chỉ 4 cấp đầy đủ",
-        "room_name": "Tên phòng",
-        "floor": "Tầng",
-        "price": "Giá thuê",
-        "is_private_bathroom": "Có/Không khép kín",
-        "appliances": "Điều hòa, nóng lạnh, máy giặt...",
-        "allow_pets": "Cho nuôi chó mèo hay không",
-        "move_in_date": "Thời gian ở được",
-        "has_balcony": "Có ban công không",
-        "has_window": "Có cửa sổ không",
-        "status": "TRỐNG" hoặc "ĐÃ CHO THUÊ"
+        "address": "...",
+        "room_name": "...",
+        "floor": "...",
+        "price": "...",
+        "is_private_bathroom": "...",
+        "appliances": "...",
+        "allow_pets": "...",
+        "move_in_date": "...",
+        "has_balcony": "...",
+        "has_window": "...",
+        "status": "TRỐNG"
     }},
-    "ai_reply": "Câu trả lời thân thiện gửi lại cho khách hàng trên Zalo"
+    "ai_reply": "Mô tả chi tiết 12 thông tin dạng văn bản đẹp mắt..."
 }}
 """
 
@@ -484,6 +476,14 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC (KHÔNG DÙNG BLOCK CODE
             else:
                 if all_current_media:
                     add_pending_media(user_id, all_current_media)
+
+        elif action == "SEARCH_ROOM" and relevant_rooms:
+            # Lấy ảnh phòng đầu tiên trong CSDL để đính kèm lên tin nhắn Zalo
+            for room in relevant_rooms:
+                m_urls = room.get("8_media_urls") or room.get("media_urls")
+                if m_urls and len(m_urls) > 0:
+                    urls_to_send = m_urls
+                    break
 
         elif action == "UPDATE_STATUS":
             address = extracted.get("address", "")
