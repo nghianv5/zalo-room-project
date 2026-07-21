@@ -61,7 +61,7 @@ try:
 except Exception as e:
     print("❌ Lỗi khởi tạo Qdrant:", e)
 
-def process_excel_file(file_url: str) -> int:
+def process_excel_file(file_url: str, sender_id: str) -> int:
     """Tải file Excel, đọc dữ liệu từng dòng và lưu vào Qdrant"""
     try:
         # 1. Tải file về tạm thời
@@ -101,7 +101,7 @@ def process_excel_file(file_url: str) -> int:
 
             if extracted_data["address"] and extracted_data["address"] != "[Chưa cập nhật]":
                 # Gọi hàm upsert để cập nhật hoặc thêm mới vào Qdrant
-                if upsert_room_to_db(extracted_data, media_urls):
+                if upsert_room_to_db(extracted_data, media_urls, sender_id):
                     success_count += 1
 
         # Xóa file tạm
@@ -277,7 +277,6 @@ def upsert_room_to_db(
     media_urls: list, 
     point_id: str = None,
     zalo_user_id: str = "SYSTEM",
-    landlord_phone: str = "Chưa rõ"
 ) -> bool:
     """Đăng mới / Cập nhật phòng kèm thông tin quản lý (User ID, Phone, Created/Updated At)"""
     try:
@@ -285,7 +284,7 @@ def upsert_room_to_db(
         room_name = extracted_data.get("room_name", "Phòng trọ")
         
         # Lấy số điện thoại từ AI trích xuất (nếu có) hoặc dùng tham số truyền vào
-        phone = extracted_data.get("landlord_phone") or landlord_phone or "Chưa rõ"
+        phone = extracted_data.get("landlord_phone")or "Chưa rõ"
 
         # 1. Tạo chuỗi văn bản tổng hợp phục vụ Vector Search
         text_to_embed = f"""
@@ -528,7 +527,7 @@ def add_pending_media(user_id: str, new_urls: list):
 def process_zalo_ai_logic(
     message_text: str, 
     media_items: list = None, 
-    user_id: str = "SYSTEM"
+    user_id: str = "SYSTEM",
 ) -> str:
     incoming_media_urls = []
     for item in media_items:
@@ -595,7 +594,8 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
         "move_in_date": "...",
         "has_balcony": "...",
         "has_window": "...",
-        "status": "TRỐNG"
+        "status": "TRỐNG",
+        "landlord_phone":"..."
     }},
     "ai_reply": "Mô tả chi tiết 12 thông tin dạng văn bản đẹp mắt..."
 }}
@@ -626,8 +626,7 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
                     extracted_data=extracted,
                     media_urls=all_current_media,
                     point_id=None, # Ép tạo phòng độc lập
-                    zalo_user_id=user_id,
-                    landlord_phone=landlord_phone
+                    zalo_user_id=user_id
                 )
                 print(f"➕ [ADD NEW ROOM SUCCESS]: Đã thêm phòng mới tại {address}")
 
@@ -649,8 +648,7 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
                     extracted_data=extracted,
                     media_urls=all_current_media,
                     point_id=existing_point_id,
-                    zalo_user_id=user_id,
-                    landlord_phone=landlord_phone
+                    zalo_user_id=user_id
                 )
                 if success:
                     print(f"🔄 [UPDATE ROOM SUCCESS]: Cập nhật thành công phòng ID {existing_point_id}")
@@ -709,7 +707,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
                     
                     # Chạy xử lý ngầm (Background Task)
                     def handle_excel():
-                        count = process_excel_file(file_url)
+                        count = process_excel_file(file_url, sender_id)
                         send_zalo_message(sender_id, f"✅ Đã nhập/cập nhật thành công {count} phòng từ file Excel vào hệ thống!")
 
                     background_tasks.add_task(handle_excel)
