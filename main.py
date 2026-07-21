@@ -3,6 +3,7 @@ import json
 import requests
 import uuid
 import time
+import google.generativeai as genai_legacy
 from typing import Dict, List
 import uvicorn
 from fastapi import FastAPI, Request, BackgroundTasks
@@ -30,9 +31,10 @@ CLOUDINARY_URL = os.environ.get("CLOUDINARY_URL")
 if CLOUDINARY_URL:
     cloudinary.config(cloudinary_url=CLOUDINARY_URL)
 
-# --- 1. CẤU HÌNH GEMINI & QDRANT ---
+# --- 1. CẤU HÌNH GEMINI & QDRANT --
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+if GEMINI_API_KEY:
+    genai_legacy.configure(api_key=GEMINI_API_KEY)
 
 COLLECTION_NAME = "rooms_v7"  # Nâng cấp phiên bản collection cho 12 trường mới
 
@@ -104,44 +106,29 @@ def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
 # --- 3. VECTOR EMBEDDING & TƯƠNG TÁC GEMINI SDK ---
 def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
     """
-    Tạo Vector Embedding sử dụng SDK google-genai.
-    Tự động fallback giữa các tên model embedding nếu bị 404.
+    Sử dụng google-generativeai SDK chuẩn để lấy 768-dim vector.
     """
-    if not gemini_client or not text or not text.strip():
+    if not GEMINI_API_KEY or not text or not text.strip():
         return None
 
-    # Danh sách các tên model embedding theo thứ tự ưu tiên
-    embedding_models = [
-        "text-embedding-004",
-        "embedding-001",
-        "models/text-embedding-004",
-        "models/embedding-001"
-    ]
+    for attempt in range(retries):
+        try:
+            # Gọi trực tiếp model text-embedding-004 chuẩn
+            result = genai_legacy.embed_content(
+                model="models/text-embedding-004",
+                content=text,
+                task_type="retrieval_document"
+            )
+            if result and "embedding" in result:
+                vector = result["embedding"]
+                print(f"✅ [EMBEDDING SUCCESS] Dims: {len(vector)}")
+                return vector
 
-    for model_name in embedding_models:
-        for attempt in range(retries):
-            try:
-                response = gemini_client.models.embed_content(
-                    model=model_name,
-                    contents=text,
-                )
-                if response and response.embedding and response.embedding.values:
-                    # Lần đầu thành công sẽ in thông báo xác nhận model chạy được
-                    print(f"✅ [EMBEDDING SUCCESS] Đã tạo embedding bằng model: '{model_name}' (Dims: {len(response.embedding.values)})")
-                    return response.embedding.values
+        except Exception as e:
+            print(f"❌ [EMBEDDING] Lỗi lần {attempt + 1}: {e}")
+            if attempt < retries - 1:
+                time.sleep(delay)
 
-            except Exception as e:
-                err_str = str(e)
-                if "404" in err_str or "NOT_FOUND" in err_str:
-                    # Nếu 404, thử ngay model tiếp theo trong danh sách
-                    print(f"⚠️ [EMBEDDING] Model '{model_name}' bị 404, thử model tiếp theo...")
-                    break 
-                else:
-                    print(f"❌ [EMBEDDING] Lỗi thử lần {attempt + 1} với '{model_name}': {e}")
-                    if attempt < retries - 1:
-                        time.sleep(delay)
-
-    print("❌ [EMBEDDING FATAL] Tất cả các model embedding đều không khả dụng với API Key này.")
     return None
 
 

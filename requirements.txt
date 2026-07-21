@@ -5,3 +5,4 @@ google-genai
 requests
 cloudinary
 aiofiles
+google-generativeai
