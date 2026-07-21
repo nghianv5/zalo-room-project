@@ -203,7 +203,7 @@ def search_rooms_by_vector(query_text: str, top_k: int = 5) -> List[dict]:
         return []
 
 
-def upsert_room_to_db(extracted_data: dict, media_urls: list, existing_point_id: str = None) -> bool:
+def upsert_room_to_db(extracted_data: dict, media_urls: list, point_id: str = None) -> bool:
     """Đăng mới / Cập nhật phòng với đầy đủ 12 trường thông tin (Tự động xóa record cũ nếu đổi địa chỉ)"""
     try:
         address = extracted_data.get("address", "")
@@ -229,21 +229,21 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list, existing_point_id:
             print("❌ Không thể tạo vector cho phòng mới, hủy upsert.")
             return False
 
-        # 2. Tính toán ID mới dựa trên địa chỉ + tên phòng mới
+        # 2. Tính toán ID mới dựa trên địa chỉ + tên phòng mới (Deterministic UUIDv5)
         new_point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{address.strip().lower()}_{str(room_name).strip().lower()}"))
 
         # 3. XỬ LÝ ĐỔI ĐỊA CHỈ: Nếu truyền ID cũ vào và ID cũ khác ID mới -> Xóa record ID cũ đi
-        if existing_point_id and existing_point_id != new_point_id:
+        if point_id and point_id != new_point_id:
             try:
                 qdrant_client.delete(
                     collection_name=COLLECTION_NAME,
-                    points_selector=[existing_point_id]
+                    points_selector=[point_id]
                 )
-                print(f"🗑️ [QDRANT DELETE OLD]: Đã xóa bản ghi cũ (ID: {existing_point_id}) do địa chỉ thay đổi.")
+                print(f"🗑️ [QDRANT DELETE OLD]: Đã xóa bản ghi cũ (ID: {point_id}) do địa chỉ thay đổi.")
             except Exception as del_err:
                 print(f"⚠️ Lỗi khi xóa bản ghi cũ: {del_err}")
 
-        # ID sẽ được chèn/cập nhật vào DB
+        # ID mới sẽ được ghi/cập nhật vào Qdrant
         final_point_id = new_point_id
 
         # 4. Payload lưu giữ chuẩn 12 trường thông tin
