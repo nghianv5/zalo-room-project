@@ -526,7 +526,7 @@ def add_pending_media(user_id: str, new_urls: list):
 
 # --- 8. LUỒNG XỬ LÝ AI VÀ LOGIC DỮ LIỆU PHÒNG ---
 def process_zalo_ai_logic(
-    user_message: str, 
+    message_text: str, 
     media_items: list = None, 
     user_id: str = "SYSTEM"
 ) -> str:
