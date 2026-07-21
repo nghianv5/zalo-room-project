@@ -6,4 +6,5 @@ requests
 cloudinary
 aiofiles
 google-generativeai
-pandas openpyxl
+pandas
+openpyxl
