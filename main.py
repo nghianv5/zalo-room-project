@@ -37,29 +37,51 @@ if CLOUDINARY_URL:
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-COLLECTION_NAME = "rooms_v9_no_embed"
+# Model Embedding chuẩn của Google (768 chiều)
+EMBEDDING_MODEL = "text-embedding-004"
+VECTOR_SIZE = 768
+COLLECTION_NAME = "rooms_v10_embedding"
 
 qdrant_client = QdrantClient(
     url=os.environ.get("QDRANT_URL"),
     api_key=os.environ.get("QDRANT_API_KEY")
 )
 
-# Khởi tạo Qdrant Collection nhẹ (không cần embedding)
+# Khởi tạo Qdrant Collection hỗ trợ Vector 768 chiều
 try:
     if not qdrant_client.collection_exists(collection_name=COLLECTION_NAME):
         qdrant_client.create_collection(
             collection_name=COLLECTION_NAME,
             vectors_config=VectorParams(
-                size=4,  # Dummy vector 4 chiều đơn giản
+                size=VECTOR_SIZE,
                 distance=Distance.COSINE
             )
         )
-        print(f"✅ Tạo mới collection '{COLLECTION_NAME}' thành công!")
+        print(f"✅ Tạo mới collection '{COLLECTION_NAME}' (Vector Dim: {VECTOR_SIZE}) thành công!")
 except Exception as e:
     print("❌ Lỗi khởi tạo Qdrant:", e)
 
 
-# --- 2. HÀM LƯU FILE MEDIA VĨNH VIỄN ---
+# --- 2. HÀM TẠO EMBEDDING BẰNG SDK GOOGLE.GENAI MỚI ---
+def get_text_embedding(text: str) -> List[float]:
+    """Tạo vector embedding 768 chiều từ văn bản"""
+    if not gemini_client or not text.strip():
+        return []
+    
+    try:
+        response = gemini_client.models.embed_content(
+            model=EMBEDDING_MODEL,
+            contents=text
+        )
+        if response and response.embedding and response.embedding.values:
+            return response.embedding.values
+    except Exception as e:
+        print(f"❌ [EMBEDDING ERROR]: Lỗi khi tạo vector với {EMBEDDING_MODEL}: {e}")
+    
+    return []
+
+
+# --- 3. HÀM LƯU FILE MEDIA VĨNH VIỄN ---
 def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
     if not zalo_media_url:
         return ""
@@ -102,7 +124,7 @@ def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
     return zalo_media_url
 
 
-# --- 3. TƯƠNG TÁC GEMINI SDK MỚI ---
+# --- 4. TƯƠNG TÁC GEMINI GENERATIVE SDK ---
 def generate_content_with_retry(prompt: str, mime_type: str = "application/json", retries: int = 3) -> str:
     if not gemini_client:
         return ""
@@ -138,25 +160,59 @@ def generate_content_with_retry(prompt: str, mime_type: str = "application/json"
     return ""
 
 
-# --- 4. XỬ LÝ DATABASE QDRANT (TRÍCH XUẤT 12 TRƯỜNG DỮ LIỆU) ---
-def search_rooms_from_db_scroll():
-    """Lấy danh sách các phòng trong CSDL để AI đọc và lọc"""
+# --- 5. TƯƠNG TÁC DATABASE QDRANT BẰNG VECTOR SEARCH ---
+def search_rooms_by_vector(query_text: str, top_k: int = 5) -> List[dict]:
+    """Tìm kiếm phòng bằng Vector Search theo ngữ nghĩa của câu hỏi"""
+    query_vector = get_text_embedding(query_text)
+    
+    # Nếu tạo vector thất bại, fallback sang lấy danh sách phòng cơ bản
+    if not query_vector:
+        print("⚠️ Không tạo được query vector, cuộn danh sách phòng dự phòng...")
+        try:
+            records, _ = qdrant_client.scroll(collection_name=COLLECTION_NAME, limit=top_k, with_payload=True)
+            return [rec.payload for rec in records if rec.payload]
+        except Exception as e:
+            print("❌ Lỗi scroll dự phòng:", e)
+            return []
+
     try:
-        records, _ = qdrant_client.scroll(
+        search_result = qdrant_client.search(
             collection_name=COLLECTION_NAME,
-            limit=50,
+            query_vector=query_vector,
+            limit=top_k,
             with_payload=True
         )
-        return [rec.payload for rec in records if rec.payload]
+        return [hit.payload for hit in search_result if hit.payload]
     except Exception as e:
-        print("❌ Lỗi khi lấy danh sách phòng từ Qdrant:", e)
+        print("❌ [VECTOR SEARCH ERROR]:", e)
         return []
 
 
 def upsert_room_to_db(extracted_data: dict, media_urls: list) -> bool:
+    """Tạo vector cho phòng và lưu vào Qdrant"""
     try:
         address = extracted_data.get("address", "")
         room_name = extracted_data.get("room_name", "Phòng")
+
+        # Chuẩn bị văn bản mô tả để tạo Embedding ngữ nghĩa đầy đủ
+        text_to_embed = f"""
+        Địa chỉ: {address}
+        Tên/Số phòng: {room_name}
+        Tầng: {extracted_data.get('floor', '')}
+        Giá thuê: {extracted_data.get('price', '')}
+        Vệ sinh: {extracted_data.get('is_private_bathroom', '')}
+        Tiện nghi: {extracted_data.get('amenities', '')}
+        Cho nuôi thú cưng: {extracted_data.get('allow_pets', '')}
+        Ngày ở: {extracted_data.get('move_in_date', '')}
+        Ban công: {extracted_data.get('has_balcony', '')}
+        Cửa sổ: {extracted_data.get('has_window', '')}
+        Trạng thái: {extracted_data.get('status', 'TRỐNG')}
+        """.strip()
+
+        vector = get_text_embedding(text_to_embed)
+        if not vector:
+            print("❌ Không thể tạo vector cho phòng mới, hủy upsert.")
+            return False
 
         # Deterministic UUIDv5 theo Địa chỉ + Tên phòng
         point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{address.strip().lower()}_{str(room_name).strip().lower()}"))
@@ -177,22 +233,21 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list) -> bool:
             "raw_data": extracted_data
         }
 
-        # Lưu vào Qdrant với dummy vector [1.0, 0.0, 0.0, 0.0]
         qdrant_client.upsert(
             collection_name=COLLECTION_NAME,
             points=[
                 PointStruct(
                     id=point_id,
-                    vector=[1.0, 0.0, 0.0, 0.0],
+                    vector=vector,
                     payload=payload
                 )
             ]
         )
-        print(f"✅ [QDRANT SAVE SUCCESS]: ID = {point_id} | Địa chỉ = {address}")
+        print(f"✅ [QDRANT VECTOR UPSERT SUCCESS]: ID = {point_id} | Địa chỉ = {address}")
         return True
 
     except Exception as e:
-        print("❌ [QDRANT SAVE EXCEPTION]:", e)
+        print("❌ [QDRANT UPSERT EXCEPTION]:", e)
         return False
 
 
@@ -211,7 +266,7 @@ def update_room_status_in_db(address: str, room_name: str, new_status: str = "Đ
         return False
 
 
-# --- 5. TƯƠNG TÁC ZALO OA API ---
+# --- 6. TƯƠNG TÁC ZALO OA API ---
 def upload_image_to_zalo(image_url_or_path: str) -> str:
     access_token = os.environ.get("ZALO_ACCESS_TOKEN")
     if not access_token or not image_url_or_path:
@@ -289,7 +344,7 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
         return False
 
 
-# --- 6. HÀM QUẢN LÝ PENDING MEDIA CACHE ---
+# --- 7. HÀM QUẢN LÝ PENDING MEDIA CACHE ---
 def get_and_clear_pending_media(user_id: str) -> list:
     if user_id in PENDING_MEDIA_CACHE:
         cached_data = PENDING_MEDIA_CACHE.pop(user_id)
@@ -313,7 +368,7 @@ def add_pending_media(user_id: str, new_urls: list):
     }
 
 
-# --- 7. LUỒNG XỬ LÝ AI VÀ LOGIC PHÒNG TRỌ ---
+# --- 8. LUỒNG XỬ LÝ AI VÀ LOGIC VECTOR SEARCH ---
 def process_zalo_ai_logic(user_id: str, message_text: str, media_items: list):
     incoming_media_urls = []
     for item in media_items:
@@ -333,7 +388,8 @@ def process_zalo_ai_logic(user_id: str, message_text: str, media_items: list):
     urls_to_send = all_current_media
 
     try:
-        all_rooms_in_db = search_rooms_from_db_scroll()
+        # Lấy Top-K phòng liên quan nhất dựa trên Vector Search
+        relevant_rooms = search_rooms_by_vector(message_text, top_k=5)
 
         system_prompt = f"""
 Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ thông minh trên Zalo.
@@ -341,7 +397,7 @@ Phân tích tin nhắn người dùng và trích xuất/xử lý chính xác 12 
 
 Tin nhắn người dùng: "{message_text}"
 Hình ảnh/Video gửi kèm: {json.dumps(all_current_media)}
-Dữ liệu tất cả phòng có trong CSDL Qdrant: {json.dumps(all_rooms_in_db, ensure_ascii=False)}
+Danh sách phòng phù hợp nhất từ Vector Search CSDL Qdrant: {json.dumps(relevant_rooms, ensure_ascii=False)}
 
 YÊU CẦU PHÂN LOẠI "action":
 1. "ADD_ROOM": Người dùng đăng/thêm bài cho thuê phòng mới.
@@ -368,11 +424,11 @@ XỬ LÝ CHI TIẾT THEO ACTION:
   Nếu thiếu địa chỉ rõ ràng -> Soạn `ai_reply` nhắc khách bổ sung địa chỉ chi tiết (Đường, Phường, Quận, Thành phố).
 
 - Nếu `action` == "SEARCH_ROOM":
-  Chỉ gợi ý các phòng có `status` == "TRỐNG" trong danh sách CSDL.
+  Lựa chọn các phòng phù hợp nhất có `status` == "TRỐNG" từ danh sách Vector Search được cung cấp.
   Soạn `ai_reply` đầy đủ 12 thông tin phòng cho người tìm trọ dễ xem.
 
 - Nếu `action` == "UPDATE_STATUS":
-  Xác định phòng nào được báo đã thuê dựa trên tin nhắn và danh sách CSDL. Đặt `status` = "ĐÃ CHO THUÊ".
+  Xác định phòng nào được báo đã thuê dựa trên tin nhắn và danh sách phòng từ Vector Search. Đặt `status` = "ĐÃ CHO THUÊ".
 
 TRẢ VỀ DUY NHẤT CHUỖI JSON ĐÚNG ĐỊNH DẠNG (KHÔNG DÙNG FENCE CODE BLOCK ```):
 {{
@@ -424,7 +480,7 @@ TRẢ VỀ DUY NHẤT CHUỖI JSON ĐÚNG ĐỊNH DẠNG (KHÔNG DÙNG FENCE COD
     send_zalo_message(user_id, ai_reply, media_urls=urls_to_send)
 
 
-# --- 8. WEBHOOK RECEIVER ---
+# --- 9. WEBHOOK RECEIVER ---
 @app.post("/webhook/zalo")
 async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
     try:
@@ -462,7 +518,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
     return {"status": "success"}
 
 
-# --- 9. MAIN ENTRY POINT ---
+# --- 10. MAIN ENTRY POINT ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     print(f"🚀 Server đang chạy tại cổng {port}...")
