@@ -101,7 +101,7 @@ def process_excel_file(file_url: str, sender_id: str) -> int:
 
             if extracted_data["address"] and extracted_data["address"] != "[Chưa cập nhật]":
                 # Gọi hàm upsert để cập nhật hoặc thêm mới vào Qdrant
-                if upsert_room_to_db(extracted_data, media_urls,point_id=None ,sender_id):
+                if upsert_room_to_db(extracted_data, media_urls, point_id=None , zalo_user_id=sender_id):
                     success_count += 1
 
         # Xóa file tạm
