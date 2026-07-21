@@ -339,7 +339,8 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list, point_id: str = No
                     vector=vector,
                     payload=payload
                 )
-            ]
+            ],
+            wait=True  # <--- THÊM THAM SỐ NÀY ĐỂ ÉP ĐỒNG BỘ DỮ LIỆU NGAY LẬP TỨC
         )
         print(f"✅ [QDRANT UPSERT SUCCESS]: ID = {final_point_id} | Địa chỉ = {payload}")
         return True
@@ -672,3 +673,21 @@ if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     print(f"🚀 Server đang chạy tại cổng {port}...")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
+    
+@app.get("/test-db")
+def check_database():
+    try:
+        # Lấy tối đa 10 bản ghi trong collection
+        records, _ = qdrant_client.scroll(
+            collection_name=COLLECTION_NAME,
+            limit=10,
+            with_payload=True,
+            with_vectors=False
+        )
+        return {
+            "total_records": len(records),
+            "collection": COLLECTION_NAME,
+            "data": records
+        }
+    except Exception as e:
+        return {"error": str(e)}
