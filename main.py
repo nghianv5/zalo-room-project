@@ -103,31 +103,36 @@ def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
 
 
 # --- 3. TẠO VECTOR EMBEDDING CHUẨN ---
+# --- 3. TẠO VECTOR EMBEDDING CHUẨN 768 DIMENSIONS ---
 def get_text_embedding(text: str, retries: int = 3) -> List[float]:
-    """Tạo Vector Embedding 768 chiều dùng gemini-embedding-001"""
+    """Tạo Vector Embedding luôn ép chuẩn 768 chiều"""
     if not text or not text.strip():
         return []
 
-    # 1. Thử gọi qua SDK Google GenAI
+    # 1. Thử gọi qua SDK Google GenAI với tham số output_dimensionality=768
     if gemini_client:
         for attempt in range(retries):
             try:
                 response = gemini_client.models.embed_content(
                     model="models/gemini-embedding-001",
-                    contents=text
+                    contents=text,
+                    config=types.EmbedContentConfig(
+                        output_dimensionality=768
+                    )
                 )
                 if response and response.embedding and response.embedding.values:
                     return response.embedding.values
             except Exception as e:
                 time.sleep(1)
 
-    # 2. Fallback gọi REST API trực tiếp
+    # 2. Fallback gọi REST API có tham số outputDimensionality: 768
     if GEMINI_API_KEY:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key={GEMINI_API_KEY}"
         headers = {"Content-Type": "application/json"}
         payload = {
             "model": "models/gemini-embedding-001",
-            "content": {"parts": [{"text": text}]}
+            "content": {"parts": [{"text": text}]},
+            "outputDimensionality": 768
         }
         try:
             res = requests.post(url, headers=headers, json=payload, timeout=10)
