@@ -3,14 +3,15 @@ import json
 import requests
 import uuid
 import time
-import google.generativeai as genai_legacy
 from typing import Dict, List
 import uvicorn
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
-from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
 
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct
+
+from google import genai
 from google.genai import types
 
 # Tích hợp Cloudinary
@@ -31,36 +32,29 @@ CLOUDINARY_URL = os.environ.get("CLOUDINARY_URL")
 if CLOUDINARY_URL:
     cloudinary.config(cloudinary_url=CLOUDINARY_URL)
 
-import google.generativeai as genai
-genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
-for model in genai.list_models():
-    print(model)
 
-# --- 1. CẤU HÌNH GEMINI & QDRANT --
+# --- 1. CẤU HÌNH GEMINI & QDRANT ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
-if GEMINI_API_KEY:
-    gemini_client = genai_legacy.configure(api_key=GEMINI_API_KEY)
+gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-COLLECTION_NAME = "rooms_v7"  # Nâng cấp phiên bản collection cho 12 trường mới
+COLLECTION_NAME = "rooms_v9_no_embed"
 
 qdrant_client = QdrantClient(
     url=os.environ.get("QDRANT_URL"),
     api_key=os.environ.get("QDRANT_API_KEY")
 )
 
-# Đổi tên collection để Qdrant tạo mới cấu hình 768 dimensions
-COLLECTION_NAME = "rooms_v6" 
-
+# Khởi tạo Qdrant Collection nhẹ (không cần embedding)
 try:
     if not qdrant_client.collection_exists(collection_name=COLLECTION_NAME):
         qdrant_client.create_collection(
             collection_name=COLLECTION_NAME,
             vectors_config=VectorParams(
-                size=768,  # SỬA THÀNH 768 DIMENSIONS CHUẨN CỦA GEMINI EMBEDDING
+                size=4,  # Dummy vector 4 chiều đơn giản
                 distance=Distance.COSINE
             )
         )
-        print(f"✅ Tạo mới collection '{COLLECTION_NAME}' (768 dims) thành công!")
+        print(f"✅ Tạo mới collection '{COLLECTION_NAME}' thành công!")
 except Exception as e:
     print("❌ Lỗi khởi tạo Qdrant:", e)
 
@@ -108,41 +102,12 @@ def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
     return zalo_media_url
 
 
-# --- 3. VECTOR EMBEDDING & TƯƠNG TÁC GEMINI SDK ---
-def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
-    """
-    Sử dụng google-generativeai SDK chuẩn để lấy 768-dim vector.
-    """
-    if not GEMINI_API_KEY or not text or not text.strip():
-        return None
-
-    for attempt in range(retries):
-        try:
-            # Gọi trực tiếp model text-embedding-004 chuẩn
-            result = genai_legacy.embed_content(
-                model="models/text-embedding-004",
-                content=text,
-                task_type="retrieval_document"
-            )
-            if result and "embedding" in result:
-                vector = result["embedding"]
-                print(f"✅ [EMBEDDING SUCCESS] Dims: {len(vector)}")
-                return vector
-
-        except Exception as e:
-            print(f"❌ [EMBEDDING] Lỗi lần {attempt + 1}: {e}")
-            if attempt < retries - 1:
-                time.sleep(delay)
-
-    return None
-
-
+# --- 3. TƯƠNG TÁC GEMINI SDK MỚI ---
 def generate_content_with_retry(prompt: str, mime_type: str = "application/json", retries: int = 3) -> str:
     if not gemini_client:
         return ""
 
-    # SỬA TẠI ĐÂY: Dùng tên model chuẩn
-    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+    models_to_try = ["gemini-2.5-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite"]
 
     for model_name in models_to_try:
         for attempt in range(retries):
@@ -163,7 +128,6 @@ def generate_content_with_retry(prompt: str, mime_type: str = "application/json"
                 err_msg = str(e)
                 if "503" in err_msg or "429" in err_msg or "UNAVAILABLE" in err_msg:
                     wait_time = 2 ** attempt
-                    print(f"⚠️ [GEMINI 503/429]: Model '{model_name}' quá tải. Thử lại {attempt + 1}/{retries} sau {wait_time}s...")
                     time.sleep(wait_time)
                 else:
                     print(f"❌ [GEMINI ERROR]: Model '{model_name}' gặp lỗi: {e}")
@@ -174,116 +138,77 @@ def generate_content_with_retry(prompt: str, mime_type: str = "application/json"
     return ""
 
 
-# --- 4. CÁC HÀM XỬ LÝ DATABASE QDRANT (VỚI 12 TRƯỜNG DỮ LIỆU) ---
-def search_rooms_from_db(query_text: str):
-    query_vector = get_text_embedding(query_text)
-    if not query_vector:
-        print("⚠️ [Qdrant Search] Không thể tạo embedding cho nội dung tìm kiếm.")
-        return []
-
+# --- 4. XỬ LÝ DATABASE QDRANT (TRÍCH XUẤT 12 TRƯỜNG DỮ LIỆU) ---
+def search_rooms_from_db_scroll():
+    """Lấy danh sách các phòng trong CSDL để AI đọc và lọc"""
     try:
-        # Tìm kiếm các phòng tương đồng
-        response = qdrant_client.query_points(
+        records, _ = qdrant_client.scroll(
             collection_name=COLLECTION_NAME,
-            query=query_vector,
-            limit=5
+            limit=50,
+            with_payload=True
         )
-
-        rooms = []
-        for point in response.points:
-            if point.payload:
-                rooms.append(point.payload)
-        return rooms
+        return [rec.payload for rec in records if rec.payload]
     except Exception as e:
-        print("❌ Lỗi khi truy vấn Qdrant:", e)
+        print("❌ Lỗi khi lấy danh sách phòng từ Qdrant:", e)
         return []
 
 
 def upsert_room_to_db(extracted_data: dict, media_urls: list) -> bool:
     try:
-        # Trích xuất 12 trường chuẩn
         address = extracted_data.get("address", "")
         room_name = extracted_data.get("room_name", "Phòng")
-        floor = extracted_data.get("floor", "Không xác định")
-        price = extracted_data.get("price", "Chưa rõ")
-        is_private_bathroom = extracted_data.get("is_private_bathroom", "Không rõ")
-        amenities = extracted_data.get("amenities", "Chưa rõ")
-        allow_pets = extracted_data.get("allow_pets", "Không rõ")
-        move_in_date = extracted_data.get("move_in_date", "Vào ở ngay")
-        has_balcony = extracted_data.get("has_balcony", "Không rõ")
-        has_window = extracted_data.get("has_window", "Không rõ")
-        status = extracted_data.get("status", "TRỐNG")  # Mặc định là TRỐNG khi đăng bài
 
-        # 1. Chuỗi văn bản đại diện cho Vector
-        text_to_vector = f"Địa chỉ: {address}. Phòng: {room_name}, Tầng {floor}. Giá: {price}. Vệ sinh khép kín: {is_private_bathroom}. Thiết bị: {amenities}. Cho nuôi chó mèo: {allow_pets}. Ban công: {has_balcony}, Cửa sổ: {has_window}. Trạng thái: {status}"
-
-        # 2. Tạo vector embedding (3072 dims)
-        vector = get_text_embedding(text_to_vector)
-        if not vector:
-            print("❌ [QDRANT UPSERT CANCELED]: Không tạo được vector embedding!")
-            return False
-
-        # 3. Tạo Deterministic UUIDv5 duy nhất theo Địa chỉ + Tên phòng
+        # Deterministic UUIDv5 theo Địa chỉ + Tên phòng
         point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{address.strip().lower()}_{str(room_name).strip().lower()}"))
 
         payload = {
             "address": address,
             "room_name": room_name,
-            "floor": floor,
-            "price": price,
-            "is_private_bathroom": is_private_bathroom,
-            "amenities": amenities,
-            "allow_pets": allow_pets,
+            "floor": extracted_data.get("floor", "Không xác định"),
+            "price": extracted_data.get("price", "Chưa rõ"),
+            "is_private_bathroom": extracted_data.get("is_private_bathroom", "Không rõ"),
+            "amenities": extracted_data.get("amenities", "Chưa rõ"),
+            "allow_pets": extracted_data.get("allow_pets", "Không rõ"),
             "media_urls": media_urls,
-            "move_in_date": move_in_date,
-            "has_balcony": has_balcony,
-            "has_window": has_window,
-            "status": status,
+            "move_in_date": extracted_data.get("move_in_date", "Vào ở ngay"),
+            "has_balcony": extracted_data.get("has_balcony", "Không rõ"),
+            "has_window": extracted_data.get("has_window", "Không rõ"),
+            "status": extracted_data.get("status", "TRỐNG"),
             "raw_data": extracted_data
         }
 
-        # 4. Lưu/Cập nhật vào Qdrant
+        # Lưu vào Qdrant với dummy vector [1.0, 0.0, 0.0, 0.0]
         qdrant_client.upsert(
             collection_name=COLLECTION_NAME,
             points=[
                 PointStruct(
                     id=point_id,
-                    vector=vector,
+                    vector=[1.0, 0.0, 0.0, 0.0],
                     payload=payload
                 )
             ]
         )
-        print(f"✅ [QDRANT UPSERT SUCCESS]: ID = {point_id} | Địa chỉ = {address} | Trạng thái = {status}")
+        print(f"✅ [QDRANT SAVE SUCCESS]: ID = {point_id} | Địa chỉ = {address}")
         return True
 
     except Exception as e:
-        print("❌ [QDRANT UPSERT EXCEPTION]:", e)
+        print("❌ [QDRANT SAVE EXCEPTION]:", e)
         return False
 
 
 def update_room_status_in_db(address: str, room_name: str, new_status: str = "ĐÃ CHO THUÊ") -> bool:
-    """Cập nhật trạng thái phòng khi chủ nhà báo đã cho thuê"""
     try:
         point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{address.strip().lower()}_{str(room_name).strip().lower()}"))
-        
-        # Lấy point hiện tại ra để update payload
-        points = qdrant_client.retrieve(collection_name=COLLECTION_NAME, ids=[point_id])
-        if points:
-            payload = points[0].payload
-            payload["status"] = new_status
-            payload["raw_data"]["status"] = new_status
-            
-            # Cập nhật lại payload
-            qdrant_client.set_payload(
-                collection_name=COLLECTION_NAME,
-                payload={"status": new_status},
-                points=[point_id]
-            )
-            print(f"🎉 [UPDATE STATUS SUCCESS]: Đã đổi trạng thái phòng {room_name} - {address} thành '{new_status}'")
-            return True
+        qdrant_client.set_payload(
+            collection_name=COLLECTION_NAME,
+            payload={"status": new_status},
+            points=[point_id]
+        )
+        print(f"🎉 [UPDATE STATUS SUCCESS]: {room_name} -> '{new_status}'")
+        return True
     except Exception as e:
         print("❌ [UPDATE STATUS ERROR]:", e)
-    return False
+        return False
 
 
 # --- 5. TƯƠNG TÁC ZALO OA API ---
@@ -304,7 +229,6 @@ def upload_image_to_zalo(image_url_or_path: str) -> str:
         else:
             filename = os.path.basename(image_url_or_path)
             local_filepath = os.path.join(MEDIA_DIR, filename)
-
             if os.path.exists(local_filepath):
                 with open(local_filepath, "rb") as f:
                     img_bytes = f.read()
@@ -315,12 +239,10 @@ def upload_image_to_zalo(image_url_or_path: str) -> str:
         files = {'file': ('image.jpg', img_bytes, 'image/jpeg')}
         response = requests.post(url, headers=headers, files=files, timeout=15)
         res_data = response.json()
-
         if res_data.get("error") == 0:
             return res_data.get("data", {}).get("attachment_id", "")
     except Exception as e:
         print("❌ [ZALO UPLOAD EXCEPTION]:", e)
-
     return ""
 
 
@@ -391,7 +313,7 @@ def add_pending_media(user_id: str, new_urls: list):
     }
 
 
-# --- 7. LUỒNG XỬ LÝ CHÍNH VỚI AI VÀ 12 TRƯỜNG DỮ LIỆU ---
+# --- 7. LUỒNG XỬ LÝ AI VÀ LOGIC PHÒNG TRỌ ---
 def process_zalo_ai_logic(user_id: str, message_text: str, media_items: list):
     incoming_media_urls = []
     for item in media_items:
@@ -411,10 +333,7 @@ def process_zalo_ai_logic(user_id: str, message_text: str, media_items: list):
     urls_to_send = all_current_media
 
     try:
-        found_rooms = []
-        is_greeting = any(kw in message_text.lower() for kw in ["chào", "hi", "hello", "bắt đầu"])
-        if not is_greeting and message_text.strip():
-            found_rooms = search_rooms_from_db(message_text)
+        all_rooms_in_db = search_rooms_from_db_scroll()
 
         system_prompt = f"""
 Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ thông minh trên Zalo.
@@ -422,7 +341,7 @@ Phân tích tin nhắn người dùng và trích xuất/xử lý chính xác 12 
 
 Tin nhắn người dùng: "{message_text}"
 Hình ảnh/Video gửi kèm: {json.dumps(all_current_media)}
-Dữ liệu các phòng tìm thấy trong CSDL Qdrant: {json.dumps(found_rooms, ensure_ascii=False)}
+Dữ liệu tất cả phòng có trong CSDL Qdrant: {json.dumps(all_rooms_in_db, ensure_ascii=False)}
 
 YÊU CẦU PHÂN LOẠI "action":
 1. "ADD_ROOM": Người dùng đăng/thêm bài cho thuê phòng mới.
@@ -449,11 +368,11 @@ XỬ LÝ CHI TIẾT THEO ACTION:
   Nếu thiếu địa chỉ rõ ràng -> Soạn `ai_reply` nhắc khách bổ sung địa chỉ chi tiết (Đường, Phường, Quận, Thành phố).
 
 - Nếu `action` == "SEARCH_ROOM":
-  Chỉ gợi ý các phòng có `status` == "TRỐNG". Nếu phòng đã cho thuê thì bỏ qua hoặc thông báo rõ.
+  Chỉ gợi ý các phòng có `status` == "TRỐNG" trong danh sách CSDL.
   Soạn `ai_reply` đầy đủ 12 thông tin phòng cho người tìm trọ dễ xem.
 
 - Nếu `action` == "UPDATE_STATUS":
-  Xác định phòng nào được báo đã thuê dựa trên tin nhắn và `found_rooms`. Đặt `status` = "ĐÃ CHO THUÊ".
+  Xác định phòng nào được báo đã thuê dựa trên tin nhắn và danh sách CSDL. Đặt `status` = "ĐÃ CHO THUÊ".
 
 TRẢ VỀ DUY NHẤT CHUỖI JSON ĐÚNG ĐỊNH DẠNG (KHÔNG DÙNG FENCE CODE BLOCK ```):
 {{
@@ -497,15 +416,6 @@ TRẢ VỀ DUY NHẤT CHUỖI JSON ĐÚNG ĐỊNH DẠNG (KHÔNG DÙNG FENCE COD
             room_name = extracted.get("room_name", "")
             if address and room_name:
                 update_room_status_in_db(address, room_name, new_status="ĐÃ CHO THUÊ")
-
-        elif action == "SEARCH_ROOM" and found_rooms:
-            # Lấy ảnh phòng còn TRỐNG để gửi cho khách
-            db_media = []
-            for room in found_rooms:
-                if room.get("status") == "TRỐNG":
-                    db_media.extend(room.get("media_urls", []))
-            if db_media:
-                urls_to_send = db_media
 
     except Exception as err:
         print("❌ [AI Logic Exception]:", err)
