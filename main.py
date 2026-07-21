@@ -10,7 +10,7 @@ from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
-from google import genai
+
 from google.genai import types
 
 # Tích hợp Cloudinary
@@ -30,6 +30,11 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 CLOUDINARY_URL = os.environ.get("CLOUDINARY_URL")
 if CLOUDINARY_URL:
     cloudinary.config(cloudinary_url=CLOUDINARY_URL)
+
+import google.generativeai as genai
+genai.configure(api_key=os.environ.get("GEMINI_API_KEY"))
+for model in genai.list_models():
+    print(model)
 
 # --- 1. CẤU HÌNH GEMINI & QDRANT --
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
