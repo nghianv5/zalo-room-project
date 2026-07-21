@@ -148,7 +148,46 @@ def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
     return zalo_media_url
 
 
-# --- 4. TƯƠNG TÁC GEMINI GENERATIVE SDK ---
+def get_text_embedding(text: str, retries: int = 3, delay: int = 2):
+    """
+    Tạo Vector Embedding sử dụng model gemini-embedding-001 chính xác từ API Key.
+    """
+    if not GEMINI_API_KEY:
+        print("❌ [EMBEDDING] Thiếu GEMINI_API_KEY!")
+        return None
+
+    # Dùng chuẩn model: gemini-embedding-001
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key={GEMINI_API_KEY}"
+    headers = {"Content-Type": "application/json"}
+    
+    payload = {
+        "model": "models/gemini-embedding-001",
+        "content": {
+            "parts": [
+                {"text": text}
+            ]
+        }
+    }
+
+    for attempt in range(retries):
+        try:
+            if not text or not text.strip():
+                return None
+
+            response = requests.post(url, headers=headers, json=payload, timeout=10)
+            res_json = response.json()
+
+            # Lấy danh sách giá trị vector trả về
+            if "embedding" in res_json and "values" in res_json["embedding"]:
+                return res_json["embedding"]["values"]
+        except Exception as e:
+            print(f"❌ [EMBEDDING] Lỗi kết nối lần {attempt + 1}: {e}")
+
+        if attempt < retries - 1:
+            time.sleep(delay)
+
+    return None
+    
 def generate_content_with_retry(prompt: str, mime_type: str = "application/json", retries: int = 3) -> str:
     if not gemini_client:
         return ""
