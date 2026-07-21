@@ -18,6 +18,8 @@ from google.genai import types
 import cloudinary
 import cloudinary.uploader
 
+import pandas as pd
+
 app = FastAPI()
 
 # --- 0. BỘ NHỚ ĐỆM TẠM THỜI (PENDING MEDIA CACHE) ---
@@ -59,6 +61,58 @@ try:
 except Exception as e:
     print("❌ Lỗi khởi tạo Qdrant:", e)
 
+def process_excel_file(file_url: str) -> int:
+    """Tải file Excel, đọc dữ liệu từng dòng và lưu vào Qdrant"""
+    try:
+        # 1. Tải file về tạm thời
+        res = requests.get(file_url, timeout=30)
+        if res.status_code != 200:
+            return 0
+            
+        temp_file = "temp_rooms.xlsx"
+        with open(temp_file, "wb") as f:
+            f.write(res.content)
+
+        # 2. Đọc file bằng Pandas (chuyển các ô trống thành chuỗi "")
+        df = pd.read_excel(temp_file).fillna("[Chưa cập nhật]")
+        
+        success_count = 0
+        
+        # 3. Duyệt từng dòng trong Excel
+        for _, row in df.iterrows():
+            # Áp vào cấu hình 12 trường thông tin
+            extracted_data = {
+                "address": str(row.get("Địa chỉ", "")).strip(),
+                "room_name": str(row.get("Tên phòng", "Phòng trọ")).strip(),
+                "floor": str(row.get("Tầng", "[Chưa cập nhật]")),
+                "price": str(row.get("Giá", "[Chưa cập nhật]")),
+                "is_private_bathroom": str(row.get("Vệ sinh", "[Chưa cập nhật]")),
+                "appliances": str(row.get("Thiết bị", "[Chưa cập nhật]")),
+                "allow_pets": str(row.get("Thú cưng", "[Chưa cập nhật]")),
+                "move_in_date": str(row.get("Ngày vào ở", "[Chưa cập nhật]")),
+                "has_balcony": str(row.get("Ban công", "[Chưa cập nhật]")),
+                "has_window": str(row.get("Cửa sổ", "[Chưa cập nhật]")),
+                "status": str(row.get("Trạng thái", "TRỐNG"))
+            }
+
+            # Lấy link ảnh/video nếu cột đó có dữ liệu
+            media_raw = str(row.get("Media", ""))
+            media_urls = [url.strip() for url in media_raw.split(",") if url.strip() and url != "[Chưa cập nhật]"]
+
+            if extracted_data["address"] and extracted_data["address"] != "[Chưa cập nhật]":
+                # Gọi hàm upsert để cập nhật hoặc thêm mới vào Qdrant
+                if upsert_room_to_db(extracted_data, media_urls):
+                    success_count += 1
+
+        # Xóa file tạm
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+
+        return success_count
+
+    except Exception as e:
+        print("❌ [EXCEL PROCESS ERROR]:", e)
+        return 0
 
 # --- 2. HÀM LƯU FILE MEDIA VĨNH VIỄN ---
 def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
@@ -569,6 +623,27 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
             send_zalo_message(sender_id, "👋 Chào mừng bạn! Hãy gửi thông tin hoặc hình ảnh phòng trọ để bắt đầu nhé!")
             return {"status": "success"}
 
+        # Thêm xử lý khi người dùng gửi File (.xlsx, .csv)
+        if event_name == "user_send_file":
+            attachments = data.get("message", {}).get("attachments", [])
+            for att in attachments:
+                file_payload = att.get("payload", {})
+                file_url = file_payload.get("url")
+                file_name = str(file_payload.get("name", "")).lower()
+
+                # Nếu là file Excel (.xlsx hoặc .xls)
+                if file_url and (file_name.endswith(".xlsx") or file_name.endswith(".xls")):
+                    send_zalo_message(sender_id, "📥 Em đã nhận file Excel! Đang tiến hành cập nhật dữ liệu phòng...")
+                    
+                    # Chạy xử lý ngầm (Background Task)
+                    def handle_excel():
+                        count = process_excel_file(file_url)
+                        send_zalo_message(sender_id, f"✅ Đã nhập/cập nhật thành công {count} phòng từ file Excel vào hệ thống!")
+
+                    background_tasks.add_task(handle_excel)
+                    return {"status": "success"}
+                    
+        
         if event_name in ["user_send_text", "user_send_image", "user_send_file", "user_send_video"]:
             message_obj = data.get("message", {})
             text = message_obj.get("text", "")
