@@ -341,7 +341,7 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list, point_id: str = No
                 )
             ]
         )
-        print(f"✅ [QDRANT UPSERT SUCCESS]: ID = {final_point_id} | Địa chỉ = {address}")
+        print(f"✅ [QDRANT UPSERT SUCCESS]: ID = {final_point_id} | Địa chỉ = {payload}")
         return True
 
     except Exception as e:
