@@ -270,11 +270,22 @@ def search_rooms_by_vector(query_text: str, top_k: int = 5) -> List[dict]:
         return []
 
 
-def upsert_room_to_db(extracted_data: dict, media_urls: list, point_id: str = None) -> bool:
-    """Đăng mới / Cập nhật phòng với đầy đủ 12 trường thông tin (Tự động xóa record cũ nếu đổi địa chỉ)"""
+from datetime import datetime
+
+def upsert_room_to_db(
+    extracted_data: dict, 
+    media_urls: list, 
+    point_id: str = None,
+    zalo_user_id: str = "SYSTEM",
+    landlord_phone: str = "Chưa rõ"
+) -> bool:
+    """Đăng mới / Cập nhật phòng kèm thông tin quản lý (User ID, Phone, Created/Updated At)"""
     try:
         address = extracted_data.get("address", "")
         room_name = extracted_data.get("room_name", "Phòng trọ")
+        
+        # Lấy số điện thoại từ AI trích xuất (nếu có) hoặc dùng tham số truyền vào
+        phone = extracted_data.get("landlord_phone") or landlord_phone or "Chưa rõ"
 
         # 1. Tạo chuỗi văn bản tổng hợp phục vụ Vector Search
         text_to_embed = f"""
@@ -289,31 +300,48 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list, point_id: str = No
         Ban công: {extracted_data.get('has_balcony', '')}
         Cửa sổ: {extracted_data.get('has_window', '')}
         Trạng thái: {extracted_data.get('status', 'TRỐNG')}
+        SĐT Chủ nhà: {phone}
         """.strip()
 
         vector = get_text_embedding(text_to_embed)
         if not vector:
-            print("❌ Không thể tạo vector cho phòng mới, hủy upsert.")
+            print("❌ Không thể tạo vector cho phòng, hủy upsert.")
             return False
 
-        # 2. Tính toán ID mới dựa trên địa chỉ + tên phòng mới (Deterministic UUIDv5)
+        # 2. Tính toán Deterministic ID mới dựa trên địa chỉ + tên phòng
         new_point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{address.strip().lower()}_{str(room_name).strip().lower()}"))
 
-        # 3. XỬ LÝ ĐỔI ĐỊA CHỈ: Nếu truyền ID cũ vào và ID cũ khác ID mới -> Xóa record ID cũ đi
+        # 3. Quản lý Thời gian (Created_at / Updated_at)
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        created_at = now_str # Mặc định thời gian tạo mới
+
+        # Nếu truyền point_id cũ vào và đổi địa chỉ -> Xóa ID cũ
         if point_id and point_id != new_point_id:
             try:
+                # Thử lấy thông tin bản ghi cũ trước khi xóa để giữ lại created_at ban đầu
+                old_records = qdrant_client.retrieve(collection_name=COLLECTION_NAME, ids=[point_id])
+                if old_records and old_records[0].payload:
+                    created_at = old_records[0].payload.get("created_at", now_str)
+
                 qdrant_client.delete(
                     collection_name=COLLECTION_NAME,
-                    points_selector=[point_id]  # Xóa chính xác theo Point ID cũ vừa tìm được
+                    points_selector=[point_id]
                 )
-                print(f"🗑️ [QDRANT DELETE OLD SUCCESS]: Đã xóa bản ghi cũ (ID: {point_id})")
+                print(f"🗑️ [QDRANT DELETE OLD]: Đã xóa bản ghi cũ (ID: {point_id})")
             except Exception as del_err:
-                print(f"⚠️ [QDRANT DELETE OLD ERROR]: {del_err}")
+                print(f"⚠️ Lỗi khi xóa bản ghi cũ: {del_err}")
+        elif point_id and point_id == new_point_id:
+            # Nếu giữ nguyên ID (Cập nhật cùng địa chỉ), lấy lại created_at cũ
+            try:
+                records = qdrant_client.retrieve(collection_name=COLLECTION_NAME, ids=[point_id])
+                if records and records[0].payload:
+                    created_at = records[0].payload.get("created_at", now_str)
+            except Exception:
+                pass
 
-        # ID mới sẽ được ghi/cập nhật vào Qdrant
         final_point_id = new_point_id
 
-        # 4. Payload lưu giữ chuẩn 12 trường thông tin
+        # 4. Payload mở rộng đầy đủ các trường
         payload = {
             "1_address": address,
             "2_room_name": room_name,
@@ -327,10 +355,15 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list, point_id: str = No
             "10_has_balcony": extracted_data.get("has_balcony", "Chưa rõ"),
             "11_has_window": extracted_data.get("has_window", "Chưa rõ"),
             "12_status": extracted_data.get("status", "TRỐNG"),
+            # --- CÁC TRƯỜNG THÔNG TIN QUẢN LÝ MỚI BỔ SUNG ---
+            "zalo_user_id": zalo_user_id,
+            "landlord_phone": phone,
+            "created_at": created_at,
+            "updated_at": now_str,
             "raw_data": extracted_data
         }
 
-        # 5. Upsert bản ghi vào Qdrant
+        # 5. Upsert vào Qdrant với wait=True để ép đồng bộ ngay lập tức
         qdrant_client.upsert(
             collection_name=COLLECTION_NAME,
             points=[
@@ -340,9 +373,9 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list, point_id: str = No
                     payload=payload
                 )
             ],
-            wait=True  # <--- THÊM THAM SỐ NÀY ĐỂ ÉP ĐỒNG BỘ DỮ LIỆU NGAY LẬP TỨC
+            wait=True
         )
-        print(f"✅ [QDRANT UPSERT SUCCESS]: ID = {final_point_id} | Địa chỉ = {payload}")
+        print(f"✅ [QDRANT UPSERT SUCCESS]: ID = {final_point_id} | User = {zalo_user_id} | SĐT = {phone}")
         return True
 
     except Exception as e:
@@ -351,17 +384,24 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list, point_id: str = No
 
 
 # --- SỬA HÀM update_room_status_in_db ---
-def update_room_status_in_db(point_id: str, new_status: str = "ĐÃ CHO THUÊ") -> bool:
+def update_room_status_in_db(point_id: str, new_status: str, zalo_user_id: str = "SYSTEM") -> bool:
     """Cập nhật trạng thái phòng dựa trên Point ID thực tế tìm được"""
     if not point_id:
         print("❌ [UPDATE STATUS ERROR]: Không có point_id hợp lệ")
         return False
         
     try:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         qdrant_client.set_payload(
             collection_name=COLLECTION_NAME,
-            payload={"12_status": new_status},
-            points=[point_id]
+            payload={
+                "12_status": new_status,
+                "raw_data.status": new_status,
+                "updated_at": now_str,
+                "zalo_user_id": zalo_user_id
+            },
+            points=[point_id],
+            wait=True
         )
         print(f"🎉 [UPDATE STATUS SUCCESS]: Point ID {point_id} -> '{new_status}'")
         return True
@@ -485,7 +525,11 @@ def add_pending_media(user_id: str, new_urls: list):
 
 
 # --- 8. LUỒNG XỬ LÝ AI VÀ LOGIC DỮ LIỆU PHÒNG ---
-def process_zalo_ai_logic(user_id: str, message_text: str, media_items: list):
+def process_zalo_ai_logic(
+    user_message: str, 
+    media_urls: list = None, 
+    user_id: str = "SYSTEM"
+) -> str:
     incoming_media_urls = []
     for item in media_items:
         saved_url = save_media_file(item["url"], is_video=item.get("is_video", False))
@@ -579,13 +623,16 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
                 # ❌ KHÔNG TRUYỀN existing_point_id KHI THÊM MỚI PHÒNG
                 # Điều này đảm bảo phòng mới độc lập 100%, không bao giờ xóa nhầm các phòng cũ có địa chỉ tương tự
                 upsert_room_to_db(
-                    extracted_data=extracted, 
-                    media_urls=all_current_media, 
-                    point_id=None # <--- Ép point_id = None để luôn tạo phòng mới độc lập
+                    extracted_data=extracted,
+                    media_urls=all_current_media,
+                    point_id=None, # Ép tạo phòng độc lập
+                    zalo_user_id=user_id,
+                    landlord_phone=landlord_phone
                 )
                 print(f"➕ [ADD NEW ROOM SUCCESS]: Đã thêm phòng mới tại {address}")
 
         elif action == "SEARCH_ROOM" and relevant_rooms:
+            print(f"SEARCH_ROOM SUCCESS]")
             for room in relevant_rooms:
                 m_urls = room.get("8_media_urls") or room.get("media_urls")
                 if m_urls and len(m_urls) > 0:
@@ -598,10 +645,12 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
 
             if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
                 # Truyền existing_point_id vào để nếu ĐỔI ĐỊA CHỈ thì sẽ xóa record cũ
-                success = upsert_room_to_db(
+                upsert_room_to_db(
                     extracted_data=extracted,
                     media_urls=all_current_media,
-                    point_id=existing_point_id
+                    point_id=existing_point_id,
+                    zalo_user_id=user_id,
+                    landlord_phone=landlord_phone
                 )
                 if success:
                     print(f"🔄 [UPDATE ROOM SUCCESS]: Cập nhật thành công phòng ID {existing_point_id}")
@@ -616,7 +665,8 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
                 # Cập nhật riêng trường status qua set_payload
                 success = update_room_status_in_db(
                     point_id=existing_point_id, 
-                    new_status=new_status
+                    new_status=new_status,
+                    zalo_user_id=user_id
                 )
                 if success:
                     print(f"✅ [UPDATE STATUS SUCCESS]: ID {existing_point_id} -> {new_status}")
@@ -681,8 +731,9 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
                         "is_video": (item.get("type") == "video") or ("user_send_video" in event_name)
                     })
 
-            background_tasks.add_task(process_zalo_ai_logic, sender_id, text, media_items)
-
+            background_tasks.add_task(process_zalo_ai_logic, text, media_items, sender_id, , )
+    
+    
     except Exception as e:
         print("❌ [Webhook Exception]:", e)
 
