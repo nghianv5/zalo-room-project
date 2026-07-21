@@ -731,7 +731,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
                         "is_video": (item.get("type") == "video") or ("user_send_video" in event_name)
                     })
 
-            background_tasks.add_task(process_zalo_ai_logic, text, media_items, sender_id, , )
+            background_tasks.add_task(process_zalo_ai_logic, text, media_items, sender_id )
     
     
     except Exception as e:
