@@ -282,15 +282,20 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list, existing_point_id:
         return False
 
 
-def update_room_status_in_db(address: str, room_name: str, new_status: str = "ĐÃ CHO THUÊ") -> bool:
+# --- SỬA HÀM update_room_status_in_db ---
+def update_room_status_in_db(point_id: str, new_status: str = "ĐÃ CHO THUÊ") -> bool:
+    """Cập nhật trạng thái phòng dựa trên Point ID thực tế tìm được"""
+    if not point_id:
+        print("❌ [UPDATE STATUS ERROR]: Không có point_id hợp lệ")
+        return False
+        
     try:
-        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{address.strip().lower()}_{str(room_name).strip().lower()}"))
         qdrant_client.set_payload(
             collection_name=COLLECTION_NAME,
             payload={"12_status": new_status},
             points=[point_id]
         )
-        print(f"🎉 [UPDATE STATUS SUCCESS]: {room_name} -> '{new_status}'")
+        print(f"🎉 [UPDATE STATUS SUCCESS]: Point ID {point_id} -> '{new_status}'")
         return True
     except Exception as e:
         print("❌ [UPDATE STATUS ERROR]:", e)
@@ -458,6 +463,11 @@ DỮ LIỆU ĐẦU VÀO:
 YÊU CẦU TRẢ VỀ JSON:
 - Nếu thiếu thông tin trường nào, đặt giá trị là "[Chưa cập nhật]".
 - Trình bày `ai_reply` đẹp mắt, sạch sẽ để gửi lại trên Zalo cho người dùng. ĐỪNG ĐÂM ĐƯỜNG LINK HÌNH ÁNH VÀO CÂU TRẢ LỜI, hình ảnh sẽ được hệ thống hiển thị đính kèm tự động.
+
+QUY TẮC PHÂN LOẠI ACTION:
+- "ADD_ROOM": Dùng khi người dùng ĐĂNG PHÒNG MỚI hoặc CẬP NHẬT/SỬA BẤT KỲ THÔNG TIN NÀO CỦA PHÒNG (Địa chỉ, Giá, Tiện ích, Ảnh, Tầng...).
+- "UPDATE_STATUS": CHỈ DÙNG khi người dùng báo phòng "ĐÃ CHO THUÊ", "ĐÃ CÓ NGL BẮT", "ĐÃ CHỐT" hoặc "ĐỔI SANG TRỐNG".
+- "SEARCH_ROOM": Dùng khi khách tìm kiếm phòng.
 
 TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
 {{
