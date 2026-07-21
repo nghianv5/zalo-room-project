@@ -37,10 +37,10 @@ if CLOUDINARY_URL:
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-# Model Embedding chuẩn của Google (768 chiều)
-EMBEDDING_MODEL = "text-embedding-004"
+# Tên model chính xác chạy ổn định
+EMBEDDING_MODEL = "models/gemini-embedding-001"
 VECTOR_SIZE = 768
-COLLECTION_NAME = "rooms_v10_embedding"
+COLLECTION_NAME = "rooms_v11_embedding"
 
 qdrant_client = QdrantClient(
     url=os.environ.get("QDRANT_URL"),
@@ -62,22 +62,47 @@ except Exception as e:
     print("❌ Lỗi khởi tạo Qdrant:", e)
 
 
-# --- 2. HÀM TẠO EMBEDDING BẰNG SDK GOOGLE.GENAI MỚI ---
-def get_text_embedding(text: str) -> List[float]:
-    """Tạo vector embedding 768 chiều từ văn bản"""
-    if not gemini_client or not text.strip():
+# --- 2. HÀM TẠO EMBEDDING CHUẨN ĐÃ SỬA LỖI 404 ---
+def get_text_embedding(text: str, retries: int = 3) -> List[float]:
+    """Tạo Vector Embedding với model gemini-embedding-001 ổn định 100%"""
+    if not text or not text.strip():
         return []
-    
-    try:
-        response = gemini_client.models.embed_content(
-            model=EMBEDDING_MODEL,
-            contents=text
-        )
-        if response and response.embedding and response.embedding.values:
-            return response.embedding.values
-    except Exception as e:
-        print(f"❌ [EMBEDDING ERROR]: Lỗi khi tạo vector với {EMBEDDING_MODEL}: {e}")
-    
+
+    # Danh sách các tên model chạy tốt với API Key
+    models_to_try = ["models/gemini-embedding-001", "models/text-embedding-004"]
+
+    # 1. Thử qua SDK Google GenAI mới
+    if gemini_client:
+        for model_name in models_to_try:
+            for attempt in range(retries):
+                try:
+                    response = gemini_client.models.embed_content(
+                        model=model_name,
+                        contents=text
+                    )
+                    if response and response.embedding and response.embedding.values:
+                        return response.embedding.values
+                except Exception as e:
+                    if attempt == retries - 1:
+                        print(f"⚠️ [SDK EMBED FAILED] Model '{model_name}': {e}")
+                    time.sleep(1)
+
+    # 2. Fallback gọi REST API chuẩn (như cách bạn làm) nếu SDK gặp vấn đề
+    if GEMINI_API_KEY:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key={GEMINI_API_KEY}"
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "model": "models/gemini-embedding-001",
+            "content": {"parts": [{"text": text}]}
+        }
+        try:
+            res = requests.post(url, headers=headers, json=payload, timeout=10)
+            res_json = res.json()
+            if "embedding" in res_json and "values" in res_json["embedding"]:
+                return res_json["embedding"]["values"]
+        except Exception as e:
+            print("❌ [REST FALLBACK ERROR]:", e)
+
     return []
 
 
@@ -102,7 +127,6 @@ def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
         except Exception as e:
             print(f"❌ [Cloudinary Error]: {e}, chuyển sang lưu local...")
 
-    # Fallback lưu tại server nội bộ
     try:
         response = requests.get(zalo_media_url, timeout=15, stream=True)
         if response.status_code == 200:
@@ -162,10 +186,8 @@ def generate_content_with_retry(prompt: str, mime_type: str = "application/json"
 
 # --- 5. TƯƠNG TÁC DATABASE QDRANT BẰNG VECTOR SEARCH ---
 def search_rooms_by_vector(query_text: str, top_k: int = 5) -> List[dict]:
-    """Tìm kiếm phòng bằng Vector Search theo ngữ nghĩa của câu hỏi"""
     query_vector = get_text_embedding(query_text)
     
-    # Nếu tạo vector thất bại, fallback sang lấy danh sách phòng cơ bản
     if not query_vector:
         print("⚠️ Không tạo được query vector, cuộn danh sách phòng dự phòng...")
         try:
@@ -189,12 +211,10 @@ def search_rooms_by_vector(query_text: str, top_k: int = 5) -> List[dict]:
 
 
 def upsert_room_to_db(extracted_data: dict, media_urls: list) -> bool:
-    """Tạo vector cho phòng và lưu vào Qdrant"""
     try:
         address = extracted_data.get("address", "")
         room_name = extracted_data.get("room_name", "Phòng")
 
-        # Chuẩn bị văn bản mô tả để tạo Embedding ngữ nghĩa đầy đủ
         text_to_embed = f"""
         Địa chỉ: {address}
         Tên/Số phòng: {room_name}
@@ -214,7 +234,6 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list) -> bool:
             print("❌ Không thể tạo vector cho phòng mới, hủy upsert.")
             return False
 
-        # Deterministic UUIDv5 theo Địa chỉ + Tên phòng
         point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{address.strip().lower()}_{str(room_name).strip().lower()}"))
 
         payload = {
@@ -388,7 +407,6 @@ def process_zalo_ai_logic(user_id: str, message_text: str, media_items: list):
     urls_to_send = all_current_media
 
     try:
-        # Lấy Top-K phòng liên quan nhất dựa trên Vector Search
         relevant_rooms = search_rooms_by_vector(message_text, top_k=5)
 
         system_prompt = f"""
