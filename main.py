@@ -203,18 +203,20 @@ def search_rooms_by_vector(query_text: str, top_k: int = 5) -> List[dict]:
         return []
 
 
-def upsert_room_to_db(extracted_data: dict, media_urls: list) -> bool:
+def upsert_room_to_db(extracted_data: dict, media_urls: list, existing_point_id: str = None) -> bool:
+    """Đăng mới / Cập nhật phòng với đầy đủ 12 trường thông tin (Tự động xóa record cũ nếu đổi địa chỉ)"""
     try:
         address = extracted_data.get("address", "")
         room_name = extracted_data.get("room_name", "Phòng trọ")
 
+        # 1. Tạo chuỗi văn bản tổng hợp phục vụ Vector Search
         text_to_embed = f"""
         Địa chỉ: {address}
         Tên/Số phòng: {room_name}
         Tầng: {extracted_data.get('floor', '')}
         Giá thuê: {extracted_data.get('price', '')}
         Khép kín: {extracted_data.get('is_private_bathroom', '')}
-        Thiết bị: {extracted_data.get('appliances', '')}
+        Thiết bị (Điều hòa, nóng lạnh, máy giặt): {extracted_data.get('appliances', '')}
         Cho nuôi chó mèo: {extracted_data.get('allow_pets', '')}
         Thời gian vào ở: {extracted_data.get('move_in_date', '')}
         Ban công: {extracted_data.get('has_balcony', '')}
@@ -227,35 +229,52 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list) -> bool:
             print("❌ Không thể tạo vector cho phòng mới, hủy upsert.")
             return False
 
-        point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{address.strip().lower()}_{str(room_name).strip().lower()}"))
+        # 2. Tính toán ID mới dựa trên địa chỉ + tên phòng mới
+        new_point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{address.strip().lower()}_{str(room_name).strip().lower()}"))
 
+        # 3. XỬ LÝ ĐỔI ĐỊA CHỈ: Nếu truyền ID cũ vào và ID cũ khác ID mới -> Xóa record ID cũ đi
+        if existing_point_id and existing_point_id != new_point_id:
+            try:
+                qdrant_client.delete(
+                    collection_name=COLLECTION_NAME,
+                    points_selector=[existing_point_id]
+                )
+                print(f"🗑️ [QDRANT DELETE OLD]: Đã xóa bản ghi cũ (ID: {existing_point_id}) do địa chỉ thay đổi.")
+            except Exception as del_err:
+                print(f"⚠️ Lỗi khi xóa bản ghi cũ: {del_err}")
+
+        # ID sẽ được chèn/cập nhật vào DB
+        final_point_id = new_point_id
+
+        # 4. Payload lưu giữ chuẩn 12 trường thông tin
         payload = {
             "1_address": address,
             "2_room_name": room_name,
-            "3_floor": extracted_data.get("floor", "[Chưa cập nhật]"),
-            "4_price": extracted_data.get("price", "[Chưa cập nhật]"),
-            "5_is_private_bathroom": extracted_data.get("is_private_bathroom", "[Chưa cập nhật]"),
-            "6_appliances": extracted_data.get("appliances", "[Chưa cập nhật]"),
-            "7_allow_pets": extracted_data.get("allow_pets", "[Chưa cập nhật]"),
+            "3_floor": extracted_data.get("floor", "Không xác định"),
+            "4_price": extracted_data.get("price", "Chưa rõ"),
+            "5_is_private_bathroom": extracted_data.get("is_private_bathroom", "Chưa rõ"),
+            "6_appliances": extracted_data.get("appliances", "Chưa rõ"),
+            "7_allow_pets": extracted_data.get("allow_pets", "Chưa rõ"),
             "8_media_urls": media_urls,
-            "9_move_in_date": extracted_data.get("move_in_date", "[Chưa cập nhật]"),
-            "10_has_balcony": extracted_data.get("has_balcony", "[Chưa cập nhật]"),
-            "11_has_window": extracted_data.get("has_window", "[Chưa cập nhật]"),
+            "9_move_in_date": extracted_data.get("move_in_date", "Vào ở ngay"),
+            "10_has_balcony": extracted_data.get("has_balcony", "Chưa rõ"),
+            "11_has_window": extracted_data.get("has_window", "Chưa rõ"),
             "12_status": extracted_data.get("status", "TRỐNG"),
             "raw_data": extracted_data
         }
 
+        # 5. Upsert bản ghi vào Qdrant
         qdrant_client.upsert(
             collection_name=COLLECTION_NAME,
             points=[
                 PointStruct(
-                    id=point_id,
+                    id=final_point_id,
                     vector=vector,
                     payload=payload
                 )
             ]
         )
-        print(f"✅ [QDRANT UPSERT SUCCESS]: ID = {point_id} | Địa chỉ = {address}")
+        print(f"✅ [QDRANT UPSERT SUCCESS]: ID = {final_point_id} | Địa chỉ = {address}")
         return True
 
     except Exception as e:
@@ -471,11 +490,15 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
 
         if action == "ADD_ROOM":
             address = str(extracted.get("address", "")).strip()
+            
+            # Tìm ID phòng cũ khớp nhất (nếu có)
+            existing_point_id = None
+            if relevant_rooms and len(relevant_rooms) > 0:
+                existing_point_id = relevant_rooms[0].get("id")  # Lấy ID của kết quả Vector Search gần nhất
+
             if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
-                upsert_room_to_db(extracted, all_current_media)
-            else:
-                if all_current_media:
-                    add_pending_media(user_id, all_current_media)
+                # Truyền existing_point_id vào
+                upsert_room_to_db(extracted, all_current_media, existing_point_id=existing_point_id)
 
         elif action == "SEARCH_ROOM" and relevant_rooms:
             # Lấy ảnh phòng đầu tiên trong CSDL để đính kèm lên tin nhắn Zalo
