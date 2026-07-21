@@ -178,14 +178,20 @@ def generate_content_with_retry(prompt: str, mime_type: str = "application/json"
 
 
 # --- 5. TƯƠNG TÁC DATABASE QDRANT (CẬP NHẬT QUERY_POINTS) ---
+# --- SỬA HÀM search_rooms_by_vector ---
 def search_rooms_by_vector(query_text: str, top_k: int = 5) -> List[dict]:
     query_vector = get_text_embedding(query_text)
     
     if not query_vector:
-        print("⚠️ Không tạo được query vector, cuộn danh sách phòng dự phòng...")
         try:
             records, _ = qdrant_client.scroll(collection_name=COLLECTION_NAME, limit=top_k, with_payload=True)
-            return [rec.payload for rec in records if rec.payload]
+            results = []
+            for rec in records:
+                if rec.payload:
+                    p = rec.payload
+                    p["id"] = rec.id  # <--- GÁN THÊM ID VÀO DỰ PHÒNG
+                    results.append(p)
+            return results
         except Exception as e:
             print("❌ Lỗi scroll dự phòng:", e)
             return []
@@ -197,7 +203,14 @@ def search_rooms_by_vector(query_text: str, top_k: int = 5) -> List[dict]:
             limit=top_k,
             with_payload=True
         )
-        return [hit.payload for hit in search_result.points if hit.payload]
+        
+        results = []
+        for hit in search_result.points:
+            if hit.payload:
+                p = hit.payload
+                p["id"] = hit.id  # <--- THÊM DÒNG NÀY: Lưu lại Point ID thực tế của Qdrant
+                results.append(p)
+        return results
     except Exception as e:
         print("❌ [VECTOR SEARCH ERROR]:", e)
         return []
@@ -237,11 +250,11 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list, point_id: str = No
             try:
                 qdrant_client.delete(
                     collection_name=COLLECTION_NAME,
-                    points_selector=[point_id]
+                    points_selector=[point_id]  # Xóa chính xác theo Point ID cũ vừa tìm được
                 )
-                print(f"🗑️ [QDRANT DELETE OLD]: Đã xóa bản ghi cũ (ID: {point_id}) do địa chỉ thay đổi.")
+                print(f"🗑️ [QDRANT DELETE OLD SUCCESS]: Đã xóa bản ghi cũ (ID: {point_id})")
             except Exception as del_err:
-                print(f"⚠️ Lỗi khi xóa bản ghi cũ: {del_err}")
+                print(f"⚠️ [QDRANT DELETE OLD ERROR]: {del_err}")
 
         # ID mới sẽ được ghi/cập nhật vào Qdrant
         final_point_id = new_point_id
