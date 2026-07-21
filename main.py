@@ -534,7 +534,7 @@ YÊU CẦU TRẢ VỀ JSON:
 
 QUY TẮC PHÂN LOẠI ACTION:
 - "ADD_ROOM": Dùng khi người dùng ĐĂNG PHÒNG MỚI hoặc CẬP NHẬT/SỬA BẤT KỲ THÔNG TIN NÀO CỦA PHÒNG (Địa chỉ, Giá, Tiện ích, Ảnh, Tầng...).
-- "UPDATE_STATUS": CHỈ DÙNG khi người dùng báo phòng "ĐÃ CHO THUÊ", "ĐÃ CÓ NGL BẮT", "ĐÃ CHỐT" hoặc "ĐỔI SANG TRỐNG".
+- "UPDATE_STATUS": CHỈ DÙNG khi người dùng báo phòng "ĐÃ CHO THUÊ", "ĐÃ CÓ NGƯỜI BẮT", "ĐÃ CHỐT" hoặc "ĐỔI SANG TRỐNG".
 - "SEARCH_ROOM": Dùng khi khách tìm kiếm phòng.
 
 TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
@@ -574,12 +574,16 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
         # 2. Xử lý theo Action
         if action == "ADD_ROOM":
             address = str(extracted.get("address", "")).strip()
+            
             if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
-                # Truyền existing_point_id vào để ghi đè (UPDATE) đúng phòng vừa tìm được
-                upsert_room_to_db(extracted, all_current_media, point_id=existing_point_id)
-            else:
-                if all_current_media:
-                    add_pending_media(user_id, all_current_media)
+                # ❌ KHÔNG TRUYỀN existing_point_id KHI THÊM MỚI PHÒNG
+                # Điều này đảm bảo phòng mới độc lập 100%, không bao giờ xóa nhầm các phòng cũ có địa chỉ tương tự
+                upsert_room_to_db(
+                    extracted_data=extracted, 
+                    media_urls=all_current_media, 
+                    point_id=None # <--- Ép point_id = None để luôn tạo phòng mới độc lập
+                )
+                print(f"➕ [ADD NEW ROOM SUCCESS]: Đã thêm phòng mới tại {address}")
 
         elif action == "SEARCH_ROOM" and relevant_rooms:
             for room in relevant_rooms:
@@ -588,19 +592,36 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
                     urls_to_send = m_urls
                     break
 
-        elif action == "UPDATE_STATUS":
-            new_status = extracted.get("status", "ĐÃ CHO THUÊ")
-            if existing_point_id:
-                # Dùng ID thực tế từ DB để update trạng thái
-                update_room_status_in_db(point_id=existing_point_id, new_status=new_status)
-            else:
-                print("⚠️ Không tìm thấy phòng tương ứng trong DB để cập nhật trạng thái.")
+        # 🔵 TRƯỜNG HỢP 2: CẬP NHẬT PHÒNG (UPDATE_ROOM)
+        elif action == "UPDATE_ROOM":
+            address = str(extracted.get("address", "")).strip()
 
+            if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
+                # Truyền existing_point_id vào để nếu ĐỔI ĐỊA CHỈ thì sẽ xóa record cũ
+                success = upsert_room_to_db(
+                    extracted_data=extracted,
+                    media_urls=all_current_media,
+                    point_id=existing_point_id
+                )
+                if success:
+                    print(f"🔄 [UPDATE ROOM SUCCESS]: Cập nhật thành công phòng ID {existing_point_id}")
+            else:
+                print("⚠️ [UPDATE ROOM CANCELLED]: Thiếu địa chỉ phòng.")
+
+        # 🟡 TRƯỜNG HỢP 3: CẬP NHẬT TRẠNG THÁI (UPDATE_STATUS)
         elif action == "UPDATE_STATUS":
-            address = extracted.get("address", "")
-            room_name = extracted.get("room_name", "")
-            if address and room_name:
-                update_room_status_in_db(address, room_name, new_status="ĐÃ CHO THUÊ")
+            new_status = extracted.get("status") or "ĐÃ CHO THUÊ"
+
+            if existing_point_id:
+                # Cập nhật riêng trường status qua set_payload
+                success = update_room_status_in_db(
+                    point_id=existing_point_id, 
+                    new_status=new_status
+                )
+                if success:
+                    print(f"✅ [UPDATE STATUS SUCCESS]: ID {existing_point_id} -> {new_status}")
+            else:
+                print("⚠️ [UPDATE STATUS WARN]: Không tìm thấy phòng khớp trong DB để đổi trạng thái.")
 
     except Exception as err:
         print("❌ [AI Logic Exception]:", err)
