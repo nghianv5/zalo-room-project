@@ -237,13 +237,16 @@ def search_rooms_by_vector(query_text: str, top_k: int = 5) -> List[dict]:
             return []
 
     try:
-        search_result = qdrant_client.search(
+        # Cập nhật dùng .query_points() thay vì .search()
+        search_result = qdrant_client.query_points(
             collection_name=COLLECTION_NAME,
             query_vector=query_vector,
             limit=top_k,
             with_payload=True
         )
-        return [hit.payload for hit in search_result if hit.payload]
+        # Lấy danh sách điểm từ search_result.points
+        return [hit.payload for hit in search_result.points if hit.payload]
+        
     except Exception as e:
         print("❌ [VECTOR SEARCH ERROR]:", e)
         return []
