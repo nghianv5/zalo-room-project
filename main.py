@@ -39,7 +39,7 @@ gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 # Sử dụng Qdrant Collection vố véc-tơ 768 chiều chuẩn với gemini-embedding-001
 VECTOR_SIZE = 768
-COLLECTION_NAME = "rooms_v12_full_fields"
+COLLECTION_NAME = "rooms_v13_dim768" 
 
 qdrant_client = QdrantClient(
     url=os.environ.get("QDRANT_URL"),
