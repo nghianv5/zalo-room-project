@@ -3,22 +3,23 @@ import json
 import requests
 import uuid
 import time
-from typing import Dict, List
+from typing import Dict, List, Optional
 import uvicorn
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.staticfiles import StaticFiles
-
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
-
 from google import genai
 from google.genai import types
-
 # Tích hợp Cloudinary
 import cloudinary
 import cloudinary.uploader
-
 import pandas as pd
+from pydantic import BaseModel
+from datetime import datetime
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
+
 
 app = FastAPI()
 
@@ -744,20 +745,108 @@ if __name__ == "__main__":
     print(f"🚀 Server đang chạy tại cổng {port}...")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
     
-@app.get("/test-db")
-def check_database():
+# --- SCHEMAS CHO CÁC REQUEST TỪ WEB ---
+class RoomCreateUpdateSchema(BaseModel):
+    address: str
+    room_name: Optional[str] = "Phòng trọ"
+    floor: Optional[str] = "Chưa rõ"
+    price: Optional[str] = "Chưa rõ"
+    is_private_bathroom: Optional[str] = "Chưa rõ"
+    appliances: Optional[str] = "Chưa rõ"
+    allow_pets: Optional[str] = "Chưa rõ"
+    media_urls: Optional[List[str]] = []
+    move_in_date: Optional[str] = "Vào ở ngay"
+    has_balcony: Optional[str] = "Chưa rõ"
+    has_window: Optional[str] = "Chưa rõ"
+    status: Optional[str] = "TRỐNG"
+    landlord_phone: Optional[str] = "Chưa rõ"
+
+# --- 1. API LẤY DANH SÁCH TẤT CẢ PHÒNG (READ) ---
+@app.get("/api/rooms")
+def get_all_rooms(limit: int = 100):
     try:
-        # Lấy tối đa 10 bản ghi trong collection
+        # Scroll để lấy danh sách bản ghi từ Qdrant
         records, _ = qdrant_client.scroll(
             collection_name=COLLECTION_NAME,
-            limit=10,
+            limit=limit,
             with_payload=True,
             with_vectors=False
         )
-        return {
-            "total_records": len(records),
-            "collection": COLLECTION_NAME,
-            "data": records
-        }
+        results = []
+        for r in records:
+            p = r.payload
+            results.append({
+                "id": r.id,
+                "address": p.get("1_address"),
+                "room_name": p.get("2_room_name"),
+                "floor": p.get("3_floor"),
+                "price": p.get("4_price"),
+                "is_private_bathroom": p.get("5_is_private_bathroom"),
+                "appliances": p.get("6_appliances"),
+                "allow_pets": p.get("7_allow_pets"),
+                "media_urls": p.get("8_media_urls", []),
+                "move_in_date": p.get("9_move_in_date"),
+                "has_balcony": p.get("10_has_balcony"),
+                "has_window": p.get("11_has_window"),
+                "status": p.get("12_status"),
+                "landlord_phone": p.get("landlord_phone"),
+                "zalo_user_id": p.get("zalo_user_id"),
+                "created_at": p.get("created_at"),
+                "updated_at": p.get("updated_at")
+            })
+        return {"status": "success", "data": results}
     except Exception as e:
-        return {"error": str(e)}
+        raise HTTPException(status_code=500, detail=str(e))
+
+# --- 2. API THÊM/SỬA PHÒNG TỪ WEB (CREATE / UPDATE) ---
+@app.post("/api/rooms")
+def create_or_update_room_from_web(data: RoomCreateUpdateSchema, point_id: Optional[str] = None):
+    # Chuyển đổi Schema về dạng dict extracted_data
+    extracted = {
+        "address": data.address,
+        "room_name": data.room_name,
+        "floor": data.floor,
+        "price": data.price,
+        "is_private_bathroom": data.is_private_bathroom,
+        "appliances": data.appliances,
+        "allow_pets": data.allow_pets,
+        "move_in_date": data.move_in_date,
+        "has_balcony": data.has_balcony,
+        "has_window": data.has_window,
+        "status": data.status,
+        "landlord_phone": data.landlord_phone
+    }
+    
+    # Gọi lại chính hàm upsert_room_to_db đã viết ở các bước trước!
+    success = upsert_room_to_db(
+        extracted_data=extracted,
+        media_urls=data.media_urls,
+        point_id=point_id, # Truyền None nếu là Thêm mới, truyền ID nếu là Sửa
+        zalo_user_id="ADMIN_WEB",
+        landlord_phone=data.landlord_phone
+    )
+    
+    if success:
+        return {"status": "success", "message": "Thao tác thành công!"}
+    raise HTTPException(status_code=500, detail="Không thể lưu thông tin vào Qdrant.")
+
+# --- 3. API XÓA PHÒNG TỪ WEB (DELETE) ---
+@app.delete("/api/rooms/{point_id}")
+def delete_room_from_web(point_id: str):
+    try:
+        qdrant_client.delete(
+            collection_name=COLLECTION_NAME,
+            points_selector=[point_id],
+            wait=True
+        )
+        return {"status": "success", "message": f"Đã xóa thành công phòng ID {point_id}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi khi xóa: {str(e)}")
+        
+        
+templates = Jinja2Templates(directory="templates")
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_dashboard(request: Request):
+    """Đường dẫn truy cập trang web Quản trị Admin: https://your-domain.com/admin"""
+    return templates.TemplateResponse("admin.html", {"request": request})
