@@ -801,10 +801,9 @@ def get_all_rooms(limit: int = 100):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-# --- 2. API THÊM/SỬA PHÒNG TỪ WEB (CREATE / UPDATE) ---
+# --- 2. API THÊM / SỬA PHÒNG TỪ WEB ---
 @app.post("/api/rooms")
 def create_or_update_room_from_web(data: RoomCreateUpdateSchema, point_id: Optional[str] = None):
-    # Chuyển đổi Schema về dạng dict extracted_data
     extracted = {
         "address": data.address,
         "room_name": data.room_name,
@@ -820,11 +819,10 @@ def create_or_update_room_from_web(data: RoomCreateUpdateSchema, point_id: Optio
         "landlord_phone": data.landlord_phone
     }
     
-    # Gọi lại chính hàm upsert_room_to_db đã viết ở các bước trước!
     success = upsert_room_to_db(
         extracted_data=extracted,
         media_urls=data.media_urls,
-        point_id=point_id, # Truyền None nếu là Thêm mới, truyền ID nếu là Sửa
+        point_id=point_id, # None = Thêm mới, có ID = Chỉnh sửa
         zalo_user_id="ADMIN_WEB",
         landlord_phone=data.landlord_phone
     )
