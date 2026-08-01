@@ -23,6 +23,9 @@ from fastapi.templating import Jinja2Templates
 
 app = FastAPI()
 
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
+
 # --- 0. BỘ NHỚ ĐỆM TẠM THỜI (PENDING MEDIA CACHE) ---
 PENDING_MEDIA_CACHE: Dict[str, dict] = {}
 CACHE_TTL_SECONDS = 600  # Bộ nhớ đệm tự hủy sau 10 phút
@@ -848,5 +851,8 @@ templates = Jinja2Templates(directory="templates")
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard(request: Request):
-    """Đường dẫn truy cập trang web Quản trị Admin: https://your-domain.com/admin"""
-    return templates.TemplateResponse("admin.html", {"request": request})
+    """Đường dẫn truy cập trang Web Admin: https://your-domain.com/admin"""
+    return templates.TemplateResponse(
+        request=request, 
+        name="admin.html"
+    )
