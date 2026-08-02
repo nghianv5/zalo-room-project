@@ -363,6 +363,7 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
 # --- API UPLOAD EXCEL / CSV CÓ AI CHECK ---
 @app.post("/api/rooms/upload-excel")
 async def upload_excel_rooms(file: UploadFile = File(...)):
+    print("upload_excel_rooms")
     if not file.filename.endswith((".xlsx", ".xls", ".csv")):
         raise HTTPException(status_code=400, detail="Vui lòng tải lên tệp định dạng .xlsx, .xls hoặc .csv!")
 
@@ -382,7 +383,7 @@ async def upload_excel_rooms(file: UploadFile = File(...)):
 
     for _, row in df.iterrows():
         raw_row_dict = row.to_dict()
-        
+        print("ai_validate_and_extract_room")
         # 1. Gọi AI Kiểm tra và Chuẩn hóa dữ liệu
         validated_data = ai_validate_and_extract_room(raw_row_dict)
 
