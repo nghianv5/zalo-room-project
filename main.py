@@ -19,8 +19,17 @@ import pandas as pd
 from datetime import datetime
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
+from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
+
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],  # Cho phép tất cả phương thức GET, POST, PUT, DELETE...
+    allow_headers=["*"],
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
@@ -519,6 +528,35 @@ def create_or_update_room_from_web(data: RoomCreateUpdateSchema, point_id: Optio
         return {"status": "success", "message": "Thao tác thành công!"}
     raise HTTPException(status_code=500, detail="Không thể lưu thông tin vào Qdrant.")
 
+@app.put("/api/rooms/{point_id}")
+def update_room_from_web(point_id: str, data: RoomCreateUpdateSchema):
+    """Cập nhật thông tin phòng theo ID"""
+    extracted = {
+        "address": data.address,
+        "room_name": data.room_name,
+        "floor": data.floor,
+        "price": data.price,
+        "is_private_bathroom": data.is_private_bathroom,
+        "appliances": data.appliances,
+        "allow_pets": data.allow_pets,
+        "move_in_date": data.move_in_date,
+        "has_balcony": data.has_balcony,
+        "has_window": data.has_window,
+        "status": data.status,
+        "landlord_phone": data.landlord_phone
+    }
+    
+    success = upsert_room_to_db(
+        extracted_data=extracted,
+        media_urls=data.media_urls,
+        point_id=point_id,
+        zalo_user_id="ADMIN_WEB",
+        landlord_phone=data.landlord_phone
+    )
+    
+    if success:
+        return {"status": "success", "message": "Cập nhật thành công!"}
+    raise HTTPException(status_code=500, detail="Không thể lưu thông tin vào Qdrant.")
 
 @app.delete("/api/rooms/{point_id}")
 def delete_room_from_web(point_id: str):
