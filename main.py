@@ -68,7 +68,7 @@ def change_admin_password(data: AdminChangePasswordSchema):
         "message": "Đã cập nhật mật khẩu tạm thời thành công!"
     }
 
-# --- 0. CẤU HÌNH MEDIA ---
+# --- CẤU HÌNH MEDIA ---
 MEDIA_DIR = "static/media"
 os.makedirs(MEDIA_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -77,11 +77,11 @@ CLOUDINARY_URL = os.environ.get("CLOUDINARY_URL")
 if CLOUDINARY_URL:
     cloudinary.config(cloudinary_url=CLOUDINARY_URL)
 
-# --- 1. CẤU HÌNH GEMINI & QDRANT ---
+# --- CẤU HÌNH GEMINI & QDRANT ---
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-COLLECTION_NAME = "rooms_v15_fixed_dim768"
+COLLECTION_NAME = "rooms_v16_structured"
 VECTOR_SIZE = 768
 
 qdrant_client = QdrantClient(
@@ -99,17 +99,37 @@ try:
 except Exception as e:
     print("❌ Lỗi khởi tạo Qdrant:", e)
 
-# --- SCHEMA DỮ LIỆU ---
-class RoomStandardSchema(BaseModel):
-    address: str = Field(description="Địa chỉ 4 cấp chuẩn hóa")
-    room_name: str = Field(default="Phòng trọ", description="Tên hoặc số phòng")
-    floor: Optional[str] = Field(default="Chưa rõ", description="Tầng bao nhiêu")
-    price: int = Field(description="Giá thuê tính theo VNĐ")
-    is_private_bathroom: bool = Field(default=False, description="Khép kín (True/False)")
-    appliances: List[str] = Field(default=[], description="Danh sách thiết bị")
-    allow_pets: bool = Field(default=False, description="Cho nuôi thú cưng không")
-    status: str = Field(default="TRỐNG", description="Trạng thái")
-    landlord_phone: Optional[str] = Field(default="Chưa rõ", description="Số điện thoại")
+# --- SCHEMA DỮ LIỆU PHÒNG TRỌ CHUẨN MỚI ---
+class RoomCreateUpdateSchema(BaseModel):
+    # 1. Địa chỉ
+    address: str
+    # 2. Tên phòng
+    room_name: Optional[str] = "Phòng trọ"
+    # 3. Giá thuê
+    price: Optional[str] = "Chưa rõ"
+    # 4. Thông tin phòng chi tiết
+    floor: Optional[str] = "Chưa rõ"                  # Tầng bao nhiêu
+    is_private_bathroom: Optional[str] = "Chưa rõ"   # Khép kín (Có / Không / Chung)
+    has_ac: Optional[str] = "Chưa rõ"                 # Có điều hoà không
+    has_heater: Optional[str] = "Chưa rõ"             # Có nóng lạnh không
+    has_washer: Optional[str] = "Chưa rõ"             # Có máy giặt không
+    allow_pets: Optional[str] = "Chưa rõ"             # Có được nuôi chó mèo không
+    has_balcony: Optional[str] = "Chưa rõ"            # Có ban công không
+    has_window: Optional[str] = "Chưa rõ"             # Có cửa sổ không
+    has_fingerprint_lock: Optional[str] = "Chưa rõ"   # Có khoá vân tay không
+    parking_info: Optional[str] = "Chưa rõ"          # Có chỗ để xe máy, oto không
+    max_occupants: Optional[str] = "Chưa rõ"         # Ở tối đa bao nhiêu người
+    appliances: Optional[str] = "Chưa rõ"             # Các tiện ích khác
+    # 5. Phí dịch vụ
+    service_fees: Optional[str] = "Chưa rõ"           # Điện, nước, dịch vụ...
+    # 6. Ảnh, video phòng
+    media_urls: Optional[List[str]] = []
+    # 7. Thời gian khách vào ở được
+    move_in_date: Optional[str] = "Vào ở ngay"
+    # 8. Trạng thái phòng (TRỐNG / ĐÃ CHO THUÊ)
+    status: Optional[str] = "TRỐNG"
+    # Thông tin liên hệ
+    landlord_phone: Optional[str] = "Chưa rõ"
 
 def get_text_embedding(text: str, retries: int = 3) -> List[float]:
     if not text or not text.strip():
@@ -128,49 +148,13 @@ def get_text_embedding(text: str, retries: int = 3) -> List[float]:
                 time.sleep(1)
     return []
 
-def generate_content_with_retry(prompt: str, mime_type: str = "application/json", retries: int = 3) -> str:
-    if not gemini_client:
-        return ""
-    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
-    for model_name in models_to_try:
-        for attempt in range(retries):
-            try:
-                config = types.GenerateContentConfig()
-                if mime_type:
-                    config.response_mime_type = mime_type
-                response = gemini_client.models.generate_content(
-                    model=model_name, contents=prompt, config=config
-                )
-                if response and response.text:
-                    return response.text.strip()
-            except Exception:
-                time.sleep(1)
-    return ""
-
-def search_rooms_by_vector(query_text: str, top_k: int = 5) -> List[dict]:
-    query_vector = get_text_embedding(query_text)
-    if not query_vector:
-        try:
-            records, _ = qdrant_client.scroll(collection_name=COLLECTION_NAME, limit=top_k, with_payload=True)
-            return [dict(rec.payload, id=rec.id) for rec in records if rec.payload]
-        except Exception:
-            return []
+def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYSTEM") -> bool:
     try:
-        search_result = qdrant_client.query_points(
-            collection_name=COLLECTION_NAME, query=query_vector, limit=top_k, with_payload=True
-        )
-        return [dict(hit.payload, id=hit.id) for hit in search_result.points if hit.payload]
-    except Exception as e:
-        print("❌ [VECTOR SEARCH ERROR]:", e)
-        return []
+        address = data.get("address", "")
+        room_name = data.get("room_name", "Phòng trọ")
+        phone = data.get("landlord_phone", "Chưa rõ")
 
-def upsert_room_to_db(extracted_data: dict, media_urls: list, point_id: str = None, zalo_user_id: str = "SYSTEM", landlord_phone: str = "Chưa rõ") -> bool:
-    try:
-        address = extracted_data.get("address", "")
-        room_name = extracted_data.get("room_name", "Phòng trọ")
-        phone = landlord_phone or extracted_data.get("landlord_phone", "Chưa rõ")
-
-        text_to_embed = f"Địa chỉ: {address} Tên: {room_name} Giá: {extracted_data.get('price', '')} Thiết bị: {extracted_data.get('appliances', '')}"
+        text_to_embed = f"Địa chỉ: {address} Tên phòng: {room_name} Giá: {data.get('price', '')} Đồ đạc: {data.get('appliances', '')} Phí dịch vụ: {data.get('service_fees', '')}"
         vector = get_text_embedding(text_to_embed)
         if not vector:
             return False
@@ -192,21 +176,27 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list, point_id: str = No
         payload = {
             "1_address": address,
             "2_room_name": room_name,
-            "3_floor": extracted_data.get("floor", "Chưa rõ"),
-            "4_price": extracted_data.get("price", "Chưa rõ"),
-            "5_is_private_bathroom": extracted_data.get("is_private_bathroom", "Chưa rõ"),
-            "6_appliances": extracted_data.get("appliances", "Chưa rõ"),
-            "7_allow_pets": extracted_data.get("allow_pets", "Chưa rõ"),
-            "8_media_urls": media_urls,
-            "9_move_in_date": extracted_data.get("move_in_date", "Vào ở ngay"),
-            "10_has_balcony": extracted_data.get("has_balcony", "Chưa rõ"),
-            "11_has_window": extracted_data.get("has_window", "Chưa rõ"),
-            "12_status": extracted_data.get("status", "TRỐNG"),
-            "zalo_user_id": zalo_user_id,
+            "3_price": data.get("price", "Chưa rõ"),
+            "4_floor": data.get("floor", "Chưa rõ"),
+            "4_is_private_bathroom": data.get("is_private_bathroom", "Chưa rõ"),
+            "4_has_ac": data.get("has_ac", "Chưa rõ"),
+            "4_has_heater": data.get("has_heater", "Chưa rõ"),
+            "4_has_washer": data.get("has_washer", "Chưa rõ"),
+            "4_allow_pets": data.get("allow_pets", "Chưa rõ"),
+            "4_has_balcony": data.get("has_balcony", "Chưa rõ"),
+            "4_has_window": data.get("has_window", "Chưa rõ"),
+            "4_has_fingerprint_lock": data.get("has_fingerprint_lock", "Chưa rõ"),
+            "4_parking_info": data.get("parking_info", "Chưa rõ"),
+            "4_max_occupants": data.get("max_occupants", "Chưa rõ"),
+            "4_appliances": data.get("appliances", "Chưa rõ"),
+            "5_service_fees": data.get("service_fees", "Chưa rõ"),
+            "6_media_urls": data.get("media_urls", []),
+            "7_move_in_date": data.get("move_in_date", "Vào ở ngay"),
+            "8_status": data.get("status", "TRỐNG"),
             "landlord_phone": phone,
+            "zalo_user_id": zalo_user_id,
             "created_at": created_at,
-            "updated_at": now_str,
-            "raw_data": extracted_data
+            "updated_at": now_str
         }
 
         qdrant_client.upsert(
@@ -224,24 +214,13 @@ def upsert_room_to_db(extracted_data: dict, media_urls: list, point_id: str = No
 def admin_dashboard(request: Request):
     return templates.TemplateResponse(request=request, name="admin.html")
 
-# --- API LẤY PHÒNG CÓ HỖ TRỢ LỌC TẤT CẢ CÁC TRƯỜNG ---
 @app.get("/api/rooms")
 def get_all_rooms(
     limit: int = 500,
     address: Optional[str] = None,
     room_name: Optional[str] = None,
-    floor: Optional[str] = None,
-    price: Optional[str] = None,
-    is_private_bathroom: Optional[str] = None,
-    allow_pets: Optional[str] = None,
-    has_balcony: Optional[str] = None,
-    has_window: Optional[str] = None,
     status: Optional[str] = None,
-    landlord_phone: Optional[str] = None,
-    appliances: Optional[str] = None,
-    has_ac: Optional[bool] = None,         # Điều hòa
-    has_heater: Optional[bool] = None,     # Nóng lạnh
-    has_washer: Optional[bool] = None      # Máy giặt
+    landlord_phone: Optional[str] = None
 ):
     try:
         records, _ = qdrant_client.scroll(
@@ -253,40 +232,34 @@ def get_all_rooms(
         results = []
         for r in records:
             p = r.payload or {}
-            app_str = str(p.get("6_appliances", "")).lower()
 
-            # Lọc Backend
+            # Lọc cơ bản
             if address and address.lower() not in str(p.get("1_address", "")).lower(): continue
             if room_name and room_name.lower() not in str(p.get("2_room_name", "")).lower(): continue
-            if floor and floor.lower() not in str(p.get("3_floor", "")).lower(): continue
-            if price and price.lower() not in str(p.get("4_price", "")).lower(): continue
-            if is_private_bathroom and p.get("5_is_private_bathroom") != is_private_bathroom: continue
-            if allow_pets and p.get("7_allow_pets") != allow_pets: continue
-            if has_balcony and p.get("10_has_balcony") != has_balcony: continue
-            if has_window and p.get("11_has_window") != has_window: continue
-            if status and p.get("12_status") != status: continue
+            if status and p.get("8_status") != status: continue
             if landlord_phone and landlord_phone not in str(p.get("landlord_phone", "")): continue
-            if appliances and appliances.lower() not in app_str: continue
-
-            # Lọc riêng các thiết bị quan trọng
-            if has_ac is True and ("điều hòa" not in app_str and "máy lạnh" not in app_str): continue
-            if has_heater is True and ("nóng lạnh" not in app_str and "bình nóng lạnh" not in app_str): continue
-            if has_washer is True and "máy giặt" not in app_str: continue
 
             results.append({
                 "id": r.id,
                 "address": p.get("1_address"),
                 "room_name": p.get("2_room_name"),
-                "floor": p.get("3_floor"),
-                "price": p.get("4_price"),
-                "is_private_bathroom": p.get("5_is_private_bathroom"),
-                "appliances": p.get("6_appliances"),
-                "allow_pets": p.get("7_allow_pets"),
-                "media_urls": p.get("8_media_urls", []),
-                "move_in_date": p.get("9_move_in_date"),
-                "has_balcony": p.get("10_has_balcony"),
-                "has_window": p.get("11_has_window"),
-                "status": p.get("12_status"),
+                "price": p.get("3_price"),
+                "floor": p.get("4_floor"),
+                "is_private_bathroom": p.get("4_is_private_bathroom"),
+                "has_ac": p.get("4_has_ac"),
+                "has_heater": p.get("4_has_heater"),
+                "has_washer": p.get("4_has_washer"),
+                "allow_pets": p.get("4_allow_pets"),
+                "has_balcony": p.get("4_has_balcony"),
+                "has_window": p.get("4_has_window"),
+                "has_fingerprint_lock": p.get("4_has_fingerprint_lock"),
+                "parking_info": p.get("4_parking_info"),
+                "max_occupants": p.get("4_max_occupants"),
+                "appliances": p.get("4_appliances"),
+                "service_fees": p.get("5_service_fees"),
+                "media_urls": p.get("6_media_urls", []),
+                "move_in_date": p.get("7_move_in_date"),
+                "status": p.get("8_status"),
                 "landlord_phone": p.get("landlord_phone"),
                 "zalo_user_id": p.get("zalo_user_id"),
                 "created_at": p.get("created_at"),
@@ -296,25 +269,10 @@ def get_all_rooms(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-class RoomCreateUpdateSchema(BaseModel):
-    address: str
-    room_name: Optional[str] = "Phòng trọ"
-    floor: Optional[str] = "Chưa rõ"
-    price: Optional[str] = "Chưa rõ"
-    is_private_bathroom: Optional[str] = "Chưa rõ"
-    appliances: Optional[str] = "Chưa rõ"
-    allow_pets: Optional[str] = "Chưa rõ"
-    media_urls: Optional[List[str]] = []
-    move_in_date: Optional[str] = "Vào ở ngay"
-    has_balcony: Optional[str] = "Chưa rõ"
-    has_window: Optional[str] = "Chưa rõ"
-    status: Optional[str] = "TRỐNG"
-    landlord_phone: Optional[str] = "Chưa rõ"
-
 @app.post("/api/rooms")
 def create_or_update_room(data: RoomCreateUpdateSchema, point_id: Optional[str] = None):
     extracted = data.dict()
-    success = upsert_room_to_db(extracted_data=extracted, media_urls=data.media_urls, point_id=point_id, zalo_user_id="ADMIN_WEB", landlord_phone=data.landlord_phone)
+    success = upsert_room_to_db(data=extracted, point_id=point_id, zalo_user_id="ADMIN_WEB")
     if success:
         return {"status": "success", "message": "Thao tác thành công!"}
     raise HTTPException(status_code=500, detail="Lỗi lưu dữ liệu.")
