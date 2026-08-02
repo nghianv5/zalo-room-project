@@ -528,9 +528,18 @@ def create_or_update_room_from_web(data: RoomCreateUpdateSchema, point_id: Optio
         return {"status": "success", "message": "Thao tác thành công!"}
     raise HTTPException(status_code=500, detail="Không thể lưu thông tin vào Qdrant.")
 
-@app.put("/api/rooms/{point_id}")
-def update_room_from_web(point_id: str, data: RoomCreateUpdateSchema):
-    """Cập nhật thông tin phòng theo ID"""
+from typing import Optional
+
+@app.post("/api/rooms")
+def create_or_update_room(
+    data: RoomCreateUpdateSchema, 
+    point_id: Optional[str] = None  # 👈 THÊM DÒNG NÀY: Nhận point_id từ Query Param (?point_id=...)
+):
+    """
+    Tạo mới hoặc Cập nhật phòng trọ từ Web Admin.
+    - Nếu có point_id: Cập nhật phòng tương ứng.
+    - Nếu không có point_id: Thêm phòng mới.
+    """
     extracted = {
         "address": data.address,
         "room_name": data.room_name,
@@ -546,17 +555,20 @@ def update_room_from_web(point_id: str, data: RoomCreateUpdateSchema):
         "landlord_phone": data.landlord_phone
     }
     
+    # Gọi hàm lưu/cập nhật dữ liệu vào Qdrant DB
     success = upsert_room_to_db(
         extracted_data=extracted,
         media_urls=data.media_urls,
-        point_id=point_id,
+        point_id=point_id,  # Truyền point_id vào hàm upsert
         zalo_user_id="ADMIN_WEB",
         landlord_phone=data.landlord_phone
     )
     
     if success:
-        return {"status": "success", "message": "Cập nhật thành công!"}
-    raise HTTPException(status_code=500, detail="Không thể lưu thông tin vào Qdrant.")
+        action_text = "Cập nhật" if point_id else "Thêm mới"
+        return {"status": "success", "message": f"{action_text} phòng trọ thành công!"}
+        
+    raise HTTPException(status_code=500, detail="Lỗi khi lưu dữ liệu vào CSDL.")
 
 @app.delete("/api/rooms/{point_id}")
 def delete_room_from_web(point_id: str):
