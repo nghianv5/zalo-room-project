@@ -142,7 +142,7 @@ def get_text_embedding(text: str, retries: int = 2) -> List[float]:
     if gemini_client:
         for attempt in range(retries):
             try:
-                # Dùng tên model text-embedding-004 chuẩn
+                # Đổi tên model chính xác cho SDK google-genai
                 response = gemini_client.models.embed_content(
                     model="text-embedding-004", 
                     contents=text,
@@ -154,7 +154,7 @@ def get_text_embedding(text: str, retries: int = 2) -> List[float]:
                 print(f"⚠️ Lỗi Embedding (Lần {attempt+1}):", e)
                 time.sleep(0.5)
                 
-    # BẮT BUỘC: Trả về vector mặc định 768 chiều thay vì [] để Qdrant lưu thành công
+    # BẮT BUỘC: Trả về vector mặc định 768 chiều để Qdrant lưu thành công
     return [0.0] * VECTOR_SIZE
 
 def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYSTEM") -> bool:
@@ -303,12 +303,7 @@ def delete_room_from_web(point_id: str):
 
 # --- HÀM AI DÙNG GEMINI KIỂM TRA & CHUẨN HÓA DỮ LIỆU ---
 def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
-    """
-    Sử dụng Gemini để kiểm tra và chuẩn hóa dữ liệu Excel.
-    Nếu AI lỗi, tự động chuyển sang Fallback thủ công.
-    """
     def manual_fallback(data: dict) -> Optional[dict]:
-        # Bóc tách địa chỉ linh hoạt từ nhiều tên cột tiếng Việt
         raw_address = (
             data.get("address") or 
             data.get("Địa chỉ") or 
@@ -317,7 +312,6 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
             data.get("1. Địa chỉ & 2. Tên phòng")
         )
         
-        # Nếu dòng hoàn toàn trống địa chỉ thì bỏ qua
         if not raw_address or pd.isna(raw_address) or str(raw_address).strip().lower() in ["nan", "none", "null", "", "chưa rõ"]:
             return None
 
@@ -388,7 +382,7 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
     
     try:
         response = gemini_client.models.generate_content(
-            model="gemini-1.5-flash-latest", # Sử dụng alias model chuẩn
+            model="gemini-1.5-flash", # Tên model chuẩn ngắn gọn
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json"
