@@ -15,6 +15,10 @@
                 <p class="text-xs text-gray-500 mt-1">Hệ thống đồng bộ dữ liệu Realtime giữa Web Admin và Zalo OA Bot</p>
             </div>
             <div class="flex gap-2">
+                <!-- Nút Xóa Hàng Loạt (Ẩn khi chưa chọn gì) -->
+                <button id="btnDeleteSelected" onclick="deleteSelectedRooms()" class="hidden bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 font-medium text-sm flex items-center gap-1 transition-all">
+                    🗑️ Xóa phòng đã chọn (<span id="selectedCount">0</span>)
+                </button>
                 <!-- Nút Tải File Mẫu -->
                 <a href="/api/rooms/download-template" download class="bg-gray-100 text-gray-700 border border-gray-300 px-3 py-2 rounded hover:bg-gray-200 font-medium text-sm flex items-center gap-1">
                     📥 File Mẫu Excel
@@ -35,6 +39,10 @@
             <table class="min-w-full border-collapse border border-gray-200 text-xs text-left">
                 <thead>
                     <tr class="bg-gray-100 text-gray-700 uppercase font-semibold">
+                        <!-- Checkbox Chọn Tất Cả -->
+                        <th class="p-2 border text-center w-10">
+                            <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)" class="w-4 h-4 cursor-pointer">
+                        </th>
                         <th class="p-2 border">Địa chỉ & Tên</th>
                         <th class="p-2 border">Tầng / Giá</th>
                         <th class="p-2 border">WC / Đồ đạc</th>
@@ -184,9 +192,13 @@
                 const result = await res.json();
                 const tbody = document.getElementById("roomTableBody");
                 tbody.innerHTML = "";
+                
+                // Reset nút "Chọn tất cả" và nút "Xóa đã chọn" khi tải lại
+                document.getElementById("selectAll").checked = false;
+                updateDeleteButton();
 
                 if (!result.data || result.data.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="9" class="p-4 text-center text-gray-500">Chưa có dữ liệu phòng trọ.</td></tr>`;
+                    tbody.innerHTML = `<tr><td colspan="10" class="p-4 text-center text-gray-500">Chưa có dữ liệu phòng trọ.</td></tr>`;
                     return;
                 }
 
@@ -197,6 +209,9 @@
 
                     tbody.innerHTML += `
                         <tr class="hover:bg-gray-50">
+                            <td class="p-2 border text-center">
+                                <input type="checkbox" value="${r.id}" class="room-checkbox w-4 h-4 cursor-pointer" onchange="updateDeleteButton()">
+                            </td>
                             <td class="p-2 border">
                                 <div class="font-bold text-gray-800">${r.address || '-'}</div>
                                 <div class="text-blue-600">${r.room_name || '-'}</div>
@@ -207,7 +222,7 @@
                                 <div class="font-semibold text-green-700">${r.price || '-'}</div>
                             </td>
                             <td class="p-2 border">
-                                <div>WC: ${r.is_private_bathroom || '-'}</div>
+                                <div>WC khép kín: ${r.is_private_bathroom || '-'}</div>
                                 <div class="text-gray-500 truncate max-w-[150px]" title="${r.appliances}">${r.appliances || '-'}</div>
                             </td>
                             <td class="p-2 border">
@@ -242,6 +257,49 @@
                 });
             } catch (err) {
                 console.error("Lỗi nạp dữ liệu:", err);
+            }
+        }
+
+        // Cập nhật hiển thị nút xóa hàng loạt
+        function updateDeleteButton() {
+            const checkboxes = document.querySelectorAll('.room-checkbox:checked');
+            const btnDelete = document.getElementById('btnDeleteSelected');
+            const countSpan = document.getElementById('selectedCount');
+            
+            if (checkboxes.length > 0) {
+                countSpan.innerText = checkboxes.length;
+                btnDelete.classList.remove('hidden');
+            } else {
+                btnDelete.classList.add('hidden');
+            }
+        }
+
+        // Toggle chọn tất cả Checkbox
+        function toggleSelectAll(selectAllCheckbox) {
+            const checkboxes = document.querySelectorAll('.room-checkbox');
+            checkboxes.forEach(cb => cb.checked = selectAllCheckbox.checked);
+            updateDeleteButton();
+        }
+
+        // Xóa các dòng đã chọn
+        async function deleteSelectedRooms() {
+            const selectedCheckboxes = document.querySelectorAll('.room-checkbox:checked');
+            const selectedIds = Array.from(selectedCheckboxes).map(cb => cb.value);
+
+            if (selectedIds.length === 0) return;
+
+            if (confirm(`Bạn có chắc chắn muốn xóa ${selectedIds.length} phòng đã chọn?`)) {
+                try {
+                    // Gửi request xóa song song các item được chọn
+                    await Promise.all(selectedIds.map(id => 
+                        fetch(`${API_URL}/${id}`, { method: "DELETE" })
+                    ));
+                    
+                    loadRooms();
+                } catch (err) {
+                    console.error("Lỗi khi xóa hàng loạt:", err);
+                    alert("Có lỗi xảy ra khi xóa một số phòng.");
+                }
             }
         }
 
@@ -280,7 +338,7 @@
             loadRooms();
         }
 
-        // Xóa phòng
+        // Xóa phòng đơn lẻ
         async function deleteRoom(id) {
             if (confirm("Bạn có chắc chắn muốn xóa phòng này khỏi cơ sở dữ liệu?")) {
                 await fetch(`${API_URL}/${id}`, { method: "DELETE" });
