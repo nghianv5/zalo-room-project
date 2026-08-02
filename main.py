@@ -499,8 +499,15 @@ def get_all_rooms(limit: int = 100):
 
 
 @app.post("/api/rooms")
-def create_or_update_room_from_web(data: RoomCreateUpdateSchema, point_id: Optional[str] = None):
-    """Thêm/Sửa phòng trực tiếp từ Web Admin"""
+def create_or_update_room(
+    data: RoomCreateUpdateSchema, 
+    point_id: Optional[str] = None  # Nhận point_id từ Query Param (?point_id=...)
+):
+    """
+    Tạo mới hoặc Cập nhật phòng trọ từ Web Admin.
+    - Nếu có point_id: Cập nhật phòng tương ứng.
+    - Nếu không có point_id: Thêm phòng mới.
+    """
     extracted = {
         "address": data.address,
         "room_name": data.room_name,
@@ -525,50 +532,11 @@ def create_or_update_room_from_web(data: RoomCreateUpdateSchema, point_id: Optio
     )
     
     if success:
-        return {"status": "success", "message": "Thao tác thành công!"}
-    raise HTTPException(status_code=500, detail="Không thể lưu thông tin vào Qdrant.")
-
-from typing import Optional
-
-@app.post("/api/rooms")
-def create_or_update_room(
-    data: RoomCreateUpdateSchema, 
-    point_id: Optional[str] = None  # 👈 THÊM DÒNG NÀY: Nhận point_id từ Query Param (?point_id=...)
-):
-    """
-    Tạo mới hoặc Cập nhật phòng trọ từ Web Admin.
-    - Nếu có point_id: Cập nhật phòng tương ứng.
-    - Nếu không có point_id: Thêm phòng mới.
-    """
-    extracted = {
-        "address": data.address,
-        "room_name": data.room_name,
-        "floor": data.floor,
-        "price": data.price,
-        "is_private_bathroom": data.is_private_bathroom,
-        "appliances": data.appliances,
-        "allow_pets": data.allow_pets,
-        "move_in_date": data.move_in_date,
-        "has_balcony": data.has_balcony,
-        "has_window": data.has_window,
-        "status": data.status,
-        "landlord_phone": data.landlord_phone
-    }
-    
-    # Gọi hàm lưu/cập nhật dữ liệu vào Qdrant DB
-    success = upsert_room_to_db(
-        extracted_data=extracted,
-        media_urls=data.media_urls,
-        point_id=point_id,  # Truyền point_id vào hàm upsert
-        zalo_user_id="ADMIN_WEB",
-        landlord_phone=data.landlord_phone
-    )
-    
-    if success:
         action_text = "Cập nhật" if point_id else "Thêm mới"
         return {"status": "success", "message": f"{action_text} phòng trọ thành công!"}
         
     raise HTTPException(status_code=500, detail="Lỗi khi lưu dữ liệu vào CSDL.")
+
 
 @app.delete("/api/rooms/{point_id}")
 def delete_room_from_web(point_id: str):
@@ -647,7 +615,8 @@ TRẢ VỀ DUY NHẤT 1 MẢNG JSON CÁC OBJECT ĐÃ ĐƯỢC CHUẨN HÓA:
 
 
 # --- 8.2. API UPLOAD EXCEL TÍCH HỢP AI TỰ ĐỘNG CHUẨN HÓA & LƯU DB ---
-@app.post("/api/rooms/upload-excel-ai")
+# Sửa lại URL chuẩn khớp với Frontend: /api/rooms/upload-excel
+@app.post("/api/rooms/upload-excel")
 async def upload_and_process_excel(file: UploadFile = File(...)):
     """Upload Excel -> AI Đọc & Chuẩn hóa dữ liệu -> Lưu trực tiếp vào Qdrant DB"""
     if not (file.filename.endswith(".xlsx") or file.filename.endswith(".xls") or file.filename.endswith(".csv")):
