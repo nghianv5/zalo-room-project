@@ -389,13 +389,16 @@ async def upload_excel_rooms(file: UploadFile = File(...)):
 
         # 2. Kiểm tra nếu AI phát hiện dữ liệu không hợp lệ (không có địa chỉ)
         if not validated_data or not validated_data.get("address"):
+            print("Khong co dia chi")
             ai_rejected_count += 1
             continue
 
         # 3. Tiến hành Lưu vào Database (Qdrant)
         if upsert_room_to_db(data=validated_data, zalo_user_id="EXCEL_AI_IMPORT"):
+            print("upsert_room_to_db success")
             success_count += 1
         else:
+            print("upsert_room_to_db fail")
             fail_count += 1
 
     return {
