@@ -299,12 +299,52 @@ def delete_room_from_web(point_id: str):
 # --- HÀM AI DÙNG GEMINI KIỂM TRA & CHUẨN HÓA DỮ LIỆU ---
 def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
     """
-    Sử dụng Gemini để kiểm tra, sửa lỗi văn bản và chuẩn hóa dữ liệu hàng từ Excel/CSV
+    Sử dụng Gemini để kiểm tra, sửa lỗi văn bản và chuẩn hóa dữ liệu hàng từ Excel/CSV.
+    Có tích hợp Fallback thủ công nếu Gemini API gặp sự cố.
     """
-    if not gemini_client:
-        # Nếu chưa cấu hình GEMINI_API_KEY thì trả về dữ liệu thô
-        return row_dict
+    
+    # --- 1. XỬ LÝ FALLBACK THỦ CÔNG (Nếu không có Gemini API Key) ---
+    def manual_fallback(data: dict) -> Optional[dict]:
+        # Tự động quét các biến thể tên cột địa chỉ bằng tiếng Việt/tiếng Anh
+        raw_address = (
+            data.get("address") or 
+            data.get("Địa chỉ") or 
+            data.get("1. Địa chỉ") or 
+            data.get("Địa chỉ & Tên phòng")
+        )
+        
+        # Nếu không có địa chỉ hoặc giá trị rác/NaN thì loại bỏ dòng này
+        if not raw_address or pd.isna(raw_address) or str(raw_address).strip().lower() in ["nan", "none", "null", ""]:
+            return None
 
+        return {
+            "address": str(raw_address).strip(),
+            "room_name": str(data.get("room_name") or data.get("Tên phòng") or data.get("2. Tên phòng") or "Phòng trọ").strip(),
+            "price": str(data.get("price") or data.get("Giá thuê") or data.get("3. Giá thuê") or "Chưa rõ").strip(),
+            "floor": str(data.get("floor") or data.get("Tầng") or "Chưa rõ").strip(),
+            "is_private_bathroom": str(data.get("is_private_bathroom") or data.get("WC Khép kín") or "Chưa rõ").strip(),
+            "has_ac": str(data.get("has_ac") or data.get("Điều hòa") or "Chưa rõ").strip(),
+            "has_heater": str(data.get("has_heater") or data.get("Nóng lạnh") or "Chưa rõ").strip(),
+            "has_washer": str(data.get("has_washer") or data.get("Máy giặt") or "Chưa rõ").strip(),
+            "allow_pets": str(data.get("allow_pets") or data.get("Nuôi chó mèo") or "Chưa rõ").strip(),
+            "has_balcony": str(data.get("has_balcony") or data.get("Ban công") or "Chưa rõ").strip(),
+            "has_window": str(data.get("has_window") or data.get("Cửa sổ") or "Chưa rõ").strip(),
+            "has_fingerprint_lock": str(data.get("has_fingerprint_lock") or data.get("Khóa vân tay") or "Chưa rõ").strip(),
+            "parking_info": str(data.get("parking_info") or data.get("Chỗ để xe") or "Chưa rõ").strip(),
+            "max_occupants": str(data.get("max_occupants") or data.get("Ở tối đa") or "Chưa rõ").strip(),
+            "other_amenities": str(data.get("other_amenities") or data.get("Nội thất") or "Chưa rõ").strip(),
+            "service_fees": str(data.get("service_fees") or data.get("5. Phí dịch vụ") or "Chưa rõ").strip(),
+            "move_in_date": str(data.get("move_in_date") or data.get("7. Ngày ở") or "Vào ở ngay").strip(),
+            "status": str(data.get("status") or data.get("8. Trạng thái") or "TRỐNG").strip(),
+            "landlord_phone": str(data.get("landlord_phone") or data.get("SĐT Chủ nhà") or "Chưa rõ").strip(),
+            "media_urls": []
+        }
+
+    # Nếu chưa khởi tạo gemini_client thì gọi ngay fallback thủ công
+    if not gemini_client:
+        return manual_fallback(row_dict)
+
+    # --- 2. GỌI GEMINI AI XỬ LÝ VÀ CHUẨN HÓA DỮ LIỆU ---
     prompt = f"""
     Bạn là một trợ lý AI kiểm định dữ liệu phòng trọ. 
     Hãy phân tích dữ liệu đầu vào từ 1 dòng file Excel sau đây và chuyển thành JSON chuẩn.
@@ -313,14 +353,13 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
     {json.dumps(row_dict, ensure_ascii=False)}
 
     Yêu cầu chuẩn hóa:
-    - "address": Địa chỉ chi tiết (nếu không có địa chỉ cụ thể hoặc là dữ liệu rác, hãy trả về null).
+    - "address": Địa chỉ chi tiết (nếu không có địa chỉ cụ thể hoặc là dữ liệu rác/trống, hãy trả về null).
     - "room_name": Tên/số phòng (mặc định "Phòng trọ" nếu thiếu).
     - "price": Giá thuê (ví dụ: "3.5 triệu/tháng").
     - "is_private_bathroom", "has_ac", "has_heater", "has_washer", "allow_pets", "has_balcony", "has_window", "has_fingerprint_lock": Chỉ trả về đúng 1 trong 3 giá trị: "Có", "Không", hoặc "Chưa rõ".
     - "status": Chỉ trả về "TRỐNG" hoặc "ĐÃ CHO THUÊ".
 
-    Trả về kết quả dưới dạng JSON duy nhất, không kèm markdown hay giải thích thêm.
-    Format JSON:
+    Format JSON duy nhất cần trả về:
     {{
         "address": string hoặc null,
         "room_name": string,
@@ -344,21 +383,33 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
         "media_urls": list
     }}
     """
+    
     try:
         response = gemini_client.models.generate_content(
-            model="gemini-2.5-flash",
+            # Đổi sang tên model chuẩn hỗ trợ hiện tại
+            model="gemini-2.0-flash", 
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json"
             )
         )
+        
         if response and response.text:
-            cleaned_data = json.loads(response.text)
+            raw_text = response.text.strip()
+            
+            # Xóa các vạch markdown ```json ... ``` nếu Gemini lỡ sinh ra
+            if raw_text.startswith("```"):
+                raw_text = re.sub(r"^```(?:json)?\n?", "", raw_text)
+                raw_text = re.sub(r"\n?```$", "", raw_text)
+                
+            cleaned_data = json.loads(raw_text)
             return cleaned_data
+            
     except Exception as e:
-        print("⚠️ Lỗi AI Validation:", e)
+        print("⚠️ Lỗi AI Validation, chuyển sang Fallback thủ công:", e)
     
-    return row_dict
+    # Nếu Gemini API bị lỗi, gọi Fallback để không làm gián đoạn việc lưu Excel
+    return manual_fallback(row_dict)
 
 # --- API UPLOAD EXCEL / CSV CÓ AI CHECK ---
 @app.post("/api/rooms/upload-excel")
