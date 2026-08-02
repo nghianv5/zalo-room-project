@@ -65,7 +65,7 @@ def change_admin_password(data: AdminChangePasswordSchema):
     os.environ["ADMIN_PASSWORD"] = data.new_password
     return {
         "status": "success", 
-        "message": "Đã cập nhật mật khẩu tạm thời thành công!"
+        "message": "Đã cập nhật mật khẩu mới thành công!"
     }
 
 # --- CẤU HÌNH MEDIA ---
@@ -108,20 +108,20 @@ class RoomCreateUpdateSchema(BaseModel):
     # 3. Giá thuê
     price: Optional[str] = "Chưa rõ"
     # 4. Thông tin phòng chi tiết
-    floor: Optional[str] = "Chưa rõ"                  # Tầng bao nhiêu
-    is_private_bathroom: Optional[str] = "Chưa rõ"   # Phòng khép kín hay không (có WC riêng không)
-    has_ac: Optional[str] = "Chưa rõ"                 # Có điều hoà không
-    has_heater: Optional[str] = "Chưa rõ"             # Có nóng lạnh không
-    has_washer: Optional[str] = "Chưa rõ"             # Có máy giặt không
-    allow_pets: Optional[str] = "Chưa rõ"             # Có được nuôi chó mèo không
-    has_balcony: Optional[str] = "Chưa rõ"            # Có ban công không
-    has_window: Optional[str] = "Chưa rõ"             # Có cửa sổ không
-    has_fingerprint_lock: Optional[str] = "Chưa rõ"   # Có khoá vân tay không
-    parking_info: Optional[str] = "Chưa rõ"          # Có chỗ để xe máy, oto không
-    max_occupants: Optional[str] = "Chưa rõ"         # Ở tối đa bao nhiêu người
-    other_amenities: Optional[str] = "Chưa rõ"       # Các thông tin/tiện ích khác
+    floor: Optional[str] = "Chưa rõ"                  
+    is_private_bathroom: Optional[str] = "Chưa rõ"   
+    has_ac: Optional[str] = "Chưa rõ"                 
+    has_heater: Optional[str] = "Chưa rõ"             
+    has_washer: Optional[str] = "Chưa rõ"             
+    allow_pets: Optional[str] = "Chưa rõ"             
+    has_balcony: Optional[str] = "Chưa rõ"            
+    has_window: Optional[str] = "Chưa rõ"             
+    has_fingerprint_lock: Optional[str] = "Chưa rõ"   
+    parking_info: Optional[str] = "Chưa rõ"          
+    max_occupants: Optional[str] = "Chưa rõ"         
+    other_amenities: Optional[str] = "Chưa rõ"       
     # 5. Phí dịch vụ
-    service_fees: Optional[str] = "Chưa rõ"           # Điện, nước, internet, vệ sinh...
+    service_fees: Optional[str] = "Chưa rõ"           
     # 6. Ảnh, video phòng
     media_urls: Optional[List[str]] = []
     # 7. Thời gian khách vào ở được
@@ -150,9 +150,12 @@ def get_text_embedding(text: str, retries: int = 3) -> List[float]:
 
 def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYSTEM") -> bool:
     try:
-        address = data.get("address", "")
-        room_name = data.get("room_name", "Phòng trọ")
-        phone = data.get("landlord_phone", "Chưa rõ")
+        address = str(data.get("address", "")).strip()
+        room_name = str(data.get("room_name", "Phòng trọ")).strip()
+        phone = str(data.get("landlord_phone", "Chưa rõ")).strip()
+
+        if not address:
+            return False
 
         # Gom văn bản tổng hợp để làm vector hóa tìm kiếm
         text_to_embed = f"Địa chỉ: {address} Tên phòng: {room_name} Giá: {data.get('price', '')} Đồ đạc: AC:{data.get('has_ac')}, Heater:{data.get('has_heater')}, Washer:{data.get('has_washer')}, {data.get('other_amenities', '')} Phí dịch vụ: {data.get('service_fees', '')}"
@@ -174,27 +177,30 @@ def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYS
         else:
             new_point_id = str(uuid.uuid4())
 
-        # Lưu đầy đủ chuẩn xác 8 mục dữ liệu vào Database Qdrant Payload
+        media_list = data.get("media_urls", [])
+        if isinstance(media_list, str):
+            media_list = [x.strip() for x in media_list.split(",") if x.strip()]
+
         payload = {
             "1_address": address,
             "2_room_name": room_name,
-            "3_price": data.get("price", "Chưa rõ"),
-            "4_floor": data.get("floor", "Chưa rõ"),
-            "4_is_private_bathroom": data.get("is_private_bathroom", "Chưa rõ"),
-            "4_has_ac": data.get("has_ac", "Chưa rõ"),
-            "4_has_heater": data.get("has_heater", "Chưa rõ"),
-            "4_has_washer": data.get("has_washer", "Chưa rõ"),
-            "4_allow_pets": data.get("allow_pets", "Chưa rõ"),
-            "4_has_balcony": data.get("has_balcony", "Chưa rõ"),
-            "4_has_window": data.get("has_window", "Chưa rõ"),
-            "4_has_fingerprint_lock": data.get("has_fingerprint_lock", "Chưa rõ"),
-            "4_parking_info": data.get("parking_info", "Chưa rõ"),
-            "4_max_occupants": data.get("max_occupants", "Chưa rõ"),
-            "4_other_amenities": data.get("other_amenities", "Chưa rõ"),
-            "5_service_fees": data.get("service_fees", "Chưa rõ"),
-            "6_media_urls": data.get("media_urls", []),
-            "7_move_in_date": data.get("move_in_date", "Vào ở ngay"),
-            "8_status": data.get("status", "TRỐNG"),
+            "3_price": str(data.get("price", "Chưa rõ")),
+            "4_floor": str(data.get("floor", "Chưa rõ")),
+            "4_is_private_bathroom": str(data.get("is_private_bathroom", "Chưa rõ")),
+            "4_has_ac": str(data.get("has_ac", "Chưa rõ")),
+            "4_has_heater": str(data.get("has_heater", "Chưa rõ")),
+            "4_has_washer": str(data.get("has_washer", "Chưa rõ")),
+            "4_allow_pets": str(data.get("allow_pets", "Chưa rõ")),
+            "4_has_balcony": str(data.get("has_balcony", "Chưa rõ")),
+            "4_has_window": str(data.get("has_window", "Chưa rõ")),
+            "4_has_fingerprint_lock": str(data.get("has_fingerprint_lock", "Chưa rõ")),
+            "4_parking_info": str(data.get("parking_info", "Chưa rõ")),
+            "4_max_occupants": str(data.get("max_occupants", "Chưa rõ")),
+            "4_other_amenities": str(data.get("other_amenities", "Chưa rõ")),
+            "5_service_fees": str(data.get("service_fees", "Chưa rõ")),
+            "6_media_urls": media_list,
+            "7_move_in_date": str(data.get("move_in_date", "Vào ở ngay")),
+            "8_status": str(data.get("status", "TRỐNG")),
             "landlord_phone": phone,
             "zalo_user_id": zalo_user_id,
             "created_at": created_at,
@@ -235,7 +241,6 @@ def get_all_rooms(
         for r in records:
             p = r.payload or {}
 
-            # Lọc Backend
             if address and address.lower() not in str(p.get("1_address", "")).lower(): continue
             if room_name and room_name.lower() not in str(p.get("2_room_name", "")).lower(): continue
             if status and p.get("8_status") != status: continue
@@ -287,5 +292,130 @@ def delete_room_from_web(point_id: str):
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+# --- HÀM AI DÙNG GEMINI KIỂM TRA & CHUẨN HÓA DỮ LIỆU ---
+def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
+    """
+    Sử dụng Gemini để kiểm tra, sửa lỗi văn bản và chuẩn hóa dữ liệu hàng từ Excel/CSV
+    """
+    if not gemini_client:
+        # Nếu chưa cấu hình GEMINI_API_KEY thì trả về dữ liệu thô
+        return row_dict
+
+    prompt = f"""
+    Bạn là một trợ lý AI kiểm định dữ liệu phòng trọ. 
+    Hãy phân tích dữ liệu đầu vào từ 1 dòng file Excel sau đây và chuyển thành JSON chuẩn.
+
+    Dữ liệu đầu vào:
+    {json.dumps(row_dict, ensure_ascii=False)}
+
+    Yêu cầu chuẩn hóa:
+    - "address": Địa chỉ chi tiết (nếu không có địa chỉ cụ thể hoặc là dữ liệu rác, hãy trả về null).
+    - "room_name": Tên/số phòng (mặc định "Phòng trọ" nếu thiếu).
+    - "price": Giá thuê (ví dụ: "3.5 triệu/tháng").
+    - "is_private_bathroom", "has_ac", "has_heater", "has_washer", "allow_pets", "has_balcony", "has_window", "has_fingerprint_lock": Chỉ trả về đúng 1 trong 3 giá trị: "Có", "Không", hoặc "Chưa rõ".
+    - "status": Chỉ trả về "TRỐNG" hoặc "ĐÃ CHO THUÊ".
+
+    Trả về kết quả dưới dạng JSON duy nhất, không kèm markdown hay giải thích thêm.
+    Format JSON:
+    {{
+        "address": string hoặc null,
+        "room_name": string,
+        "price": string,
+        "floor": string,
+        "is_private_bathroom": string,
+        "has_ac": string,
+        "has_heater": string,
+        "has_washer": string,
+        "allow_pets": string,
+        "has_balcony": string,
+        "has_window": string,
+        "has_fingerprint_lock": string,
+        "parking_info": string,
+        "max_occupants": string,
+        "other_amenities": string,
+        "service_fees": string,
+        "move_in_date": string,
+        "status": string,
+        "landlord_phone": string,
+        "media_urls": list
+    }}
+    """
+    try:
+        response = gemini_client.models.generate_content(
+            model="gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(
+                response_mime_type="application/json"
+            )
+        )
+        if response and response.text:
+            cleaned_data = json.loads(response.text)
+            return cleaned_data
+    except Exception as e:
+        print("⚠️ Lỗi AI Validation:", e)
+    
+    return row_dict
+
+# --- API UPLOAD EXCEL / CSV CÓ AI CHECK ---
+@app.post("/api/rooms/upload-excel")
+async def upload_excel_rooms(file: UploadFile = File(...)):
+    if not file.filename.endswith((".xlsx", ".xls", ".csv")):
+        raise HTTPException(status_code=400, detail="Vui lòng tải lên tệp định dạng .xlsx, .xls hoặc .csv!")
+
+    contents = await file.read()
+    try:
+        if file.filename.endswith(".csv"):
+            df = pd.read_csv(io.BytesIO(contents))
+        else:
+            df = pd.read_excel(io.BytesIO(contents))
+    except Exception as e:
+        raise HTTPException(status_code=400, detail=f"Không thể đọc file Excel/CSV: {str(e)}")
+
+    df.fillna("Chưa rõ", inplace=True)
+    success_count = 0
+    fail_count = 0
+    ai_rejected_count = 0
+
+    for _, row in df.iterrows():
+        raw_row_dict = row.to_dict()
+        
+        # 1. Gọi AI Kiểm tra và Chuẩn hóa dữ liệu
+        validated_data = ai_validate_and_extract_room(raw_row_dict)
+
+        # 2. Kiểm tra nếu AI phát hiện dữ liệu không hợp lệ (không có địa chỉ)
+        if not validated_data or not validated_data.get("address"):
+            ai_rejected_count += 1
+            continue
+
+        # 3. Tiến hành Lưu vào Database (Qdrant)
+        if upsert_room_to_db(data=validated_data, zalo_user_id="EXCEL_AI_IMPORT"):
+            success_count += 1
+        else:
+            fail_count += 1
+
+    return {
+        "status": "success",
+        "message": f"AI đã xử lý xong! Thành công: {success_count} phòng. (Bỏ qua {ai_rejected_count} dòng dữ liệu lỗi/rác, {fail_count} lỗi lưu DB)."
+    }
+    
+# --- API TẢI FILE EXCEL MẪU ---
+@app.get("/api/rooms/download-template")
+def download_room_template():
+    # Đường dẫn tới file mẫu trong thư mục templates
+    template_path = os.path.join(BASE_DIR, "templates", "Mau_Nhap_Danh_Sach_Phong.xlsx")
+    
+    if not os.path.exists(template_path):
+        raise HTTPException(
+            status_code=404, 
+            detail="Không tìm thấy tệp mẫu 'Mau_Nhap_Danh_Sach_Phong.xlsx' trong thư mục templates!"
+        )
+    
+    return FileResponse(
+        path=template_path,
+        filename="Mau_Nhap_Danh_Sach_Phong.xlsx",
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
+    
+    
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)

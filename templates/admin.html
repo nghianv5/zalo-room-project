@@ -38,19 +38,25 @@
     <div id="adminDashboard" class="hidden p-6 max-w-[98%] mx-auto">
         <div class="bg-white p-6 rounded-lg shadow-md">
             <!-- HEADER -->
-            <div class="flex justify-between items-center mb-6">
+            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                 <div>
                     <h1 class="text-2xl font-bold text-gray-800">📋 Quản Lý Danh Sách Phòng Trọ</h1>
                     <p class="text-xs text-gray-500 mt-1">Chuẩn hóa dữ liệu theo 8 mục chi tiết & Đồng bộ Realtime</p>
                 </div>
-                <div class="flex gap-2 items-center">
-                    <button id="btnDeleteSelected" onclick="deleteSelectedRooms()" class="hidden bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 font-medium text-sm flex items-center gap-1 transition-all">
+                <div class="flex flex-wrap gap-2 items-center">
+                    <button id="btnDeleteSelected" onclick="deleteSelectedRooms()" class="hidden bg-red-600 text-white px-3 py-2 rounded hover:bg-red-700 font-medium text-xs flex items-center gap-1 transition-all">
                         🗑️ Xóa phòng đã chọn (<span id="selectedCount">0</span>)
                     </button>
-                    <button onclick="openModal()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 font-medium text-sm flex items-center gap-1">
+                    <button onclick="openExcelModal()" class="bg-emerald-600 text-white px-3 py-2 rounded hover:bg-emerald-700 font-medium text-xs flex items-center gap-1">
+                        📊 Nhập Excel / CSV
+                    </button>
+                    <button onclick="openModal()" class="bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700 font-medium text-xs flex items-center gap-1">
                         + Thêm Phòng Mới
                     </button>
-                    <button onclick="handleLogout()" class="bg-gray-800 text-white px-3 py-2 rounded hover:bg-gray-900 font-medium text-sm flex items-center gap-1">
+                    <button onclick="openChangePasswordModal()" class="bg-amber-600 text-white px-3 py-2 rounded hover:bg-amber-700 font-medium text-xs flex items-center gap-1">
+                        🔑 Đổi mật khẩu
+                    </button>
+                    <button onclick="handleLogout()" class="bg-gray-800 text-white px-3 py-2 rounded hover:bg-gray-900 font-medium text-xs flex items-center gap-1">
                         🚪 Đăng xuất
                     </button>
                 </div>
@@ -296,6 +302,46 @@
                 <div class="flex justify-end gap-2 mt-4 pt-3 border-t">
                     <button type="button" onclick="closeModal()" class="px-4 py-2 border rounded text-sm hover:bg-gray-100">Hủy</button>
                     <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700">Lưu Dữ Liệu</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL ĐỔI MẬT KHẨU -->
+    <div id="changePasswordModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-lg p-6 w-full max-w-md">
+            <h2 class="text-lg font-bold mb-4 text-gray-800">🔑 Đổi Mật Khẩu Admin</h2>
+            <form onsubmit="handleChangePassword(event)">
+                <div class="mb-4">
+                    <label class="block text-xs font-semibold text-gray-700 mb-1">Mật khẩu hiện tại</label>
+                    <input type="password" id="oldPass" required class="w-full border p-2 rounded text-sm">
+                </div>
+                <div class="mb-6">
+                    <label class="block text-xs font-semibold text-gray-700 mb-1">Mật khẩu mới</label>
+                    <input type="password" id="newPass" required class="w-full border p-2 rounded text-sm">
+                </div>
+                <div id="changePassMsg" class="hidden text-xs p-2 rounded mb-4 text-center"></div>
+                <div class="flex justify-end gap-2">
+                    <button type="button" onclick="closeChangePasswordModal()" class="px-4 py-2 border rounded text-sm">Hủy</button>
+                    <button type="submit" class="px-4 py-2 bg-amber-600 text-white rounded text-sm font-medium hover:bg-amber-700">Cập nhật</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- MODAL UPLOAD EXCEL / CSV -->
+    <div id="excelModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-lg p-6 w-full max-w-md">
+            <h2 class="text-lg font-bold mb-2 text-gray-800">📊 Nhập Danh Sách Phòng Tự Động Từ Excel / CSV</h2>
+            <p class="text-xs text-gray-500 mb-4">Các cột cần có trong file Excel/CSV: <i>Địa chỉ, Tên phòng, Giá thuê, Tầng, WC khép kín, Điều hòa, Nóng lạnh, Máy giặt, Cho nuôi thú cưng, Phí dịch vụ, SĐT chủ nhà,...</i></p>
+            <form onsubmit="handleUploadExcel(event)">
+                <div class="mb-4">
+                    <input type="file" id="excelFileInput" accept=".xlsx, .xls, .csv" required class="w-full border p-2 rounded text-sm">
+                </div>
+                <div id="uploadMsg" class="hidden text-xs p-2 rounded mb-4 text-center"></div>
+                <div class="flex justify-end gap-2">
+                    <button type="button" onclick="closeExcelModal()" class="px-4 py-2 border rounded text-sm">Hủy</button>
+                    <button type="submit" id="btnSubmitExcel" class="px-4 py-2 bg-emerald-600 text-white rounded text-sm font-medium hover:bg-emerald-700">Tải Lên & Nhập</button>
                 </div>
             </form>
         </div>
@@ -571,6 +617,95 @@
             
             document.getElementById("modalTitle").innerText = "Cập Nhật Thông Tin Phòng";
             document.getElementById("roomModal").classList.remove("hidden");
+        }
+
+        // ĐỔI MẬT KHẨU LOGIC
+        function openChangePasswordModal() {
+            document.getElementById("oldPass").value = "";
+            document.getElementById("newPass").value = "";
+            document.getElementById("changePassMsg").classList.add("hidden");
+            document.getElementById("changePasswordModal").classList.remove("hidden");
+        }
+        function closeChangePasswordModal() {
+            document.getElementById("changePasswordModal").classList.add("hidden");
+        }
+        async function handleChangePassword(e) {
+            e.preventDefault();
+            const old_password = document.getElementById("oldPass").value;
+            const new_password = document.getElementById("newPass").value;
+            const msgBox = document.getElementById("changePassMsg");
+
+            try {
+                const res = await fetch("/api/admin/change-password", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ old_password, new_password })
+                });
+
+                const data = await res.json();
+                msgBox.classList.remove("hidden");
+                if (res.ok) {
+                    msgBox.className = "text-xs p-2 rounded mb-4 text-center bg-green-100 text-green-800";
+                    msgBox.innerText = "✅ " + data.message;
+                    setTimeout(closeChangePasswordModal, 1500);
+                } else {
+                    msgBox.className = "text-xs p-2 rounded mb-4 text-center bg-red-100 text-red-800";
+                    msgBox.innerText = "❌ " + (data.detail || "Đổi mật khẩu thất bại!");
+                }
+            } catch (err) {
+                console.error("Lỗi đổi mật khẩu:", err);
+            }
+        }
+
+        // UPLOAD EXCEL LOGIC
+        function openExcelModal() {
+            document.getElementById("excelFileInput").value = "";
+            document.getElementById("uploadMsg").classList.add("hidden");
+            document.getElementById("excelModal").classList.remove("hidden");
+        }
+        function closeExcelModal() {
+            document.getElementById("excelModal").classList.add("hidden");
+        }
+        async function handleUploadExcel(e) {
+            e.preventDefault();
+            const fileInput = document.getElementById("excelFileInput");
+            if (!fileInput.files || fileInput.files.length === 0) return;
+
+            const msgBox = document.getElementById("uploadMsg");
+            const btn = document.getElementById("btnSubmitExcel");
+            
+            msgBox.className = "text-xs p-2 rounded mb-4 text-center bg-blue-100 text-blue-800";
+            msgBox.innerText = "⏳ Đang tải lên và xử lý dữ liệu...";
+            msgBox.classList.remove("hidden");
+            btn.disabled = true;
+
+            const formData = new FormData();
+            formData.append("file", fileInput.files[0]);
+
+            try {
+                const res = await fetch("/api/rooms/upload-excel", {
+                    method: "POST",
+                    body: formData
+                });
+                const data = await res.json();
+                if (res.ok) {
+                    msgBox.className = "text-xs p-2 rounded mb-4 text-center bg-green-100 text-green-800";
+                    msgBox.innerText = "✅ " + data.message;
+                    setTimeout(() => {
+                        closeExcelModal();
+                        loadRooms();
+                    }, 2000);
+                } else {
+                    msgBox.className = "text-xs p-2 rounded mb-4 text-center bg-red-100 text-red-800";
+                    msgBox.innerText = "❌ " + (data.detail || "Tải lên tệp thất bại!");
+                }
+            } catch (err) {
+                console.error("Lỗi upload Excel:", err);
+                msgBox.className = "text-xs p-2 rounded mb-4 text-center bg-red-100 text-red-800";
+                msgBox.innerText = "❌ Đã có lỗi xảy ra trong quá trình xử lý tệp!";
+            } finally {
+                btn.disabled = false;
+            }
         }
 
         checkAuth();
