@@ -5,7 +5,7 @@ import uuid
 import time
 from typing import Dict, List, Optional
 import uvicorn
-from fastapi import FastAPI, Request, BackgroundTasks, UploadFile, File, HTTPException
+from fastapi import FastAPI, Request, BackgroundTasks, UploadFile, File, HTTPException, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
