@@ -135,22 +135,27 @@ class RoomCreateUpdateSchema(BaseModel):
     # Thông tin liên hệ
     landlord_phone: Optional[str] = "Chưa rõ"
 
-def get_text_embedding(text: str, retries: int = 3) -> List[float]:
+def get_text_embedding(text: str, retries: int = 2) -> List[float]:
     if not text or not text.strip():
-        return []
+        return [0.0] * VECTOR_SIZE
+        
     if gemini_client:
         for attempt in range(retries):
             try:
+                # Dùng tên model text-embedding-004 chuẩn
                 response = gemini_client.models.embed_content(
-                    model="models/gemini-embedding-001",
+                    model="text-embedding-004", 
                     contents=text,
-                    config=types.EmbedContentConfig(output_dimensionality=768)
+                    config=types.EmbedContentConfig(output_dimensionality=VECTOR_SIZE)
                 )
                 if response and response.embedding and response.embedding.values:
                     return response.embedding.values
-            except Exception:
-                time.sleep(1)
-    return []
+            except Exception as e:
+                print(f"⚠️ Lỗi Embedding (Lần {attempt+1}):", e)
+                time.sleep(0.5)
+                
+    # BẮT BUỘC: Trả về vector mặc định 768 chiều thay vì [] để Qdrant lưu thành công
+    return [0.0] * VECTOR_SIZE
 
 def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYSTEM") -> bool:
     try:
@@ -383,7 +388,7 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
     
     try:
         response = gemini_client.models.generate_content(
-            model="gemini-1.5-flash", # Đã cập nhật sang model ổn định
+            model="gemini-1.5-flash-latest", # Sử dụng alias model chuẩn
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json"
