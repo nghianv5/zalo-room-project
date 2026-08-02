@@ -85,10 +85,6 @@ if CLOUDINARY_URL:
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
-import google.genai
-import importlib.metadata
-print("google-genai")
-print(importlib.metadata.version("google-genai"))
 
     
 COLLECTION_NAME = "rooms_v16_structured"
@@ -412,7 +408,7 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
                 response_mime_type="application/json"
             )
         )
-        
+        print("Kết nối thành công gemini-2.5-flash")
         if response and response.text:
             raw_text = response.text.strip()
             if raw_text.startswith("```"):
