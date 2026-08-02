@@ -85,14 +85,11 @@ if CLOUDINARY_URL:
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
+import google.genai
+import importlib.metadata
 
+print(importlib.metadata.version("google-genai"))
 
-print("--- DANH SÁCH MODEL DÙNG ĐƯỢC ---")
-try:
-    for model in gemini_client.models.list():
-        print(model.name)
-except Exception as e:
-    print("❌ Lỗi khi lấy danh sách model:", e)
     
 COLLECTION_NAME = "rooms_v16_structured"
 VECTOR_SIZE = 768
@@ -409,7 +406,7 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
     
     try:
         response = gemini_client.models.generate_content(
-            model="gemini-1.5-flash", # Tên model chuẩn ngắn gọn
+            model="models/gemini-2.5-flash",
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json"
