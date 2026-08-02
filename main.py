@@ -34,6 +34,33 @@ app.add_middleware(
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
+# --- QUẢN LÝ THÔNG TIN CẤU HÌNH USERCONNECT.TXT ---
+CONFIG_FILE = os.path.join(BASE_DIR, "userconnect.txt")
+
+def read_user_config() -> dict:
+    """Đọc thông tin user từ file userconnect.txt"""
+    if not os.path.exists(CONFIG_FILE):
+        default_config = {"username": "admin", "password": "123"}
+        save_user_config(default_config)
+        return default_config
+    try:
+        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print("❌ Lỗi đọc file userconnect.txt:", e)
+        return {"username": "admin", "password": "123"}
+
+def save_user_config(data: dict):
+    """Ghi thông tin user mới vào file userconnect.txt"""
+    try:
+        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+        return True
+    except Exception as e:
+        print("❌ Lỗi ghi file userconnect.txt:", e)
+        return False
+
+
 # --- 0. CẤU HÌNH MEDIA & CLOUDINARY ---
 MEDIA_DIR = "static/media"
 os.makedirs(MEDIA_DIR, exist_ok=True)
@@ -70,7 +97,7 @@ except Exception as e:
     print("❌ Lỗi khởi tạo Qdrant:", e)
 
 
-# --- SCHEMA DỮ LIỆU CHUẨN HÓA DÙNG CHO AI ---
+# --- SCHEMA DỮ LIỆU ---
 class RoomStandardSchema(BaseModel):
     address: str = Field(description="Địa chỉ 4 cấp chuẩn hóa (Số nhà, Phường/Xã, Quận/Huyện, Tỉnh/TP)")
     room_name: str = Field(default="Phòng trọ", description="Tên hoặc số phòng")
@@ -81,6 +108,14 @@ class RoomStandardSchema(BaseModel):
     allow_pets: bool = Field(default=False, description="Cho nuôi thú cưng không")
     status: str = Field(default="TRỐNG", description="Trạng thái: 'TRỐNG' hoặc 'ĐÃ CHO THUÊ'")
     landlord_phone: Optional[str] = Field(default="Chưa rõ", description="Số điện thoại chuẩn 10 chữ số")
+
+class AdminLoginSchema(BaseModel):
+    username: str
+    password: str
+
+class AdminChangePasswordSchema(BaseModel):
+    old_password: str
+    new_password: str
 
 
 # --- 2. HÀM TẠO VECTOR EMBEDDING ---
@@ -197,7 +232,6 @@ def upsert_room_to_db(
     zalo_user_id: str = "SYSTEM",
     landlord_phone: str = "Chưa rõ"
 ) -> bool:
-    """Hàm Upsert cơ bản dùng chung cho Web Admin và Import Excel"""
     try:
         address = extracted_data.get("address", "")
         room_name = extracted_data.get("room_name", "Phòng trọ")
@@ -225,7 +259,6 @@ def upsert_room_to_db(
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         created_at = now_str
 
-        # Nếu cập nhật phòng cũ có point_id
         if point_id:
             new_point_id = point_id
             try:
@@ -235,7 +268,6 @@ def upsert_room_to_db(
             except Exception:
                 pass
         else:
-            # Nếu thêm mới: Tạo UUID ngẫu nhiên duy nhất
             new_point_id = str(uuid.uuid4())
 
         payload = {
@@ -347,7 +379,45 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
         return False
 
 
-# --- 6. LUỒNG XỬ LÝ AI ZALO (CHỈ CHO PHÉP TÌM PHÒNG) ---
+# --- 6. API ĐĂNG NHẬP & ĐỔI MẬT KHẨU TỪ USERCONNECT.TXT ---
+@app.post("/api/admin/login")
+def admin_login(data: AdminLoginSchema):
+    """Xác thực người dùng từ file userconnect.txt"""
+    config = read_user_config()
+    if data.username == config.get("username") and data.password == config.get("password"):
+        return {"status": "success", "message": "Đăng nhập thành công!"}
+    
+    raise HTTPException(status_code=401, detail="Tài khoản hoặc mật khẩu không chính xác!")
+
+@app.post("/api/admin/change-password")
+def change_admin_password(data: AdminChangePasswordSchema, background_tasks: BackgroundTasks):
+    """Cập nhật mật khẩu mới và gửi thông báo qua Zalo OA"""
+    config = read_user_config()
+    
+    if data.old_password != config.get("password"):
+        raise HTTPException(status_code=400, detail="Mật khẩu hiện tại không chính xác!")
+
+    # Cập nhật mật khẩu mới
+    config["password"] = data.new_password
+    if not save_user_config(config):
+        raise HTTPException(status_code=500, detail="Không thể lưu mật khẩu mới vào file!")
+
+    # Gửi thông báo bảo mật qua Zalo nếu có cấu hình Admin Zalo ID
+    admin_zalo_id = os.environ.get("ADMIN_ZALO_USER_ID", "")
+    if admin_zalo_id:
+        now_str = datetime.now().strftime("%H:%M:%S %d/%m/%Y")
+        zalo_msg = (
+            f"⚠️ **CẢNH BÁO AN NINH HỆ THỐNG**\n\n"
+            f"Mật khẩu Admin vừa được thay đổi thành công.\n"
+            f"🕒 **Thời gian:** {now_str}\n\n"
+            f"Nếu đây không phải thao tác của bạn, hãy kiểm tra lại file userconnect.txt ngay lập tức!"
+        )
+        background_tasks.add_task(send_zalo_message, admin_zalo_id, zalo_msg)
+
+    return {"status": "success", "message": "Đổi mật khẩu thành công!"}
+
+
+# --- 7. LUỒNG XỬ LÝ AI ZALO (CHỈ CHO PHÉP TÌM PHÒNG) ---
 def process_zalo_ai_logic(
     message_text: str, 
     user_id: str = "SYSTEM"
@@ -404,7 +474,7 @@ TRẢ VỀ DUY NHẤT CHUỖI JSON DẠNG:
     send_zalo_message(user_id, ai_reply, media_urls=urls_to_send)
 
 
-# --- 7. ZALO WEBHOOK RECEIVER ---
+# --- 8. ZALO WEBHOOK RECEIVER ---
 @app.post("/webhook/zalo")
 async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
     try:
@@ -431,7 +501,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
     return {"status": "success"}
 
 
-# --- 8. WEB ADMIN APIS & ROUTING ---
+# --- 9. WEB ADMIN APIS & ROUTING ---
 class RoomCreateUpdateSchema(BaseModel):
     address: str
     room_name: Optional[str] = "Phòng trọ"
@@ -559,7 +629,7 @@ def download_excel_template():
     )
 
 
-# --- 8.1. HÀM AI CHUẨN HÓA DỮ LIỆU EXCEL ---
+# --- 9.1. HÀM AI CHUẨN HÓA DỮ LIỆU EXCEL ---
 def normalize_excel_batch_with_ai(df_chunk: pd.DataFrame) -> List[dict]:
     raw_records = df_chunk.to_dict(orient="records")
     
@@ -606,7 +676,7 @@ TRẢ VỀ DUY NHẤT 1 MẢNG JSON CÁC OBJECT ĐÃ ĐƯỢC CHUẨN HÓA:
     return []
 
 
-# --- 8.2. API UPLOAD EXCEL TÍCH HỢP AI TỰ ĐỘNG CHUẨN HÓA & LƯU DB ---
+# --- 9.2. API UPLOAD EXCEL TÍCH HỢP AI TỰ ĐỘNG CHUẨN HÓA & LƯU DB ---
 @app.post("/api/rooms/upload-excel")
 async def upload_and_process_excel(file: UploadFile = File(...)):
     """Upload Excel -> AI Đọc & Chuẩn hóa dữ liệu -> Lưu trực tiếp vào Qdrant DB"""
@@ -630,10 +700,8 @@ async def upload_and_process_excel(file: UploadFile = File(...)):
         for i in range(0, total_rows, batch_size):
             df_chunk = df.iloc[i:i + batch_size]
             
-            # 1. Đưa qua Gemini AI chuẩn hóa
             normalized_batch = normalize_excel_batch_with_ai(df_chunk)
 
-            # 2. Duyệt từng dòng đã chuẩn hóa và lưu Qdrant
             for index, item in enumerate(normalized_batch):
                 try:
                     valid_data = RoomStandardSchema(**item)
@@ -688,7 +756,7 @@ async def upload_and_process_excel(file: UploadFile = File(...)):
         raise HTTPException(status_code=500, detail=f"Lỗi xử lý file Excel: {str(e)}")
 
 
-# --- 9. MAIN ENTRY POINT ---
+# --- 10. MAIN ENTRY POINT ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
     print(f"🚀 Server đang chạy tại cổng {port}...")
