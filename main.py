@@ -85,6 +85,15 @@ if CLOUDINARY_URL:
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
+
+
+print("--- DANH SÁCH MODEL DÙNG ĐƯỢC ---")
+try:
+    for model in gemini_client.models.list():
+        print(model.name)
+except Exception as e:
+    print("❌ Lỗi khi lấy danh sách model:", e)
+    
 COLLECTION_NAME = "rooms_v16_structured"
 VECTOR_SIZE = 768
 
