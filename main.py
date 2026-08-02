@@ -16,7 +16,7 @@ from google.genai import types
 import cloudinary
 import cloudinary.uploader
 import pandas as pd
-from datetime import datetime
+from datetime import datetime, date
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
@@ -74,6 +74,28 @@ def change_admin_password(data: AdminChangePasswordSchema):
         "message": "Đã cập nhật mật khẩu mới thành công!"
     }
 
+
+def parse_move_in_date(date_str: str) -> float:
+    """
+    Chuyển đổi các chuỗi ngày sang Timestamp (Unix Timestamp).
+    Nếu là "Vào ở ngay" hoặc không xác định -> Mặc định là ngày hôm nay.
+    """
+    if not date_str or str(date_str).strip().lower() in ["vào ở ngay", "ngay", "chưa rõ", "none", "nan", ""]:
+        return datetime.now().timestamp()
+
+    text = str(date_str).strip()
+    
+    # 1. Thử parse các định dạng ngày chuẩn: "DD/MM/YYYY", "YYYY-MM-DD", "DD-MM-YYYY"
+    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+        try:
+            dt = datetime.strptime(text, fmt)
+            return dt.timestamp()
+        except ValueError:
+            pass
+
+    # Mặc định trả về thời gian hiện tại nếu không nhận diện được format
+    return datetime.now().timestamp()
+    
 # --- CẤU HÌNH MEDIA ---
 MEDIA_DIR = "static/media"
 os.makedirs(MEDIA_DIR, exist_ok=True)
@@ -310,6 +332,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYS
             "5_service_fees": str(data.get("service_fees", "Chưa rõ")),
             "6_media_urls": media_list,
             "7_move_in_date": str(data.get("move_in_date", "Vào ở ngay")),
+            "move_in_timestamp": move_in_ts,
             "8_status": str(data.get("status", "TRỐNG")),
             "landlord_phone": phone,
             "zalo_user_id": zalo_user_id,
@@ -860,6 +883,64 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
     send_zalo_message(user_id, ai_reply, media_urls=urls_to_send)
 
 
+
+
+@app.get("/api/admin/rooms")
+async def get_rooms_filter(
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    from_date: Optional[str] = None, # Dạng YYYY-MM-DD truyền từ ô chọn ngày
+    to_date: Optional[str] = None,   # Dạng YYYY-MM-DD
+    status: Optional[str] = "TRỐNG"
+):
+    must_conditions = []
+
+    # 1. Lọc theo trạng thái phòng (Chỉ lọc phòng TRỐNG)
+    if status:
+        must_conditions.append(
+            models.FieldCondition(
+                key="status",
+                match=models.MatchValue(value=status)
+            )
+        )
+
+    # 2. Lọc theo khoảng giá
+    if min_price is not None or max_price is not None:
+        price_range = {}
+        if min_price is not None: price_range["gte"] = min_price
+        if max_price is not None: price_range["lte"] = max_price
+        
+        must_conditions.append(
+            models.FieldCondition(key="price_num", range=models.Range(**price_range))
+        )
+
+    # 3. Lọc theo khoảng thời gian phòng trống (move_in_timestamp)
+    if from_date or to_date:
+        time_range = {}
+        if from_date:
+            dt_from = datetime.strptime(from_date, "%Y-%m-%d")
+            time_range["gte"] = dt_from.timestamp()
+        if to_date:
+            dt_to = datetime.strptime(to_date, "%Y-%m-%d")
+            time_range["lte"] = dt_to.timestamp()
+
+        must_conditions.append(
+            models.FieldCondition(
+                key="move_in_timestamp",
+                range=models.Range(**time_range)
+            )
+        )
+
+    # Truy vấn Qdrant
+    query_filter = models.Filter(must=must_conditions) if must_conditions else None
+    
+    records = qdrant_client.scroll(
+        collection_name=COLLECTION_NAME,
+        scroll_filter=query_filter,
+        limit=50
+    )[0]
+
+    return [rec.payload for rec.payload in records]
 
 # --- 9. WEBHOOK RECEIVER ---
 @app.post("/webhook/zalo")

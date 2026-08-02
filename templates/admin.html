@@ -4,7 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quản Lý Phòng Trọ - Admin Dashboard</title>
-    <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
+    <!-- Đã sửa lại đường dẫn CDN chuẩn -->
+    <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100 min-h-screen">
 
@@ -62,7 +63,7 @@
                 </div>
             </div>
 
-            <!-- BỘ LỌC DỮ LIỆU BỔ SUNG KHOẢNG GIÁ & KHOẢNG THỜI GIAN -->
+            <!-- BỘ LỌC DỮ LIỆU -->
             <div class="bg-gray-50 p-4 rounded-lg border mb-6 text-xs">
                 <div class="flex justify-between items-center mb-3">
                     <h3 class="font-bold text-gray-700 text-sm flex items-center gap-1">
@@ -89,9 +90,9 @@
                         <div class="col-span-1 sm:col-span-2 bg-blue-50/50 p-2 rounded border border-blue-100">
                             <label class="block font-semibold text-blue-900 mb-1">3. Khoảng Giá Thuê (VNĐ):</label>
                             <div class="flex items-center gap-2">
-                                <input type="number" id="filterMinPrice" oninput="applyFilters()" placeholder="Giá từ (VD: 2000000)" class="w-full border p-2 rounded bg-white">
+                                <input type="number" id="filterMinPrice" onchange="loadRooms()" placeholder="Giá từ (VD: 2000000)" class="w-full border p-2 rounded bg-white">
                                 <span>-</span>
-                                <input type="number" id="filterMaxPrice" oninput="applyFilters()" placeholder="Giá đến (VD: 5000000)" class="w-full border p-2 rounded bg-white">
+                                <input type="number" id="filterMaxPrice" onchange="loadRooms()" placeholder="Giá đến (VD: 5000000)" class="w-full border p-2 rounded bg-white">
                             </div>
                         </div>
 
@@ -99,15 +100,15 @@
                         <div class="col-span-1 sm:col-span-2 bg-amber-50/50 p-2 rounded border border-amber-100">
                             <label class="block font-semibold text-amber-900 mb-1">7. Khoảng Thời Gian Phòng Trống:</label>
                             <div class="flex items-center gap-2">
-                                <input type="date" id="filterFromDate" onchange="applyFilters()" class="w-full border p-2 rounded bg-white">
+                                <input type="date" id="filterFromDate" onchange="loadRooms()" class="w-full border p-2 rounded bg-white">
                                 <span>tới</span>
-                                <input type="date" id="filterToDate" onchange="applyFilters()" class="w-full border p-2 rounded bg-white">
+                                <input type="date" id="filterToDate" onchange="loadRooms()" class="w-full border p-2 rounded bg-white">
                             </div>
                         </div>
 
                         <div>
                             <label class="block font-semibold text-gray-600 mb-1">8. Trạng thái phòng:</label>
-                            <select id="filterStatus" onchange="applyFilters()" class="w-full border p-2 rounded bg-white font-semibold">
+                            <select id="filterStatus" onchange="loadRooms()" class="w-full border p-2 rounded bg-white font-semibold">
                                 <option value="">-- Tất cả --</option>
                                 <option value="TRỐNG">🟢 TRỐNG</option>
                                 <option value="ĐÃ CHO THUÊ">🔴 ĐÃ CHO THUÊ</option>
@@ -303,7 +304,7 @@
 
                     <div class="md:col-span-3">
                         <label class="block font-bold text-gray-700 mb-1">6. Ảnh, Video phòng (URLs phân cách bằng dấu phẩy):</label>
-                        <textarea id="media_urls" rows="2" class="w-full border p-2 rounded" placeholder="[https://res.cloudinary.com/.../img1.jpg](https://res.cloudinary.com/.../img1.jpg), [https://res.cloudinary.com/.../video.mp4](https://res.cloudinary.com/.../video.mp4)"></textarea>
+                        <textarea id="media_urls" rows="2" class="w-full border p-2 rounded" placeholder="https://res.cloudinary.com/.../img1.jpg, https://res.cloudinary.com/.../video.mp4"></textarea>
                     </div>
                 </div>
 
@@ -337,31 +338,31 @@
         </div>
     </div>
 
-	<!-- MODAL UPLOAD EXCEL / CSV -->
-	<div id="excelModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-		<div class="bg-white rounded-lg p-6 w-full max-w-md">
-			<div class="flex justify-between items-center mb-2">
-				<h2 class="text-lg font-bold text-gray-800">📊 Nhập Danh Sách Phòng</h2>
-				<a href="/api/rooms/download-template" download class="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2 py-1 rounded hover:bg-blue-100 font-semibold flex items-center gap-1">
-					📥 Tải File Mẫu
-				</a>
-			</div>
-			<p class="text-xs text-gray-500 mb-4">
-				Tải tệp mẫu về điền thông tin hoặc chọn tệp Excel/CSV có sẵn để AI kiểm tra và nhập vào hệ thống.
-			</p>
-			
-			<form onsubmit="handleUploadExcel(event)">
-				<div class="mb-4">
-					<input type="file" id="excelFileInput" accept=".xlsx, .xls, .csv" required class="w-full border p-2 rounded text-sm">
-				</div>
-				<div id="uploadMsg" class="hidden text-xs p-2 rounded mb-4 text-center"></div>
-				<div class="flex justify-end gap-2">
-					<button type="button" onclick="closeExcelModal()" class="px-4 py-2 border rounded text-sm">Hủy</button>
-					<button type="submit" id="btnSubmitExcel" class="px-4 py-2 bg-emerald-600 text-white rounded text-sm font-medium hover:bg-emerald-700">Tải Lên & Nhập</button>
-				</div>
-			</form>
-		</div>
-	</div>
+    <!-- MODAL UPLOAD EXCEL / CSV -->
+    <div id="excelModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-lg p-6 w-full max-w-md">
+            <div class="flex justify-between items-center mb-2">
+                <h2 class="text-lg font-bold text-gray-800">📊 Nhập Danh Sách Phòng</h2>
+                <a href="/api/rooms/download-template" download class="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2 py-1 rounded hover:bg-blue-100 font-semibold flex items-center gap-1">
+                    📥 Tải File Mẫu
+                </a>
+            </div>
+            <p class="text-xs text-gray-500 mb-4">
+                Tải tệp mẫu về điền thông tin hoặc chọn tệp Excel/CSV có sẵn để AI kiểm tra và nhập vào hệ thống.
+            </p>
+            
+            <form onsubmit="handleUploadExcel(event)">
+                <div class="mb-4">
+                    <input type="file" id="excelFileInput" accept=".xlsx, .xls, .csv" required class="w-full border p-2 rounded text-sm">
+                </div>
+                <div id="uploadMsg" class="hidden text-xs p-2 rounded mb-4 text-center"></div>
+                <div class="flex justify-end gap-2">
+                    <button type="button" onclick="closeExcelModal()" class="px-4 py-2 border rounded text-sm">Hủy</button>
+                    <button type="submit" id="btnSubmitExcel" class="px-4 py-2 bg-emerald-600 text-white rounded text-sm font-medium hover:bg-emerald-700">Tải Lên & Nhập</button>
+                </div>
+            </form>
+        </div>
+    </div>
 
     <!-- JAVASCRIPT LOGIC -->
     <script>
@@ -412,11 +413,11 @@
         // TẢI PHÒNG KÈM BỘ LỌC TỪ API SERVER
         async function loadRooms() {
             try {
-                const minPrice = document.getElementById("filterMinPrice").value;
-                const maxPrice = document.getElementById("filterMaxPrice").value;
-                const fromDate = document.getElementById("filterFromDate").value;
-                const toDate = document.getElementById("filterToDate").value;
-                const status = document.getElementById("filterStatus").value;
+                const minPrice = document.getElementById("filterMinPrice")?.value || "";
+                const maxPrice = document.getElementById("filterMaxPrice")?.value || "";
+                const fromDate = document.getElementById("filterFromDate")?.value || "";
+                const toDate = document.getElementById("filterToDate")?.value || "";
+                const status = document.getElementById("filterStatus")?.value || "";
 
                 let url = '/api/admin/rooms?';
                 if (minPrice) url += `min_price=${minPrice}&`;
@@ -436,6 +437,7 @@
 
         function renderTable(rooms) {
             const tbody = document.getElementById("roomTableBody");
+            if (!tbody) return;
             tbody.innerHTML = "";
             document.getElementById("selectAll").checked = false;
             updateDeleteButton();
@@ -492,7 +494,6 @@
             });
         }
 
-        // BỘ LỌC TÌM KIẾM TRÊN CLIENT DÀNH CHO CÁC TRƯỜNG CHỮ
         function applyFilters() {
             const vAddress = document.getElementById("filterAddress").value.toLowerCase().trim();
             const vRoomName = document.getElementById("filterRoomName").value.toLowerCase().trim();
@@ -529,13 +530,6 @@
             document.getElementById("filterPhone").value = "";
             loadRooms();
         }
-
-        // Tự động gọi lại API nạp lại danh sách phòng khi nhập Giá hoặc Ngày ở
-        document.getElementById("filterMinPrice").addEventListener("change", loadRooms);
-        document.getElementById("filterMaxPrice").addEventListener("change", loadRooms);
-        document.getElementById("filterFromDate").addEventListener("change", loadRooms);
-        document.getElementById("filterToDate").addEventListener("change", loadRooms);
-        document.getElementById("filterStatus").addEventListener("change", loadRooms);
 
         function toggleFilterPanel() {
             const panel = document.getElementById("filterPanel");
@@ -741,7 +735,8 @@
             }
         }
 
-        checkAuth();
+        // Tự động kiểm tra đăng nhập khi mở trang
+        document.addEventListener("DOMContentLoaded", checkAuth);
     </script>
 </body>
 </html>
