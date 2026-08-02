@@ -941,3 +941,60 @@ async def upload_rooms_from_excel(file: UploadFile = File(...)):
 
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Lỗi khi xử lý file Excel: {str(e)}")
+        
+        
+# --- API TẢI FILE EXCEL MẪU ---
+@app.get("/api/rooms/download-template")
+def download_excel_template():
+    # 1. Định nghĩa bảng dữ liệu mẫu chuẩn 13 cột chính
+    sample_data = [
+        {
+            "Địa chỉ": "143 Phan Bội Châu, La Khê, Hà Đông, Hà Nội",
+            "Tên phòng": "P201",
+            "Tầng": "Tầng 2",
+            "Giá": "3.5 triệu",
+            "WC Khép kín": "Khép kín",
+            "Đồ đạc": "Điều hòa, nóng lạnh, tủ quần áo, máy giặt",
+            "Thú cưng": "Có",
+            "Ngày ở": "Vào ở ngay",
+            "Ban công": "Có",
+            "Cửa sổ": "Có",
+            "Trạng thái": "TRỐNG",
+            "SĐT Chủ nhà": "0987654321",
+            "Media URLs": "https://res.cloudinary.com/demo/image1.jpg, https://res.cloudinary.com/demo/image2.jpg"
+        },
+        {
+            "Địa chỉ": "32 Nguyễn Trãi, Thanh Xuân, Hà Nội",
+            "Tên phòng": "P302",
+            "Tầng": "Tầng 3",
+            "Giá": "4.2 triệu",
+            "WC Khép kín": "Khép kín",
+            "Đồ đạc": "Full nội thất, tủ lạnh, bếp từ",
+            "Thú cưng": "Không",
+            "Ngày ở": "15/08/2026",
+            "Ban công": "Không",
+            "Cửa sổ": "Có",
+            "Trạng thái": "TRỐNG",
+            "SĐT Chủ nhà": "0912345678",
+            "Media URLs": ""
+        }
+    ]
+
+    # 2. Tạo DataFrame
+    df = pd.DataFrame(sample_data)
+
+    # 3. Xuất file Excel ra bộ nhớ RAM (BytesIO)
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine='openpyxl') as writer:
+        df.to_excel(writer, index=False, sheet_name='Danh Sách Phòng Mẫu')
+    output.seek(0)
+
+    # 4. Trả về file dưới dạng download attachment
+    headers = {
+        'Content-Disposition': 'attachment; filename="Mau_Nhap_Danh_Sach_Phong.xlsx"'
+    }
+    return StreamingResponse(
+        output,
+        headers=headers,
+        media_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+    )

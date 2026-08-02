@@ -15,9 +15,15 @@
                 <p class="text-xs text-gray-500 mt-1">Hệ thống đồng bộ dữ liệu Realtime giữa Web Admin và Zalo OA Bot</p>
             </div>
             <div class="flex gap-2">
+                <!-- Nút Tải File Mẫu -->
+                <a href="/api/rooms/download-template" download class="bg-gray-100 text-gray-700 border border-gray-300 px-3 py-2 rounded hover:bg-gray-200 font-medium text-sm flex items-center gap-1">
+                    📥 File Mẫu Excel
+                </a>
+                <!-- Nút Import Excel -->
                 <button onclick="openExcelModal()" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 font-medium text-sm flex items-center gap-1">
                     📊 Import từ Excel
                 </button>
+                <!-- Nút Thêm Phòng Mới -->
                 <button onclick="openModal()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 font-medium text-sm flex items-center gap-1">
                     + Thêm Phòng Mới
                 </button>
@@ -141,10 +147,15 @@
     <!-- 2. MODAL UPLOAD FILE EXCEL -->
     <div id="excelModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
         <div class="bg-white rounded-lg p-6 w-full max-w-md shadow-xl">
-            <h2 class="text-lg font-bold mb-3 text-gray-800">📥 Nhập Danh Sách Phòng Bằng Excel</h2>
+            <div class="flex justify-between items-center mb-3">
+                <h2 class="text-lg font-bold text-gray-800">📥 Nhập Phòng Bằng Excel</h2>
+                <a href="/api/rooms/download-template" download class="text-xs text-blue-600 font-semibold underline hover:text-blue-800">
+                    Tải File Mẫu (.xlsx)
+                </a>
+            </div>
             
             <p class="text-xs text-gray-500 mb-4 leading-relaxed">
-                Tải lên file <code>.xlsx</code> hoặc <code>.csv</code>. Cột bắt buộc: <strong>Địa chỉ</strong> (hoặc address). Các cột tùy chọn: Tên phòng, Tầng, Giá, WC Khép kín, Đồ đạc, Thú cưng, Ban công, Cửa sổ, Trạng thái, SĐT Chủ nhà, Media URLs.
+                Tải lên file <code>.xlsx</code> hoặc <code>.csv</code>. Nếu chưa có file mẫu chuẩn, vui lòng bấm nút <strong>Tải File Mẫu</strong> ở trên.
             </p>
 
             <form id="excelForm" onsubmit="uploadExcel(event)">
@@ -363,7 +374,7 @@
             }
         }
 
-        // Tải dữ liệu ban đầu khi load trang
+        // Tải dữ liệu ban đầu
         loadRooms();
     </script>
 </body>
