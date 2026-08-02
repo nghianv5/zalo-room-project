@@ -135,27 +135,45 @@ class RoomCreateUpdateSchema(BaseModel):
     # Thông tin liên hệ
     landlord_phone: Optional[str] = "Chưa rõ"
 
-def get_text_embedding(text: str, retries: int = 2) -> List[float]:
+def get_text_embedding(text: str, retries: int = 3) -> List[float]:
+    """Tạo Vector Embedding luôn ép chuẩn 768 chiều"""
     if not text or not text.strip():
-        return [0.0] * VECTOR_SIZE
-        
+        return []
+
+    # 1. Gọi qua SDK Google GenAI với output_dimensionality=768
     if gemini_client:
         for attempt in range(retries):
             try:
-                # Đổi tên model chính xác cho SDK google-genai
                 response = gemini_client.models.embed_content(
-                    model="text-embedding-004", 
+                    model="models/gemini-embedding-001",
                     contents=text,
-                    config=types.EmbedContentConfig(output_dimensionality=VECTOR_SIZE)
+                    config=types.EmbedContentConfig(
+                        output_dimensionality=768
+                    )
                 )
                 if response and response.embedding and response.embedding.values:
                     return response.embedding.values
             except Exception as e:
-                print(f"⚠️ Lỗi Embedding (Lần {attempt+1}):", e)
-                time.sleep(0.5)
-                
-    # BẮT BUỘC: Trả về vector mặc định 768 chiều để Qdrant lưu thành công
-    return [0.0] * VECTOR_SIZE
+                time.sleep(1)
+
+    # 2. Fallback gọi REST API có tham số outputDimensionality: 768
+    if GEMINI_API_KEY:
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key={GEMINI_API_KEY}"
+        headers = {"Content-Type": "application/json"}
+        payload = {
+            "model": "models/gemini-embedding-001",
+            "content": {"parts": [{"text": text}]},
+            "outputDimensionality": 768
+        }
+        try:
+            res = requests.post(url, headers=headers, json=payload, timeout=10)
+            res_json = res.json()
+            if "embedding" in res_json and "values" in res_json["embedding"]:
+                return res_json["embedding"]["values"]
+        except Exception as e:
+            print("❌ [REST FALLBACK ERROR]:", e)
+
+    return []
 
 def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYSTEM") -> bool:
     try:
