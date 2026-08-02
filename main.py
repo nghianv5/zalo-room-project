@@ -345,13 +345,11 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
     }}
     """
     try:
-        response = gemini_client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(
-                response_mime_type="application/json"
-            )
-        )
+        response = gemini_client.models.embed_content(
+                    model="models/gemini-embedding-001",
+                    contents=text,
+                    config=types.EmbedContentConfig(output_dimensionality=768)
+                )
         if response and response.text:
             cleaned_data = json.loads(response.text)
             return cleaned_data
