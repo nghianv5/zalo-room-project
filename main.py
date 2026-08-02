@@ -5,7 +5,7 @@ import uuid
 import time
 from typing import Dict, List, Optional
 import uvicorn
-from fastapi import FastAPI, Request, BackgroundTasks
+from fastapi import FastAPI, Request, BackgroundTasks, UploadFile, File, HTTPException
 from fastapi.staticfiles import StaticFiles
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
@@ -19,7 +19,7 @@ from pydantic import BaseModel
 from datetime import datetime
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-
+import io
 
 app = FastAPI()
 
@@ -854,3 +854,90 @@ def admin_dashboard(request: Request):
         request=request, 
         name="admin.html"
     )
+    
+    
+import pandas as pd
+from fastapi import FastAPI, UploadFile, File, HTTPException
+import io
+
+# --- API UPLOAD & XỬ LÝ FILE EXCEL / CSV ---
+@app.post("/api/rooms/upload-excel")
+async def upload_rooms_from_excel(file: UploadFile = File(...)):
+    # 1. Kiểm tra định dạng file
+    if not (file.filename.endswith(".xlsx") or file.filename.endswith(".xls") or file.filename.endswith(".csv")):
+        raise HTTPException(status_code=400, detail="Chỉ hỗ trợ định dạng file .xlsx, .xls hoặc .csv")
+
+    try:
+        # 2. Đọc nội dung file vào Pandas DataFrame
+        contents = await file.read()
+        if file.filename.endswith(".csv"):
+            df = pd.read_csv(io.BytesIO(contents))
+        else:
+            df = pd.read_excel(io.BytesIO(contents))
+
+        # Thay thế các giá trị NaN/NaT thành chuỗi rỗng
+        df = df.fillna("")
+
+        success_count = 0
+        failed_count = 0
+        error_logs = []
+
+        # 3. Duyệt qua từng dòng trong file Excel
+        for index, row in df.iterrows():
+            address = str(row.get("Địa chỉ", row.get("address", ""))).strip()
+            
+            # Bỏ qua dòng thiếu địa chỉ
+            if not address or address.lower() in ["null", "none", "nan", ""]:
+                failed_count += 1
+                error_logs.append(f"Dòng {index + 2}: Thiếu địa chỉ phòng.")
+                continue
+
+            room_name = str(row.get("Tên phòng", row.get("room_name", "Phòng trọ"))).strip()
+            phone = str(row.get("SĐT Chủ nhà", row.get("landlord_phone", "Chưa rõ"))).strip()
+            
+            # Xử lý mảng ảnh Media (phân cách bằng dấu phẩy nếu có)
+            raw_media = str(row.get("Media URLs", row.get("media_urls", "")))
+            media_urls = [url.strip() for url in raw_media.split(",") if url.strip()] if raw_media else []
+
+            extracted_data = {
+                "address": address,
+                "room_name": room_name,
+                "floor": str(row.get("Tầng", row.get("floor", "Chưa rõ"))),
+                "price": str(row.get("Giá", row.get("price", "Chưa rõ"))),
+                "is_private_bathroom": str(row.get("WC Khép kín", row.get("is_private_bathroom", "Chưa rõ"))),
+                "appliances": str(row.get("Đồ đạc", row.get("appliances", "Chưa rõ"))),
+                "allow_pets": str(row.get("Thú cưng", row.get("allow_pets", "Chưa rõ"))),
+                "move_in_date": str(row.get("Ngày ở", row.get("move_in_date", "Vào ở ngay"))),
+                "has_balcony": str(row.get("Ban công", row.get("has_balcony", "Chưa rõ"))),
+                "has_window": str(row.get("Cửa sổ", row.get("has_window", "Chưa rõ"))),
+                "status": str(row.get("Trạng thái", row.get("status", "TRỐNG"))).upper(),
+                "landlord_phone": phone
+            }
+
+            # 4. Lưu vào Qdrant DB (Dùng point_id=None để đảm bảo luôn tạo/cập nhật chuẩn xác theo UUID5 địa chỉ)
+            ok = upsert_room_to_db(
+                extracted_data=extracted_data,
+                media_urls=media_urls,
+                point_id=None,
+                zalo_user_id="EXCEL_IMPORT",
+                landlord_phone=phone
+            )
+
+            if ok:
+                success_count += 1
+            else:
+                failed_count += 1
+                error_logs.append(f"Dòng {index + 2}: Lỗi khi tạo Vector/Lưu Qdrant.")
+
+        return {
+            "status": "success",
+            "message": f"Nhập file hoàn tất: Thành công {success_count} phòng, thất bại {failed_count} phòng.",
+            "details": {
+                "success_count": success_count,
+                "failed_count": failed_count,
+                "errors": error_logs
+            }
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi khi xử lý file Excel: {str(e)}")
