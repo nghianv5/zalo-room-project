@@ -416,6 +416,67 @@ def download_room_template():
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
     
+
+# --- 9. WEBHOOK RECEIVER ---
+@app.post("/webhook/zalo")
+async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
+    try:
+        data = await request.json()
+        event_name = str(data.get("event_name", "")).strip()
+        sender_id = data.get("user_id_by_app") or data.get("sender", {}).get("id")
+
+        if not sender_id:
+            return {"status": "ignored"}
+
+        if "user_follow_oa" in event_name:
+            send_zalo_message(sender_id, "👋 Chào mừng bạn! Hãy gửi thông tin hoặc hình ảnh phòng trọ để bắt đầu nhé!")
+            return {"status": "success"}
+
+        # Thêm xử lý khi người dùng gửi File (.xlsx, .csv)
+        if event_name == "user_send_file":
+            attachments = data.get("message", {}).get("attachments", [])
+            for att in attachments:
+                file_payload = att.get("payload", {})
+                file_url = file_payload.get("url")
+                file_name = str(file_payload.get("name", "")).lower()
+
+                # Nếu là file Excel (.xlsx hoặc .xls)
+                if file_url and (file_name.endswith(".xlsx") or file_name.endswith(".xls")):
+                    send_zalo_message(sender_id, "📥 Em đã nhận file Excel! Đang tiến hành cập nhật dữ liệu phòng...")
+                    
+                    # Chạy xử lý ngầm (Background Task)
+                    def handle_excel():
+                        count = process_excel_file(file_url, sender_id)
+                        send_zalo_message(sender_id, f"✅ Đã nhập/cập nhật thành công {count} phòng từ file Excel vào hệ thống!")
+
+                    background_tasks.add_task(handle_excel)
+                    return {"status": "success"}
+                    
+        
+        if event_name in ["user_send_text", "user_send_image", "user_send_file", "user_send_video"]:
+            message_obj = data.get("message", {})
+            text = message_obj.get("text", "")
+
+            attachments = message_obj.get("attachments", [])
+            media_items = []
+            for item in attachments:
+                payload = item.get("payload", {})
+                media_url = payload.get("url") or payload.get("thumbnailUrl")
+                if media_url:
+                    media_items.append({
+                        "url": media_url,
+                        "is_video": (item.get("type") == "video") or ("user_send_video" in event_name)
+                    })
+
+            background_tasks.add_task(process_zalo_ai_logic, text, media_items, sender_id )
     
+    
+    except Exception as e:
+        print("❌ [Webhook Exception]:", e)
+
+    return {"status": "success"}
+
+
+
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
