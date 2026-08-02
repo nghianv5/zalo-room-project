@@ -6,62 +6,192 @@
     <title>Quản Lý Phòng Trọ - Admin Dashboard</title>
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
-<body class="bg-gray-100 p-6">
-    <div class="max-w-[95%] mx-auto bg-white p-6 rounded-lg shadow-md">
-        <!-- HEADER & NÚT THAO TÁC -->
-        <div class="flex justify-between items-center mb-6">
-            <div>
-                <h1 class="text-2xl font-bold text-gray-800">📋 Quản Lý Danh Sách Phòng Trọ</h1>
-                <p class="text-xs text-gray-500 mt-1">Hệ thống đồng bộ dữ liệu Realtime giữa Web Admin và Zalo OA Bot</p>
-            </div>
-            <div class="flex gap-2">
-                <!-- Nút Xóa Hàng Loạt (Ẩn khi chưa chọn gì) -->
-                <button id="btnDeleteSelected" onclick="deleteSelectedRooms()" class="hidden bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 font-medium text-sm flex items-center gap-1 transition-all">
-                    🗑️ Xóa phòng đã chọn (<span id="selectedCount">0</span>)
-                </button>
-                <!-- Nút Tải File Mẫu -->
-                <a href="/api/rooms/download-template" download class="bg-gray-100 text-gray-700 border border-gray-300 px-3 py-2 rounded hover:bg-gray-200 font-medium text-sm flex items-center gap-1">
-                    📥 File Mẫu Excel
-                </a>
-                <!-- Nút Import Excel -->
-                <button onclick="openExcelModal()" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 font-medium text-sm flex items-center gap-1">
-                    📊 Import từ Excel
-                </button>
-                <!-- Nút Thêm Phòng Mới -->
-                <button onclick="openModal()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 font-medium text-sm flex items-center gap-1">
-                    + Thêm Phòng Mới
-                </button>
-            </div>
-        </div>
+<body class="bg-gray-100 min-h-screen">
 
-        <!-- BẢNG DANH SÁCH PHÒNG CHI TIẾT -->
-        <div class="overflow-x-auto">
-            <table class="min-w-full border-collapse border border-gray-200 text-xs text-left">
-                <thead>
-                    <tr class="bg-gray-100 text-gray-700 uppercase font-semibold">
-                        <!-- Checkbox Chọn Tất Cả -->
-                        <th class="p-2 border text-center w-10">
-                            <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)" class="w-4 h-4 cursor-pointer">
-                        </th>
-                        <th class="p-2 border">Địa chỉ & Tên</th>
-                        <th class="p-2 border">Tầng / Giá</th>
-                        <th class="p-2 border">WC / Đồ đạc</th>
-                        <th class="p-2 border">Ban công / Cửa sổ</th>
-                        <th class="p-2 border">Thú cưng / Ngày ở</th>
-                        <th class="p-2 border">Trạng thái</th>
-                        <th class="p-2 border">Media (Hình ảnh)</th>
-                        <th class="p-2 border">Thông tin Quản lý</th>
-                        <th class="p-2 border text-center">Hành động</th>
-                    </tr>
-                </thead>
-                <tbody id="roomTableBody" class="divide-y divide-gray-200">
-                    <!-- Dữ liệu JS sẽ render ở đây -->
-                </tbody>
-            </table>
+    <!-- 1. MÀN HÌNH ĐĂNG NHẬP -->
+    <div id="loginScreen" class="fixed inset-0 bg-gray-900 bg-opacity-70 flex items-center justify-center p-4 z-50">
+        <div class="bg-white rounded-lg shadow-2xl p-8 w-full max-w-md">
+            <div class="text-center mb-6">
+                <h2 class="text-2xl font-bold text-gray-800">🔐 Admin Portal</h2>
+                <p class="text-xs text-gray-500 mt-1">Đăng nhập để quản lý danh sách phòng trọ</p>
+            </div>
+            <form onsubmit="handleLogin(event)">
+                <div class="mb-4">
+                    <label class="block text-xs font-semibold text-gray-700 mb-1">Tài khoản Admin</label>
+                    <input type="text" id="adminUser" required placeholder="admin" class="w-full border p-2.5 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                </div>
+                <div class="mb-6">
+                    <label class="block text-xs font-semibold text-gray-700 mb-1">Mật khẩu</label>
+                    <input type="password" id="adminPass" required placeholder="••••••••" class="w-full border p-2.5 rounded text-sm focus:ring-2 focus:ring-blue-500 focus:outline-none">
+                </div>
+                <div id="loginError" class="hidden text-xs text-red-600 bg-red-50 p-2 rounded mb-4 text-center">
+                    ❌ Mật khẩu hoặc tài khoản không đúng!
+                </div>
+                <button type="submit" class="w-full bg-blue-600 text-white font-semibold py-2.5 rounded hover:bg-blue-700 transition duration-200">
+                    Đăng Nhập
+                </button>
+            </form>
         </div>
     </div>
 
-    <!-- 1. MODAL FORM THÊM / SỬA PHÒNG -->
+    <!-- 2. GIAO DIỆN ADMIN MAIN DASHBOARD -->
+    <div id="adminDashboard" class="hidden p-6 max-w-[95%] mx-auto">
+        <div class="bg-white p-6 rounded-lg shadow-md">
+            <!-- HEADER & NÚT THAO TÁC -->
+            <div class="flex justify-between items-center mb-6">
+                <div>
+                    <h1 class="text-2xl font-bold text-gray-800">📋 Quản Lý Danh Sách Phòng Trọ</h1>
+                    <p class="text-xs text-gray-500 mt-1">Hệ thống đồng bộ dữ liệu Realtime giữa Web Admin và Zalo OA Bot</p>
+                </div>
+                <div class="flex gap-2 items-center">
+                    <button id="btnDeleteSelected" onclick="deleteSelectedRooms()" class="hidden bg-red-600 text-white px-4 py-2 rounded hover:bg-red-700 font-medium text-sm flex items-center gap-1 transition-all">
+                        🗑️ Xóa phòng đã chọn (<span id="selectedCount">0</span>)
+                    </button>
+                    <a href="/api/rooms/download-template" download class="bg-gray-100 text-gray-700 border border-gray-300 px-3 py-2 rounded hover:bg-gray-200 font-medium text-sm flex items-center gap-1">
+                        📥 File Mẫu Excel
+                    </a>
+                    <button onclick="openExcelModal()" class="bg-green-600 text-white px-4 py-2 rounded hover:bg-green-700 font-medium text-sm flex items-center gap-1">
+                        📊 Import từ Excel
+                    </button>
+                    <button onclick="openModal()" class="bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 font-medium text-sm flex items-center gap-1">
+                        + Thêm Phòng Mới
+                    </button>
+                    <button onclick="handleLogout()" class="bg-gray-800 text-white px-3 py-2 rounded hover:bg-gray-900 font-medium text-sm flex items-center gap-1 ml-2">
+                        🚪 Đăng xuất
+                    </button>
+                </div>
+            </div>
+
+            <!-- 🔍 BỘ LỌC DỮ LIỆU TẤT CẢ CÁC TRƯỜNG -->
+            <div class="bg-gray-50 p-4 rounded-lg border mb-6 text-xs">
+                <div class="flex justify-between items-center mb-3">
+                    <h3 class="font-bold text-gray-700 text-sm flex items-center gap-1">
+                        🔍 Bộ Lọc Tìm Kiếm Chi Tiết (Tất cả trường)
+                    </h3>
+                    <div class="flex gap-2">
+                        <button onclick="resetFilters()" class="text-blue-600 hover:underline font-semibold">🔄 Xóa bộ lọc</button>
+                        <button onclick="toggleFilterPanel()" id="btnToggleFilter" class="text-gray-500 hover:text-gray-700 font-semibold">▼ Thu gọn</button>
+                    </div>
+                </div>
+
+                <div id="filterPanel" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+                    <!-- 1. Địa chỉ -->
+                    <div>
+                        <label class="block font-semibold text-gray-600 mb-1">📍 Địa chỉ:</label>
+                        <input type="text" id="filterAddress" oninput="applyFilters()" placeholder="Nhập địa chỉ..." class="w-full border p-2 rounded bg-white">
+                    </div>
+                    <!-- 2. Tên phòng -->
+                    <div>
+                        <label class="block font-semibold text-gray-600 mb-1">🚪 Tên / Số phòng:</label>
+                        <input type="text" id="filterRoomName" oninput="applyFilters()" placeholder="VD: P201..." class="w-full border p-2 rounded bg-white">
+                    </div>
+                    <!-- 3. Vị trí tầng -->
+                    <div>
+                        <label class="block font-semibold text-gray-600 mb-1">🏢 Tầng:</label>
+                        <input type="text" id="filterFloor" oninput="applyFilters()" placeholder="VD: Tầng 2..." class="w-full border p-2 rounded bg-white">
+                    </div>
+                    <!-- 4. Giá thuê -->
+                    <div>
+                        <label class="block font-semibold text-gray-600 mb-1">💵 Giá thuê:</label>
+                        <input type="text" id="filterPrice" oninput="applyFilters()" placeholder="VD: 3.5 triệu..." class="w-full border p-2 rounded bg-white">
+                    </div>
+                    <!-- 5. WC Khép kín -->
+                    <div>
+                        <label class="block font-semibold text-gray-600 mb-1">🚿 Vệ sinh (WC):</label>
+                        <select id="filterBathroom" onchange="applyFilters()" class="w-full border p-2 rounded bg-white">
+                            <option value="">-- Tất cả --</option>
+                            <option value="Khép kín">Khép kín</option>
+                            <option value="Chung WC">Chung WC</option>
+                            <option value="Chưa rõ">Chưa rõ</option>
+                        </select>
+                    </div>
+                    <!-- 6. Thiết bị / Nội thất -->
+                    <div>
+                        <label class="block font-semibold text-gray-600 mb-1">🛏️ Thiết bị / Nội thất:</label>
+                        <input type="text" id="filterAppliances" oninput="applyFilters()" placeholder="VD: Điều hòa, tủ lạnh..." class="w-full border p-2 rounded bg-white">
+                    </div>
+                    <!-- 7. Cho nuôi pet -->
+                    <div>
+                        <label class="block font-semibold text-gray-600 mb-1">🐶 Cho nuôi Vật nuôi:</label>
+                        <select id="filterPets" onchange="applyFilters()" class="w-full border p-2 rounded bg-white">
+                            <option value="">-- Tất cả --</option>
+                            <option value="Có">Có</option>
+                            <option value="Không">Không</option>
+                            <option value="Chưa rõ">Chưa rõ</option>
+                        </select>
+                    </div>
+                    <!-- 8. Ngày ở -->
+                    <div>
+                        <label class="block font-semibold text-gray-600 mb-1">📅 Ngày chuyển vào:</label>
+                        <input type="text" id="filterMoveInDate" oninput="applyFilters()" placeholder="VD: Vào ở ngay..." class="w-full border p-2 rounded bg-white">
+                    </div>
+                    <!-- 9. Ban công -->
+                    <div>
+                        <label class="block font-semibold text-gray-600 mb-1">🪴 Ban công:</label>
+                        <select id="filterBalcony" onchange="applyFilters()" class="w-full border p-2 rounded bg-white">
+                            <option value="">-- Tất cả --</option>
+                            <option value="Có">Có ban công</option>
+                            <option value="Không">Không</option>
+                            <option value="Chưa rõ">Chưa rõ</option>
+                        </select>
+                    </div>
+                    <!-- 10. Cửa sổ -->
+                    <div>
+                        <label class="block font-semibold text-gray-600 mb-1">🪟 Cửa sổ:</label>
+                        <select id="filterWindow" onchange="applyFilters()" class="w-full border p-2 rounded bg-white">
+                            <option value="">-- Tất cả --</option>
+                            <option value="Có">Có cửa sổ</option>
+                            <option value="Thoáng">Cửa sổ thoáng</option>
+                            <option value="Không">Không</option>
+                            <option value="Chưa rõ">Chưa rõ</option>
+                        </select>
+                    </div>
+                    <!-- 11. Trạng thái -->
+                    <div>
+                        <label class="block font-semibold text-gray-600 mb-1">🏷️ Trạng thái phòng:</label>
+                        <select id="filterStatus" onchange="applyFilters()" class="w-full border p-2 rounded bg-white">
+                            <option value="">-- Tất cả --</option>
+                            <option value="TRỐNG">🟢 TRỐNG</option>
+                            <option value="ĐÃ CHO THUÊ">🔴 ĐÃ CHO THUÊ</option>
+                            <option value="ĐANG CÓ NGHĨA VỤ">🟡 ĐANG CÓ NGHĨA VỤ</option>
+                        </select>
+                    </div>
+                    <!-- 12. SĐT Chủ nhà -->
+                    <div>
+                        <label class="block font-semibold text-gray-600 mb-1">📞 SĐT Chủ nhà:</label>
+                        <input type="text" id="filterPhone" oninput="applyFilters()" placeholder="Nhập SĐT..." class="w-full border p-2 rounded bg-white">
+                    </div>
+                </div>
+            </div>
+
+            <!-- BẢNG DANH SÁCH PHÒNG CHI TIẾT -->
+            <div class="overflow-x-auto">
+                <table class="min-w-full border-collapse border border-gray-200 text-xs text-left">
+                    <thead>
+                        <tr class="bg-gray-100 text-gray-700 uppercase font-semibold">
+                            <th class="p-2 border text-center w-10">
+                                <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)" class="w-4 h-4 cursor-pointer">
+                            </th>
+                            <th class="p-2 border">Địa chỉ & Tên</th>
+                            <th class="p-2 border">Tầng / Giá</th>
+                            <th class="p-2 border">WC / Đồ đạc</th>
+                            <th class="p-2 border">Ban công / Cửa sổ</th>
+                            <th class="p-2 border">Thú cưng / Ngày ở</th>
+                            <th class="p-2 border">Trạng thái</th>
+                            <th class="p-2 border">Media (Hình ảnh)</th>
+                            <th class="p-2 border">Thông tin Quản lý</th>
+                            <th class="p-2 border text-center">Hành động</th>
+                        </tr>
+                    </thead>
+                    <tbody id="roomTableBody" class="divide-y divide-gray-200">
+                        <!-- Dữ liệu JS sẽ render ở đây -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- MODAL FORM THÊM / SỬA PHÒNG -->
     <div id="roomModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
         <div class="bg-white rounded-lg p-6 w-full max-w-3xl max-h-[90vh] overflow-y-auto">
             <h2 id="modalTitle" class="text-xl font-bold mb-4 text-gray-800">Thêm Phòng Mới</h2>
@@ -152,7 +282,7 @@
         </div>
     </div>
 
-    <!-- 2. MODAL UPLOAD FILE EXCEL -->
+    <!-- MODAL UPLOAD FILE EXCEL -->
     <div id="excelModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
         <div class="bg-white rounded-lg p-6 w-full max-w-md shadow-xl">
             <div class="flex justify-between items-center mb-3">
@@ -181,86 +311,191 @@
         </div>
     </div>
 
-    <!-- JAVASCRIPT XỬ LÝ DỮ LIỆU -->
+    <!-- JAVASCRIPT LOGIC -->
     <script>
         const API_URL = "/api/rooms";
+        let allRoomsData = [];
 
-        // Tải danh sách phòng từ Server
+        // --- AUTHENTICATION ---
+        function checkAuth() {
+            const isAuth = localStorage.getItem("isAdminLoggedIn");
+            if (isAuth === "true") {
+                document.getElementById("loginScreen").classList.add("hidden");
+                document.getElementById("adminDashboard").classList.remove("hidden");
+                loadRooms();
+            } else {
+                document.getElementById("loginScreen").classList.remove("hidden");
+                document.getElementById("adminDashboard").classList.add("hidden");
+            }
+        }
+
+        function handleLogin(e) {
+            e.preventDefault();
+            const u = document.getElementById("adminUser").value;
+            const p = document.getElementById("adminPass").value;
+
+            if (u === "admin" && p === "admin123") {
+                localStorage.setItem("isAdminLoggedIn", "true");
+                document.getElementById("loginError").classList.add("hidden");
+                checkAuth();
+            } else {
+                document.getElementById("loginError").classList.remove("hidden");
+            }
+        }
+
+        function handleLogout() {
+            localStorage.removeItem("isAdminLoggedIn");
+            checkAuth();
+        }
+
+        // --- LOAD ROOMS ---
         async function loadRooms() {
             try {
                 const res = await fetch(API_URL);
                 const result = await res.json();
-                const tbody = document.getElementById("roomTableBody");
-                tbody.innerHTML = "";
-                
-                // Reset nút "Chọn tất cả" và nút "Xóa đã chọn" khi tải lại
-                document.getElementById("selectAll").checked = false;
-                updateDeleteButton();
-
-                if (!result.data || result.data.length === 0) {
-                    tbody.innerHTML = `<tr><td colspan="10" class="p-4 text-center text-gray-500">Chưa có dữ liệu phòng trọ.</td></tr>`;
-                    return;
-                }
-
-                result.data.forEach(r => {
-                    const mediaImgs = (r.media_urls || []).map(url => 
-                        `<a href="${url}" target="_blank"><img src="${url}" class="w-8 h-8 object-cover rounded border inline-block m-0.5 hover:opacity-80" /></a>`
-                    ).join("");
-
-                    tbody.innerHTML += `
-                        <tr class="hover:bg-gray-50">
-                            <td class="p-2 border text-center">
-                                <input type="checkbox" value="${r.id}" class="room-checkbox w-4 h-4 cursor-pointer" onchange="updateDeleteButton()">
-                            </td>
-                            <td class="p-2 border">
-                                <div class="font-bold text-gray-800">${r.address || '-'}</div>
-                                <div class="text-blue-600">${r.room_name || '-'}</div>
-                                <div class="text-[10px] text-gray-400">ID: ${r.id}</div>
-                            </td>
-                            <td class="p-2 border">
-                                <div>Tầng: ${r.floor || '-'}</div>
-                                <div class="font-semibold text-green-700">${r.price || '-'}</div>
-                            </td>
-                            <td class="p-2 border">
-                                <div>WC khép kín: ${r.is_private_bathroom || '-'}</div>
-                                <div class="text-gray-500 truncate max-w-[150px]" title="${r.appliances}">${r.appliances || '-'}</div>
-                            </td>
-                            <td class="p-2 border">
-                                <div>BC: ${r.has_balcony || '-'}</div>
-                                <div>CS: ${r.has_window || '-'}</div>
-                            </td>
-                            <td class="p-2 border">
-                                <div>Pet: ${r.allow_pets || '-'}</div>
-                                <div class="text-gray-500">${r.move_in_date || '-'}</div>
-                            </td>
-                            <td class="p-2 border">
-                                <span class="px-2 py-0.5 text-[11px] rounded font-semibold ${
-                                    r.status === 'TRỐNG' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                                }">
-                                    ${r.status || 'TRỐNG'}
-                                </span>
-                            </td>
-                            <td class="p-2 border max-w-[120px]">
-                                ${mediaImgs || '<span class="text-gray-400">Không có ảnh</span>'}
-                            </td>
-                            <td class="p-2 border text-[11px]">
-                                <div>📞 ${r.landlord_phone || '-'}</div>
-                                <div class="text-gray-500">👤 User: ${r.zalo_user_id || '-'}</div>
-                                <div class="text-gray-400">🕒 ${r.updated_at || r.created_at || '-'}</div>
-                            </td>
-                            <td class="p-2 border text-center space-x-1">
-                                <button onclick='editRoom(${JSON.stringify(r)})' class="px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 font-medium">Sửa</button>
-                                <button onclick="deleteRoom('${r.id}')" class="px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium">Xóa</button>
-                            </td>
-                        </tr>
-                    `;
-                });
+                allRoomsData = result.data || [];
+                applyFilters();
             } catch (err) {
                 console.error("Lỗi nạp dữ liệu:", err);
             }
         }
 
-        // Cập nhật hiển thị nút xóa hàng loạt
+        // --- RENDER TABLE ---
+        function renderTable(rooms) {
+            const tbody = document.getElementById("roomTableBody");
+            tbody.innerHTML = "";
+            
+            document.getElementById("selectAll").checked = false;
+            updateDeleteButton();
+
+            if (!rooms || rooms.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="10" class="p-4 text-center text-gray-500">Không tìm thấy phòng phù hợp với bộ lọc.</td></tr>`;
+                return;
+            }
+
+            rooms.forEach(r => {
+                const mediaImgs = (r.media_urls || []).map(url => 
+                    `<a href="${url}" target="_blank"><img src="${url}" class="w-8 h-8 object-cover rounded border inline-block m-0.5 hover:opacity-80" /></a>`
+                ).join("");
+
+                tbody.innerHTML += `
+                    <tr class="hover:bg-gray-50">
+                        <td class="p-2 border text-center">
+                            <input type="checkbox" value="${r.id}" class="room-checkbox w-4 h-4 cursor-pointer" onchange="updateDeleteButton()">
+                        </td>
+                        <td class="p-2 border">
+                            <div class="font-bold text-gray-800">${r.address || '-'}</div>
+                            <div class="text-blue-600">${r.room_name || '-'}</div>
+                            <div class="text-[10px] text-gray-400">ID: ${r.id}</div>
+                        </td>
+                        <td class="p-2 border">
+                            <div>Tầng: ${r.floor || '-'}</div>
+                            <div class="font-semibold text-green-700">${r.price || '-'}</div>
+                        </td>
+                        <td class="p-2 border">
+                            <div>WC khép kín: ${r.is_private_bathroom || '-'}</div>
+                            <div class="text-gray-500 truncate max-w-[150px]" title="${r.appliances}">${r.appliances || '-'}</div>
+                        </td>
+                        <td class="p-2 border">
+                            <div>BC: ${r.has_balcony || '-'}</div>
+                            <div>CS: ${r.has_window || '-'}</div>
+                        </td>
+                        <td class="p-2 border">
+                            <div>Pet: ${r.allow_pets || '-'}</div>
+                            <div class="text-gray-500">${r.move_in_date || '-'}</div>
+                        </td>
+                        <td class="p-2 border">
+                            <span class="px-2 py-0.5 text-[11px] rounded font-semibold ${
+                                r.status === 'TRỐNG' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                            }">
+                                ${r.status || 'TRỐNG'}
+                            </span>
+                        </td>
+                        <td class="p-2 border max-w-[120px]">
+                            ${mediaImgs || '<span class="text-gray-400">Không có ảnh</span>'}
+                        </td>
+                        <td class="p-2 border text-[11px]">
+                            <div>📞 ${r.landlord_phone || '-'}</div>
+                            <div class="text-gray-500">👤 User: ${r.zalo_user_id || '-'}</div>
+                            <div class="text-gray-400">🕒 ${r.updated_at || r.created_at || '-'}</div>
+                        </td>
+                        <td class="p-2 border text-center space-x-1">
+                            <button onclick='editRoom(${JSON.stringify(r)})' class="px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 font-medium">Sửa</button>
+                            <button onclick="deleteRoom('${r.id}')" class="px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium">Xóa</button>
+                        </td>
+                    </tr>
+                `;
+            });
+        }
+
+        // --- BỘ LỌC TẤT CẢ CÁC TRƯỜNG ---
+        function applyFilters() {
+            const vAddress = document.getElementById("filterAddress").value.toLowerCase().trim();
+            const vRoomName = document.getElementById("filterRoomName").value.toLowerCase().trim();
+            const vFloor = document.getElementById("filterFloor").value.toLowerCase().trim();
+            const vPrice = document.getElementById("filterPrice").value.toLowerCase().trim();
+            const vBathroom = document.getElementById("filterBathroom").value;
+            const vAppliances = document.getElementById("filterAppliances").value.toLowerCase().trim();
+            const vPets = document.getElementById("filterPets").value;
+            const vMoveInDate = document.getElementById("filterMoveInDate").value.toLowerCase().trim();
+            const vBalcony = document.getElementById("filterBalcony").value;
+            const vWindow = document.getElementById("filterWindow").value;
+            const vStatus = document.getElementById("filterStatus").value;
+            const vPhone = document.getElementById("filterPhone").value.trim();
+
+            const filtered = allRoomsData.filter(r => {
+                const matchAddress = !vAddress || (r.address && r.address.toLowerCase().includes(vAddress));
+                const matchRoomName = !vRoomName || (r.room_name && r.room_name.toLowerCase().includes(vRoomName));
+                const matchFloor = !vFloor || (r.floor && r.floor.toLowerCase().includes(vFloor));
+                const matchPrice = !vPrice || (r.price && r.price.toLowerCase().includes(vPrice));
+                const matchBathroom = !vBathroom || r.is_private_bathroom === vBathroom;
+                const matchAppliances = !vAppliances || (r.appliances && r.appliances.toLowerCase().includes(vAppliances));
+                const matchPets = !vPets || r.allow_pets === vPets;
+                const matchMoveInDate = !vMoveInDate || (r.move_in_date && r.move_in_date.toLowerCase().includes(vMoveInDate));
+                const matchBalcony = !vBalcony || r.has_balcony === vBalcony;
+                const matchWindow = !vWindow || r.has_window === vWindow;
+                const matchStatus = !vStatus || r.status === vStatus;
+                const matchPhone = !vPhone || (r.landlord_phone && r.landlord_phone.includes(vPhone));
+
+                return matchAddress && matchRoomName && matchFloor && matchPrice && 
+                       matchBathroom && matchAppliances && matchPets && matchMoveInDate && 
+                       matchBalcony && matchWindow && matchStatus && matchPhone;
+            });
+
+            renderTable(filtered);
+        }
+
+        // Reset bộ lọc về trạng thái ban đầu
+        function resetFilters() {
+            document.getElementById("filterAddress").value = "";
+            document.getElementById("filterRoomName").value = "";
+            document.getElementById("filterFloor").value = "";
+            document.getElementById("filterPrice").value = "";
+            document.getElementById("filterBathroom").value = "";
+            document.getElementById("filterAppliances").value = "";
+            document.getElementById("filterPets").value = "";
+            document.getElementById("filterMoveInDate").value = "";
+            document.getElementById("filterBalcony").value = "";
+            document.getElementById("filterWindow").value = "";
+            document.getElementById("filterStatus").value = "";
+            document.getElementById("filterPhone").value = "";
+            applyFilters();
+        }
+
+        // Thu gọn / Mở rộng bảng lọc
+        function toggleFilterPanel() {
+            const panel = document.getElementById("filterPanel");
+            const btn = document.getElementById("btnToggleFilter");
+            if (panel.classList.contains("hidden")) {
+                panel.classList.remove("hidden");
+                btn.innerText = "▼ Thu gọn";
+            } else {
+                panel.classList.add("hidden");
+                btn.innerText = "▲ Mở rộng";
+            }
+        }
+
+        // --- CHECKBOX & DELETE MULTIPLE ---
         function updateDeleteButton() {
             const checkboxes = document.querySelectorAll('.room-checkbox:checked');
             const btnDelete = document.getElementById('btnDeleteSelected');
@@ -274,14 +509,12 @@
             }
         }
 
-        // Toggle chọn tất cả Checkbox
         function toggleSelectAll(selectAllCheckbox) {
             const checkboxes = document.querySelectorAll('.room-checkbox');
             checkboxes.forEach(cb => cb.checked = selectAllCheckbox.checked);
             updateDeleteButton();
         }
 
-        // Xóa các dòng đã chọn
         async function deleteSelectedRooms() {
             const selectedCheckboxes = document.querySelectorAll('.room-checkbox:checked');
             const selectedIds = Array.from(selectedCheckboxes).map(cb => cb.value);
@@ -290,11 +523,9 @@
 
             if (confirm(`Bạn có chắc chắn muốn xóa ${selectedIds.length} phòng đã chọn?`)) {
                 try {
-                    // Gửi request xóa song song các item được chọn
                     await Promise.all(selectedIds.map(id => 
                         fetch(`${API_URL}/${id}`, { method: "DELETE" })
                     ));
-                    
                     loadRooms();
                 } catch (err) {
                     console.error("Lỗi khi xóa hàng loạt:", err);
@@ -303,11 +534,10 @@
             }
         }
 
-        // Lưu / Cập nhật phòng từ Form
+        // --- CRUD PHÒNG ---
         async function saveRoom(e) {
             e.preventDefault();
             const id = document.getElementById("roomId").value;
-            
             const rawMedia = document.getElementById("media_urls").value;
             const mediaArray = rawMedia ? rawMedia.split(",").map(item => item.trim()).filter(Boolean) : [];
 
@@ -338,7 +568,6 @@
             loadRooms();
         }
 
-        // Xóa phòng đơn lẻ
         async function deleteRoom(id) {
             if (confirm("Bạn có chắc chắn muốn xóa phòng này khỏi cơ sở dữ liệu?")) {
                 await fetch(`${API_URL}/${id}`, { method: "DELETE" });
@@ -346,7 +575,7 @@
             }
         }
 
-        // Quản lý Modal Form
+        // --- MODAL UTILS ---
         function openModal() {
             document.getElementById("roomForm").reset();
             document.getElementById("roomId").value = "";
@@ -378,7 +607,6 @@
             document.getElementById("roomModal").classList.remove("hidden");
         }
 
-        // Quản lý Modal Upload Excel
         function openExcelModal() {
             document.getElementById("excelForm").reset();
             document.getElementById("uploadStatus").classList.add("hidden");
@@ -432,8 +660,8 @@
             }
         }
 
-        // Tải dữ liệu ban đầu
-        loadRooms();
+        // Kích hoạt check auth
+        checkAuth();
     </script>
 </body>
 </html>
