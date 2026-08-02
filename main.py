@@ -129,6 +129,20 @@ try:
 except Exception as e:
     print("❌ Lỗi khởi tạo Qdrant:", e)
 
+try:
+    # Tạo index cho trường status và price_num để lọc trên Admin
+    qdrant_client.create_payload_index(
+        collection_name=COLLECTION_NAME,
+        field_name="status",
+        field_schema=models.PayloadSchemaType.KEYWORD,
+    )
+    qdrant_client.create_payload_index(
+        collection_name=COLLECTION_NAME,
+        field_name="price_num",
+        field_schema=models.PayloadSchemaType.FLOAT,
+    )
+except Exception as e:
+    pass
 
 @app.get("/api/admin/rooms")
 async def get_rooms_filter(
@@ -312,28 +326,29 @@ def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYS
         # Tạo trường giá dạng số để lọc/tìm kiếm
         price_number = parse_price_to_number(raw_price)
         
+        # Tìm đoạn khởi tạo payload trong upsert_room_to_db và sửa lại thành:
         payload = {
-            "1_address": address,
-            "2_room_name": room_name,
-            "3_price": str(data.get("price", "Chưa rõ")),
+            "address": address,
+            "room_name": room_name,
+            "price": str(data.get("price", "Chưa rõ")),
             "price_num": price_number,
-            "4_floor": str(data.get("floor", "Chưa rõ")),
-            "4_is_private_bathroom": str(data.get("is_private_bathroom", "Chưa rõ")),
-            "4_has_ac": str(data.get("has_ac", "Chưa rõ")),
-            "4_has_heater": str(data.get("has_heater", "Chưa rõ")),
-            "4_has_washer": str(data.get("has_washer", "Chưa rõ")),
-            "4_allow_pets": str(data.get("allow_pets", "Chưa rõ")),
-            "4_has_balcony": str(data.get("has_balcony", "Chưa rõ")),
-            "4_has_window": str(data.get("has_window", "Chưa rõ")),
-            "4_has_fingerprint_lock": str(data.get("has_fingerprint_lock", "Chưa rõ")),
-            "4_parking_info": str(data.get("parking_info", "Chưa rõ")),
-            "4_max_occupants": str(data.get("max_occupants", "Chưa rõ")),
-            "4_other_amenities": str(data.get("other_amenities", "Chưa rõ")),
-            "5_service_fees": str(data.get("service_fees", "Chưa rõ")),
-            "6_media_urls": media_list,
-            "7_move_in_date": str(data.get("move_in_date", "Vào ở ngay")),
-            "move_in_timestamp": move_in_ts,
-            "8_status": str(data.get("status", "TRỐNG")),
+            "floor": str(data.get("floor", "Chưa rõ")),
+            "is_private_bathroom": str(data.get("is_private_bathroom", "Chưa rõ")),
+            "has_ac": str(data.get("has_ac", "Chưa rõ")),
+            "has_heater": str(data.get("has_heater", "Chưa rõ")),
+            "has_washer": str(data.get("has_washer", "Chưa rõ")),
+            "allow_pets": str(data.get("allow_pets", "Chưa rõ")),
+            "has_balcony": str(data.get("has_balcony", "Chưa rõ")),
+            "has_window": str(data.get("has_window", "Chưa rõ")),
+            "has_fingerprint_lock": str(data.get("has_fingerprint_lock", "Chưa rõ")),
+            "parking_info": str(data.get("parking_info", "Chưa rõ")),
+            "max_occupants": str(data.get("max_occupants", "Chưa rõ")),
+            "other_amenities": str(data.get("other_amenities", "Chưa rõ")),
+            "service_fees": str(data.get("service_fees", "Chưa rõ")),
+            "media_urls": media_list,
+            "move_in_date": str(data.get("move_in_date", "Vào ở ngay")),
+            "move_in_timestamp": parse_move_in_date(data.get("move_in_date")),
+            "status": str(data.get("status", "TRỐNG")),
             "landlord_phone": phone,
             "zalo_user_id": zalo_user_id,
             "created_at": created_at,
@@ -889,13 +904,13 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
 async def get_rooms_filter(
     min_price: Optional[float] = None,
     max_price: Optional[float] = None,
-    from_date: Optional[str] = None, # Dạng YYYY-MM-DD truyền từ ô chọn ngày
-    to_date: Optional[str] = None,   # Dạng YYYY-MM-DD
-    status: Optional[str] = "TRỐNG"
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    status: Optional[str] = None # Cho phép None nếu Admin muốn xem TẤT CẢ các phòng
 ):
     must_conditions = []
 
-    # 1. Lọc theo trạng thái phòng (Chỉ lọc phòng TRỐNG)
+    # 1. Lọc theo trạng thái phòng (nếu truyền lên status)
     if status:
         must_conditions.append(
             models.FieldCondition(
@@ -914,7 +929,7 @@ async def get_rooms_filter(
             models.FieldCondition(key="price_num", range=models.Range(**price_range))
         )
 
-    # 3. Lọc theo khoảng thời gian phòng trống (move_in_timestamp)
+    # 3. Lọc theo khoảng thời gian phòng trống
     if from_date or to_date:
         time_range = {}
         if from_date:
@@ -934,13 +949,21 @@ async def get_rooms_filter(
     # Truy vấn Qdrant
     query_filter = models.Filter(must=must_conditions) if must_conditions else None
     
-    records = qdrant_client.scroll(
+    records, _ = qdrant_client.scroll(
         collection_name=COLLECTION_NAME,
         scroll_filter=query_filter,
-        limit=50
-    )[0]
+        limit=100
+    )
 
-    return [rec.payload for rec.payload in records]
+    # Sửa lỗi cú pháp trả về dữ liệu kèm theo ID phòng
+    results = []
+    for rec in records:
+        if rec.payload:
+            payload_data = rec.payload
+            payload_data["id"] = rec.id  # Gán ID để frontend thao tác sửa/xóa
+            results.append(payload_data)
+            
+    return results
 
 # --- 9. WEBHOOK RECEIVER ---
 @app.post("/webhook/zalo")
