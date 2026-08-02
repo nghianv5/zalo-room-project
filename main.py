@@ -16,9 +16,9 @@ from google.genai import types
 import cloudinary
 import cloudinary.uploader
 import pandas as pd
-from pydantic import BaseModel
 from datetime import datetime
 from fastapi.templating import Jinja2Templates
+from pydantic import BaseModel, Field
 
 app = FastAPI()
 
@@ -59,6 +59,19 @@ try:
         print(f"✅ Tạo mới collection '{COLLECTION_NAME}' (Vector Dim: {VECTOR_SIZE}) thành công!")
 except Exception as e:
     print("❌ Lỗi khởi tạo Qdrant:", e)
+
+
+# --- SCHEMA DỮ LIỆU CHUẨN HÓA DÙNG CHO AI ---
+class RoomStandardSchema(BaseModel):
+    address: str = Field(description="Địa chỉ 4 cấp chuẩn hóa (Số nhà, Phường/Xã, Quận/Huyện, Tỉnh/TP)")
+    room_name: str = Field(default="Phòng trọ", description="Tên hoặc số phòng")
+    floor: Optional[str] = Field(default="Chưa rõ", description="Tầng bao nhiêu (dạng chuỗi hoặc số)")
+    price: int = Field(description="Giá thuê tính theo VNĐ (ví dụ: 3500000 thay vì 3.5tr)")
+    is_private_bathroom: bool = Field(default=False, description="Khép kín (True/False)")
+    appliances: List[str] = Field(default=[], description="Danh sách thiết bị: ['Điều hòa', 'Nóng lạnh', ...]")
+    allow_pets: bool = Field(default=False, description="Cho nuôi thú cưng không")
+    status: str = Field(default="TRỐNG", description="Trạng thái: 'TRỐNG' hoặc 'ĐÃ CHO THUÊ'")
+    landlord_phone: Optional[str] = Field(default="Chưa rõ", description="Số điện thoại chuẩn 10 chữ số")
 
 
 # --- 2. HÀM TẠO VECTOR EMBEDDING ---
@@ -521,82 +534,6 @@ def delete_room_from_web(point_id: str):
         raise HTTPException(status_code=500, detail=f"Lỗi khi xóa: {str(e)}")
 
 
-@app.post("/api/rooms/upload-excel")
-async def upload_rooms_from_excel(file: UploadFile = File(...)):
-    """Upload danh sách phòng bằng file Excel từ Web Admin"""
-    if not (file.filename.endswith(".xlsx") or file.filename.endswith(".xls") or file.filename.endswith(".csv")):
-        raise HTTPException(status_code=400, detail="Chỉ hỗ trợ file .xlsx, .xls hoặc .csv")
-
-    try:
-        contents = await file.read()
-        if file.filename.endswith(".csv"):
-            df = pd.read_csv(io.BytesIO(contents))
-        else:
-            df = pd.read_excel(io.BytesIO(contents))
-
-        df = df.fillna("")
-
-        success_count = 0
-        failed_count = 0
-        error_logs = []
-
-        for index, row in df.iterrows():
-            address = str(row.get("Địa chỉ", row.get("address", ""))).strip()
-            
-            if not address or address.lower() in ["null", "none", "nan", ""]:
-                failed_count += 1
-                error_logs.append(f"Dòng {index + 2}: Thiếu địa chỉ phòng.")
-                continue
-
-            room_name = str(row.get("Tên phòng", row.get("room_name", "Phòng trọ"))).strip()
-            phone = str(row.get("SĐT Chủ nhà", row.get("landlord_phone", "Chưa rõ"))).strip()
-            
-            raw_media = str(row.get("Media URLs", row.get("media_urls", "")))
-            media_urls = [url.strip() for url in raw_media.split(",") if url.strip()] if raw_media else []
-
-            extracted_data = {
-                "address": address,
-                "room_name": room_name,
-                "floor": str(row.get("Tầng", row.get("floor", "Chưa rõ"))),
-                "price": str(row.get("Giá", row.get("price", "Chưa rõ"))),
-                "is_private_bathroom": str(row.get("WC Khép kín", row.get("is_private_bathroom", "Chưa rõ"))),
-                "appliances": str(row.get("Đồ đạc", row.get("appliances", "Chưa rõ"))),
-                "allow_pets": str(row.get("Thú cưng", row.get("allow_pets", "Chưa rõ"))),
-                "move_in_date": str(row.get("Ngày ở", row.get("move_in_date", "Vào ở ngay"))),
-                "has_balcony": str(row.get("Ban công", row.get("has_balcony", "Chưa rõ"))),
-                "has_window": str(row.get("Cửa sổ", row.get("has_window", "Chưa rõ"))),
-                "status": str(row.get("Trạng thái", row.get("status", "TRỐNG"))).upper(),
-                "landlord_phone": phone
-            }
-
-            ok = upsert_room_to_db(
-                extracted_data=extracted_data,
-                media_urls=media_urls,
-                point_id=None,
-                zalo_user_id="EXCEL_IMPORT",
-                landlord_phone=phone
-            )
-
-            if ok:
-                success_count += 1
-            else:
-                failed_count += 1
-                error_logs.append(f"Dòng {index + 2}: Lỗi khi tạo Vector/Lưu Qdrant.")
-
-        return {
-            "status": "success",
-            "message": f"Nhập file hoàn tất: Thành công {success_count} phòng, thất bại {failed_count} phòng.",
-            "details": {
-                "success_count": success_count,
-                "failed_count": failed_count,
-                "errors": error_logs
-            }
-        }
-
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Lỗi khi xử lý file Excel: {str(e)}")
-
-
 TEMPLATE_FILE_PATH = os.path.join(os.path.dirname(__file__), "templates", "Mau_Nhap_Danh_Sach_Phong.xlsx")
 
 @app.get("/api/rooms/download-template")
@@ -610,6 +547,139 @@ def download_excel_template():
         filename="Mau_Nhap_Danh_Sach_Phong.xlsx",
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+
+
+# --- 8.1. HÀM AI CHUẨN HÓA DỮ LIỆU EXCEL ---
+def normalize_excel_batch_with_ai(df_chunk: pd.DataFrame) -> List[dict]:
+    raw_records = df_chunk.to_dict(orient="records")
+    
+    prompt = f"""
+Bạn là Trợ lý AI Chuyên viên Xử lý và Chuẩn hóa Dữ liệu Phòng trọ.
+Hãy đọc danh sách dữ liệu thô từ file Excel dưới đây và chuẩn hóa về đúng định dạng JSON yêu cầu.
+
+YÊU CẦU CHUẨN HÓA DỮ LIỆU:
+1. `address`: Chuẩn hóa lại tên đường, phường/xã, quận/huyện đầy đủ.
+2. `room_name`: Tên/Số phòng (mặc định "Phòng trọ" nếu không rõ).
+3. `floor`: Số tầng (dạng chuỗi, VD: "Tầng 2").
+4. `price`: Đổi toàn bộ các dạng viết tắt như "3.5 tr", "3tr5", "3,500,000đ" thành SỐ NGUYÊN VNĐ (ví dụ: 3500000).
+5. `is_private_bathroom` & `allow_pets`: Chuyển thành kiểu Boolean `true` hoặc `false` dựa trên ngữ cảnh ("có", "khép kín" -> true; "không", "chung" -> false).
+6. `appliances`: Chuyển chuỗi liệt kê đồ đạc thành mảng các từ khóa chuẩn (VD: ["Điều hòa", "Nóng lạnh", "Máy giặt"]).
+7. `landlord_phone`: Chuẩn hóa số điện thoại về dạng 10 chữ số (xóa khoảng trắng, dấu chấm, +84).
+8. `status`: Viết hoa, chỉ nhận 2 giá trị "TRỐNG" hoặc "ĐÃ CHO THUÊ".
+
+DỮ LIỆU THÔ ĐẦU VÀO:
+{json.dumps(raw_records, ensure_ascii=False)}
+
+TRẢ VỀ DUY NHẤT 1 MẢNG JSON CÁC OBJECT ĐÃ ĐƯỢC CHUẨN HÓA:
+[
+  {{
+    "address": "...",
+    "room_name": "...",
+    "floor": "Tầng 2",
+    "price": 3500000,
+    "is_private_bathroom": true,
+    "appliances": ["Điều hòa", "Nóng lạnh"],
+    "allow_pets": false,
+    "status": "TRỐNG",
+    "landlord_phone": "0987654321"
+  }}
+]
+"""
+    try:
+        raw_text = generate_content_with_retry(prompt, mime_type="application/json")
+        if raw_text:
+            cleaned_records = json.loads(raw_text)
+            return cleaned_records
+    except Exception as e:
+        print("❌ Lỗi khi AI chuẩn hóa batch:", e)
+    
+    return []
+
+
+# --- 8.2. API UPLOAD EXCEL TÍCH HỢP AI TỰ ĐỘNG CHUẨN HÓA & LƯU DB ---
+@app.post("/api/rooms/upload-excel-ai")
+async def upload_and_process_excel(file: UploadFile = File(...)):
+    """Upload Excel -> AI Đọc & Chuẩn hóa dữ liệu -> Lưu trực tiếp vào Qdrant DB"""
+    if not (file.filename.endswith(".xlsx") or file.filename.endswith(".xls") or file.filename.endswith(".csv")):
+        raise HTTPException(status_code=400, detail="Chỉ chấp nhận file Excel (.xlsx, .xls) hoặc .csv")
+
+    try:
+        contents = await file.read()
+        if file.filename.endswith(".csv"):
+            df = pd.read_csv(io.BytesIO(contents))
+        else:
+            df = pd.read_excel(io.BytesIO(contents))
+
+        df = df.fillna("")
+
+        batch_size = 10
+        total_rows = len(df)
+        success_count = 0
+        failed_count = 0
+
+        for i in range(0, total_rows, batch_size):
+            df_chunk = df.iloc[i:i + batch_size]
+            
+            # 1. Đưa qua Gemini AI chuẩn hóa
+            normalized_batch = normalize_excel_batch_with_ai(df_chunk)
+
+            # 2. Duyệt từng dòng đã chuẩn hóa và lưu Qdrant
+            for index, item in enumerate(normalized_batch):
+                try:
+                    # Kiểm tra dữ liệu chuẩn bằng Pydantic Model
+                    valid_data = RoomStandardSchema(**item)
+                    
+                    # Chuyển đổi định dạng phù hợp cho hàm upsert_room_to_db
+                    extracted = {
+                        "address": valid_data.address,
+                        "room_name": valid_data.room_name,
+                        "floor": valid_data.floor,
+                        "price": f"{valid_data.price:,} VNĐ" if valid_data.price else "Chưa rõ",
+                        "is_private_bathroom": "Có" if valid_data.is_private_bathroom else "Không",
+                        "appliances": ", ".join(valid_data.appliances) if valid_data.appliances else "Chưa rõ",
+                        "allow_pets": "Có" if valid_data.allow_pets else "Không",
+                        "move_in_date": "Vào ở ngay",
+                        "has_balcony": "Chưa rõ",
+                        "has_window": "Chưa rõ",
+                        "status": valid_data.status,
+                        "landlord_phone": valid_data.landlord_phone
+                    }
+
+                    # Trích xuất media_urls nếu file Excel thô có kèm cột ảnh
+                    raw_row = df_chunk.iloc[index] if index < len(df_chunk) else {}
+                    raw_media = str(raw_row.get("Media URLs", raw_row.get("media_urls", "")))
+                    media_urls = [u.strip() for u in raw_media.split(",") if u.strip()] if raw_media else []
+
+                    # 3. Lưu trực tiếp vào Database Qdrant
+                    ok = upsert_room_to_db(
+                        extracted_data=extracted,
+                        media_urls=media_urls,
+                        point_id=None,
+                        zalo_user_id="EXCEL_AI_IMPORT",
+                        landlord_phone=valid_data.landlord_phone
+                    )
+
+                    if ok:
+                        success_count += 1
+                    else:
+                        failed_count += 1
+
+                except Exception as val_err:
+                    print("⚠️ Bản ghi không qua được Pydantic/Lưu DB:", val_err)
+                    failed_count += 1
+
+        return {
+            "status": "success",
+            "message": f"Đã chuẩn hóa và nhập thành công {success_count}/{total_rows} phòng vào Database!",
+            "details": {
+                "total": total_rows,
+                "success": success_count,
+                "failed": failed_count
+            }
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi xử lý file Excel: {str(e)}")
 
 
 # --- 9. MAIN ENTRY POINT ---
