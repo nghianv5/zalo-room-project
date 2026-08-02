@@ -443,6 +443,55 @@ def add_pending_media(user_id: str, new_urls: list):
     }
 
 
+def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
+    access_token = os.environ.get("ZALO_ACCESS_TOKEN")
+    if not access_token:
+        return False
+
+    url = "https://openapi.zalo.me/v3.0/oa/message/cs"
+    headers = {
+        "Content-Type": "application/json",
+        "access_token": access_token
+    }
+
+    attachment_id = None
+    if media_urls and len(media_urls) > 0:
+        # Lấy URL ảnh đầu tiên upload lên Zalo
+        attachment_id = upload_image_to_zalo(media_urls[0])
+
+    # Gửi tin nhắn dạng Media Template để Zalo tự render ảnh ra màn hình
+    if attachment_id:
+        payload = {
+            "recipient": {"user_id": user_id},
+            "message": {
+                "text": ai_reply,
+                "attachment": {
+                    "type": "template",
+                    "payload": {
+                        "template_type": "media",
+                        "elements": [
+                            {
+                                "media_type": "image",
+                                "attachment_id": attachment_id
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+    else:
+        payload = {
+            "recipient": {"user_id": user_id},
+            "message": {"text": ai_reply}
+        }
+
+    try:
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        return response.json().get("error") == 0
+    except Exception as e:
+        print("❌ [ZALO CRITICAL ERROR]:", e)
+        return False
+
 # --- 8. LUỒNG XỬ LÝ AI VÀ LOGIC DỮ LIỆU PHÒNG ---
 def process_zalo_ai_logic(
     message_text: str, 
