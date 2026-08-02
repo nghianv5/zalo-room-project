@@ -415,7 +415,163 @@ def download_room_template():
         filename="Mau_Nhap_Danh_Sach_Phong.xlsx",
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
-    
+
+
+# --- 8. LUỒNG XỬ LÝ AI VÀ LOGIC DỮ LIỆU PHÒNG ---
+def process_zalo_ai_logic(
+    message_text: str, 
+    media_items: list = None, 
+    user_id: str = "SYSTEM",
+) -> str:
+    incoming_media_urls = []
+    for item in media_items:
+        saved_url = save_media_file(item["url"], is_video=item.get("is_video", False))
+        if saved_url:
+            incoming_media_urls.append(saved_url)
+
+    if not message_text.strip() and incoming_media_urls:
+        add_pending_media(user_id, incoming_media_urls)
+        total_pending = len(PENDING_MEDIA_CACHE.get(user_id, {}).get("urls", []))
+        reply = f"📸 Em đã nhận {len(incoming_media_urls)} ảnh/video! (Tổng đã nhận: {total_pending} file)\n\n👉 Anh/Chị gửi thêm thông tin phòng để em tạo bài nhé!"
+        send_zalo_message(user_id, reply, media_urls=incoming_media_urls)
+        return
+
+    pending_urls = get_and_clear_pending_media(user_id)
+    all_current_media = list(dict.fromkeys(pending_urls + incoming_media_urls))
+    urls_to_send = all_current_media
+
+    try:
+        relevant_rooms = search_rooms_by_vector(message_text, top_k=5)
+
+        system_prompt = f"""
+Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ thông minh trên Zalo.
+Phân tích tin nhắn người dùng và trích xuất đúng 12 trường thông tin:
+
+1. `address`: Địa chỉ 4 cấp đầy đủ (Số nhà/Đường, Phường/Xã, Quận/Huyện, Tỉnh/Thành phố).
+2. `room_name`: Tên hoặc số phòng (VD: Phòng 301, Phòng tầng 2...).
+3. `floor`: Tầng bao nhiêu.
+4. `price`: Giá thuê.
+5. `is_private_bathroom`: Khép kín hay không.
+6. `appliances`: Có điều hòa, nóng lạnh, máy giặt không.
+7. `allow_pets`: Cho nuôi chó mèo không.
+8. `media_urls`: Danh sách ảnh/video.
+9. `move_in_date`: Thời gian vào ở được.
+10. `has_balcony`: Có ban công không.
+11. `has_window`: Có cửa sổ không.
+12. `status`: Trạng thái phòng ("TRỐNG" hoặc "ĐÃ CHO THUÊ").
+
+DỮ LIỆU ĐẦU VÀO:
+- Tin nhắn: "{message_text}"
+- Media kèm theo: {json.dumps(all_current_media)}
+- Phòng khớp từ Vector Search: {json.dumps(relevant_rooms, ensure_ascii=False)}
+
+YÊU CẦU TRẢ VỀ JSON:
+- Nếu thiếu thông tin trường nào, đặt giá trị là "[Chưa cập nhật]".
+- Trình bày `ai_reply` đẹp mắt, sạch sẽ để gửi lại trên Zalo cho người dùng. ĐỪNG ĐÂM ĐƯỜNG LINK HÌNH ÁNH VÀO CÂU TRẢ LỜI, hình ảnh sẽ được hệ thống hiển thị đính kèm tự động.
+
+QUY TẮC PHÂN LOẠI ACTION:
+- "ADD_ROOM": Dùng khi người dùng ĐĂNG PHÒNG MỚI hoặc CẬP NHẬT/SỬA BẤT KỲ THÔNG TIN NÀO CỦA PHÒNG (Địa chỉ, Giá, Tiện ích, Ảnh, Tầng...).
+- "UPDATE_STATUS": CHỈ DÙNG khi người dùng báo phòng "ĐÃ CHO THUÊ", "ĐÃ CÓ NGƯỜI BẮT", "ĐÃ CHỐT" hoặc "ĐỔI SANG TRỐNG".
+- "SEARCH_ROOM": Dùng khi khách tìm kiếm phòng.
+
+TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
+{{
+    "action": "ADD_ROOM" | "SEARCH_ROOM" | "UPDATE_STATUS",
+    "extracted_data": {{
+        "address": "...",
+        "room_name": "...",
+        "floor": "...",
+        "price": "...",
+        "is_private_bathroom": "...",
+        "appliances": "...",
+        "allow_pets": "...",
+        "move_in_date": "...",
+        "has_balcony": "...",
+        "has_window": "...",
+        "status": "TRỐNG",
+        "landlord_phone":"..."
+    }},
+    "ai_reply": "Mô tả chi tiết 12 thông tin dạng văn bản đẹp mắt..."
+}}
+"""
+
+        raw_text = generate_content_with_retry(system_prompt, mime_type="application/json")
+        if not raw_text:
+            raise Exception("Gemini không phản hồi dữ liệu.")
+
+        result_data = json.loads(raw_text)
+        ai_reply = result_data.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
+        action = result_data.get("action")
+        extracted = result_data.get("extracted_data", {})
+
+        # 1. Lấy ID phòng khớp nhất từ kết quả Vector Search (nếu có)
+        existing_point_id = None
+        if relevant_rooms and len(relevant_rooms) > 0:
+            existing_point_id = relevant_rooms[0].get("id")
+
+        # 2. Xử lý theo Action
+        if action == "ADD_ROOM":
+            address = str(extracted.get("address", "")).strip()
+            
+            if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
+                # ❌ KHÔNG TRUYỀN existing_point_id KHI THÊM MỚI PHÒNG
+                # Điều này đảm bảo phòng mới độc lập 100%, không bao giờ xóa nhầm các phòng cũ có địa chỉ tương tự
+                upsert_room_to_db(
+                    extracted_data=extracted,
+                    media_urls=all_current_media,
+                    point_id=None, # Ép tạo phòng độc lập
+                    zalo_user_id=user_id
+                )
+                print(f"➕ [ADD NEW ROOM SUCCESS]: Đã thêm phòng mới tại {address}")
+
+        elif action == "SEARCH_ROOM" and relevant_rooms:
+            print(f"SEARCH_ROOM SUCCESS]")
+            for room in relevant_rooms:
+                m_urls = room.get("8_media_urls") or room.get("media_urls")
+                if m_urls and len(m_urls) > 0:
+                    urls_to_send = m_urls
+                    break
+
+        # 🔵 TRƯỜNG HỢP 2: CẬP NHẬT PHÒNG (UPDATE_ROOM)
+        elif action == "UPDATE_ROOM":
+            address = str(extracted.get("address", "")).strip()
+
+            if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
+                # Truyền existing_point_id vào để nếu ĐỔI ĐỊA CHỈ thì sẽ xóa record cũ
+                upsert_room_to_db(
+                    extracted_data=extracted,
+                    media_urls=all_current_media,
+                    point_id=existing_point_id,
+                    zalo_user_id=user_id
+                )
+                if success:
+                    print(f"🔄 [UPDATE ROOM SUCCESS]: Cập nhật thành công phòng ID {existing_point_id}")
+            else:
+                print("⚠️ [UPDATE ROOM CANCELLED]: Thiếu địa chỉ phòng.")
+
+        # 🟡 TRƯỜNG HỢP 3: CẬP NHẬT TRẠNG THÁI (UPDATE_STATUS)
+        elif action == "UPDATE_STATUS":
+            new_status = extracted.get("status") or "ĐÃ CHO THUÊ"
+
+            if existing_point_id:
+                # Cập nhật riêng trường status qua set_payload
+                success = update_room_status_in_db(
+                    point_id=existing_point_id, 
+                    new_status=new_status,
+                    zalo_user_id=user_id
+                )
+                if success:
+                    print(f"✅ [UPDATE STATUS SUCCESS]: ID {existing_point_id} -> {new_status}")
+            else:
+                print("⚠️ [UPDATE STATUS WARN]: Không tìm thấy phòng khớp trong DB để đổi trạng thái.")
+
+    except Exception as err:
+        print("❌ [AI Logic Exception]:", err)
+        ai_reply = "Dạ hệ thống đang bận một chút, anh/chị chờ em vài giây rồi nhắn lại giúp em nhé!"
+
+    send_zalo_message(user_id, ai_reply, media_urls=urls_to_send)
+
+
 
 # --- 9. WEBHOOK RECEIVER ---
 @app.post("/webhook/zalo")
