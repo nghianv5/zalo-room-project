@@ -34,32 +34,42 @@ app.add_middleware(
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
-# --- QUẢN LÝ THÔNG TIN CẤU HÌNH USERCONNECT.TXT ---
-CONFIG_FILE = os.path.join(BASE_DIR, "userconnect.txt")
+ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
+ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "123456")
 
-def read_user_config() -> dict:
-    """Đọc thông tin user từ file userconnect.txt"""
-    if not os.path.exists(CONFIG_FILE):
-        default_config = {"username": "admin", "password": "123"}
-        save_user_config(default_config)
-        return default_config
-    try:
-        with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-            return json.load(f)
-    except Exception as e:
-        print("❌ Lỗi đọc file userconnect.txt:", e)
-        return {"username": "admin", "password": "123"}
+# --- API ĐĂNG NHẬP (XÁC THỰC QUA ENV) ---
+@app.post("/api/admin/login")
+def admin_login(data: AdminLoginSchema):
+    # Lấy lại giá trị env mới nhất (để không cần restart server nếu app dùng thư viện reload dynamic)
+    current_user = os.environ.get("ADMIN_USERNAME", ADMIN_USERNAME)
+    current_pass = os.environ.get("ADMIN_PASSWORD", ADMIN_PASSWORD)
 
-def save_user_config(data: dict):
-    """Ghi thông tin user mới vào file userconnect.txt"""
-    try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=4)
-        return True
-    except Exception as e:
-        print("❌ Lỗi ghi file userconnect.txt:", e)
-        return False
+    if data.username == current_user and data.password == current_pass:
+        return {"status": "success", "message": "Đăng nhập thành công!"}
+    
+    raise HTTPException(status_code=401, detail="Tài khoản hoặc mật khẩu không chính xác!")
 
+
+# --- API ĐỔI MẬT KHẨU ---
+@app.post("/api/admin/change-password")
+def change_admin_password(data: AdminChangePasswordSchema):
+    current_pass = os.environ.get("ADMIN_PASSWORD", ADMIN_PASSWORD)
+    
+    # 1. Kiểm tra mật khẩu cũ
+    if data.old_password != current_pass:
+        raise HTTPException(status_code=400, detail="Mật khẩu hiện tại không chính xác!")
+
+    # 2. Cập nhật mật khẩu mới vào biến môi trường tạm thời của process
+    os.environ["ADMIN_PASSWORD"] = data.new_password
+
+    # LƯU Ý BẢO MẬT:
+    # Vì việc sửa os.environ trong runtime chỉ có hiệu lực tạm thời trong bộ nhớ (khi restart server sẽ về lại ENV cũ),
+    # bạn nên phản hồi thông báo nhắc Admin cập nhật lại biến môi trường trên Server/Hosting.
+
+    return {
+        "status": "success", 
+        "message": "Đã cập nhật mật khẩu tạm thời thành công! Lưu ý: Hãy cập nhật lại biến ADMIN_PASSWORD trên Dashboard Hosting/Server để giữ thay đổi khi restart app."
+    }
 
 # --- 0. CẤU HÌNH MEDIA & CLOUDINARY ---
 MEDIA_DIR = "static/media"
