@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quản Lý Phòng Trọ - Admin Dashboard</title>
-    <!-- Đã sửa lại đường dẫn CDN chuẩn -->
+    <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
 <body class="bg-gray-100 min-h-screen">
@@ -36,8 +36,8 @@
     </div>
 
     <!-- 2. GIAO DIỆN ADMIN MAIN DASHBOARD -->
-    <div id="adminDashboard" class="hidden p-6 max-w-[98%] mx-auto">
-        <div class="bg-white p-6 rounded-lg shadow-md">
+    <div id="adminDashboard" class="hidden p-4 md:p-6 max-w-[98%] mx-auto">
+        <div class="bg-white p-4 md:p-6 rounded-lg shadow-md">
             <!-- HEADER -->
             <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
                 <div>
@@ -146,26 +146,26 @@
                 </div>
             </div>
 
-            <!-- BẢNG DANH SÁCH PHÒNG -->
-            <div class="overflow-x-auto">
-                <table class="min-w-full border-collapse border border-gray-200 text-xs text-left">
+            <!-- BẢNG DANH SÁCH PHÒNG (CỐ ĐỊNH KÍCH THƯỚC TRÁNH VỠ) -->
+            <div class="overflow-x-auto rounded-lg border border-gray-200">
+                <table class="w-full table-fixed border-collapse text-xs text-left">
                     <thead>
                         <tr class="bg-gray-100 text-gray-700 uppercase font-semibold">
                             <th class="p-2 border text-center w-10">
                                 <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)" class="w-4 h-4 cursor-pointer">
                             </th>
-                            <th class="p-2 border">1. Địa chỉ & 2. Tên phòng</th>
-                            <th class="p-2 border">3. Giá thuê</th>
-                            <th class="p-2 border max-w-[280px]">4. Thông tin phòng chi tiết</th>
-                            <th class="p-2 border">5. Phí dịch vụ</th>
-                            <th class="p-2 border">6. Media</th>
-                            <th class="p-2 border">7. Ngày ở</th>
-                            <th class="p-2 border">8. Trạng thái</th>
-                            <th class="p-2 border">Quản lý</th>
-                            <th class="p-2 border text-center">Hành động</th>
+                            <th class="p-2 border w-48">1. Địa chỉ & 2. Tên phòng</th>
+                            <th class="p-2 border w-24">3. Giá thuê</th>
+                            <th class="p-2 border w-64">4. Thông tin phòng chi tiết</th>
+                            <th class="p-2 border w-36">5. Phí dịch vụ</th>
+                            <th class="p-2 border w-28">6. Media</th>
+                            <th class="p-2 border w-24">7. Ngày ở</th>
+                            <th class="p-2 border w-28 text-center">8. Trạng thái</th>
+                            <th class="p-2 border w-32">Quản lý</th>
+                            <th class="p-2 border w-24 text-center">Hành động</th>
                         </tr>
                     </thead>
-                    <tbody id="roomTableBody" class="divide-y divide-gray-200">
+                    <tbody id="roomTableBody" class="divide-y divide-gray-200 bg-white">
                         <!-- Render Javascript -->
                     </tbody>
                 </table>
@@ -435,6 +435,7 @@
             }
         }
 
+        // HÀM RENDER DỮ LIỆU ĐÃ ĐƯỢC TỐI ƯU TRÁNH VỠ BẢNG
         function renderTable(rooms) {
             const tbody = document.getElementById("roomTableBody");
             if (!tbody) return;
@@ -447,23 +448,24 @@
                 return;
             }
 
+            let rowsHtml = "";
             rooms.forEach(r => {
                 const mediaImgs = (r.media_urls || []).map(url => 
-                    `<a href="${url}" target="_blank"><img src="${url}" class="w-8 h-8 object-cover rounded border inline-block m-0.5 hover:opacity-80" /></a>`
+                    `<a href="${url}" target="_blank" class="inline-block"><img src="${url}" class="w-8 h-8 object-cover rounded border m-0.5 hover:opacity-80" /></a>`
                 ).join("");
 
-                tbody.innerHTML += `
-                    <tr class="hover:bg-gray-50">
+                rowsHtml += `
+                    <tr class="hover:bg-gray-50 transition-colors">
                         <td class="p-2 border text-center">
                             <input type="checkbox" value="${r.id}" class="room-checkbox w-4 h-4 cursor-pointer" onchange="updateDeleteButton()">
                         </td>
-                        <td class="p-2 border">
+                        <td class="p-2 border break-words">
                             <div class="font-bold text-gray-800">${r.address || '-'}</div>
                             <div class="text-blue-600 font-semibold">${r.room_name || '-'}</div>
                             <div class="text-[10px] text-gray-400">ID: ${r.id}</div>
                         </td>
                         <td class="p-2 border font-bold text-green-700">${r.price || '-'}</td>
-                        <td class="p-2 border leading-relaxed">
+                        <td class="p-2 border leading-relaxed break-words">
                             <div>• Tầng: <b>${r.floor || '-'}</b> | WC riêng: <b>${r.is_private_bathroom || '-'}</b></div>
                             <div>• ĐH: <b>${r.has_ac || '-'}</b> | NL: <b>${r.has_heater || '-'}</b> | Giặt: <b>${r.has_washer || '-'}</b></div>
                             <div>• Ban công: <b>${r.has_balcony || '-'}</b> | Cửa sổ: <b>${r.has_window || '-'}</b></div>
@@ -471,27 +473,34 @@
                             <div>• Để xe: ${r.parking_info || '-'} | Tối đa: ${r.max_occupants || '-'} người</div>
                             <div class="text-gray-500 italic">Khác: ${r.other_amenities || '-'}</div>
                         </td>
-                        <td class="p-2 border text-gray-600">${r.service_fees || '-'}</td>
-                        <td class="p-2 border max-w-[100px]">${mediaImgs || '<span class="text-gray-400">Không có</span>'}</td>
+                        <td class="p-2 border text-gray-600 break-words">${r.service_fees || '-'}</td>
+                        <td class="p-2 border">${mediaImgs || '<span class="text-gray-400">Không có</span>'}</td>
                         <td class="p-2 border text-blue-700 font-medium">${r.move_in_date || '-'}</td>
                         <td class="p-2 border text-center">
-                            <span class="px-2 py-1 text-[11px] rounded font-bold ${
+                            <span class="px-2 py-1 text-[11px] rounded font-bold inline-block ${
                                 r.status === 'TRỐNG' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
                             }">
                                 ${r.status || 'TRỐNG'}
                             </span>
                         </td>
-                        <td class="p-2 border text-[11px]">
+                        <td class="p-2 border text-[11px] break-words">
                             <div>📞 ${r.landlord_phone || '-'}</div>
                             <div class="text-gray-500">👤 ${r.zalo_user_id || '-'}</div>
                         </td>
-                        <td class="p-2 border text-center space-x-1">
-                            <button onclick='editRoom(${JSON.stringify(r)})' class="px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 font-medium">Sửa</button>
+                        <td class="p-2 border text-center space-x-1 whitespace-nowrap">
+                            <button onclick="onEditClick('${r.id}')" class="px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 font-medium">Sửa</button>
                             <button onclick="deleteRoom('${r.id}')" class="px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium">Xóa</button>
                         </td>
                     </tr>
                 `;
             });
+
+            tbody.innerHTML = rowsHtml;
+        }
+
+        function onEditClick(id) {
+            const room = allRoomsData.find(item => item.id === id);
+            if (room) editRoom(room);
         }
 
         function applyFilters() {
