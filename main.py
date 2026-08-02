@@ -3,6 +3,7 @@ import json
 import requests
 import uuid
 import time
+import io
 from typing import Dict, List, Optional
 import uvicorn
 from fastapi import FastAPI, Request, BackgroundTasks, UploadFile, File, HTTPException
@@ -24,7 +25,7 @@ app = FastAPI()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
-# --- 0. THƯ MỤC MEDIA & CLOUDINARY ---
+# --- 0. CẤU HÌNH MEDIA & CLOUDINARY ---
 MEDIA_DIR = "static/media"
 os.makedirs(MEDIA_DIR, exist_ok=True)
 app.mount("/static", StaticFiles(directory="static"), name="static")
@@ -60,7 +61,7 @@ except Exception as e:
     print("❌ Lỗi khởi tạo Qdrant:", e)
 
 
-# --- 2. TẠO VECTOR EMBEDDING ---
+# --- 2. HÀM TẠO VECTOR EMBEDDING ---
 def get_text_embedding(text: str, retries: int = 3) -> List[float]:
     if not text or not text.strip():
         return []
@@ -167,6 +168,89 @@ def search_rooms_by_vector(query_text: str, top_k: int = 5) -> List[dict]:
         return []
 
 
+def upsert_room_to_db(
+    extracted_data: dict, 
+    media_urls: list, 
+    point_id: str = None,
+    zalo_user_id: str = "SYSTEM",
+    landlord_phone: str = "Chưa rõ"
+) -> bool:
+    """Hàm Upsert cơ bản dùng chung cho Web Admin và Import Excel"""
+    try:
+        address = extracted_data.get("address", "")
+        room_name = extracted_data.get("room_name", "Phòng trọ")
+        phone = landlord_phone or extracted_data.get("landlord_phone", "Chưa rõ")
+
+        text_to_embed = f"""
+        Địa chỉ: {address}
+        Tên/Số phòng: {room_name}
+        Tầng: {extracted_data.get('floor', '')}
+        Giá thuê: {extracted_data.get('price', '')}
+        Khép kín: {extracted_data.get('is_private_bathroom', '')}
+        Thiết bị: {extracted_data.get('appliances', '')}
+        Cho nuôi chó mèo: {extracted_data.get('allow_pets', '')}
+        Thời gian vào ở: {extracted_data.get('move_in_date', '')}
+        Ban công: {extracted_data.get('has_balcony', '')}
+        Cửa sổ: {extracted_data.get('has_window', '')}
+        Trạng thái: {extracted_data.get('status', 'TRỐNG')}
+        SĐT Chủ nhà: {phone}
+        """.strip()
+
+        vector = get_text_embedding(text_to_embed)
+        if not vector:
+            return False
+
+        new_point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{address.strip().lower()}_{str(room_name).strip().lower()}"))
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        created_at = now_str
+
+        if point_id and point_id != new_point_id:
+            try:
+                old_records = qdrant_client.retrieve(collection_name=COLLECTION_NAME, ids=[point_id])
+                if old_records and old_records[0].payload:
+                    created_at = old_records[0].payload.get("created_at", now_str)
+                qdrant_client.delete(collection_name=COLLECTION_NAME, points_selector=[point_id])
+            except Exception:
+                pass
+        elif point_id and point_id == new_point_id:
+            try:
+                records = qdrant_client.retrieve(collection_name=COLLECTION_NAME, ids=[point_id])
+                if records and records[0].payload:
+                    created_at = records[0].payload.get("created_at", now_str)
+            except Exception:
+                pass
+
+        payload = {
+            "1_address": address,
+            "2_room_name": room_name,
+            "3_floor": extracted_data.get("floor", "Chưa rõ"),
+            "4_price": extracted_data.get("price", "Chưa rõ"),
+            "5_is_private_bathroom": extracted_data.get("is_private_bathroom", "Chưa rõ"),
+            "6_appliances": extracted_data.get("appliances", "Chưa rõ"),
+            "7_allow_pets": extracted_data.get("allow_pets", "Chưa rõ"),
+            "8_media_urls": media_urls,
+            "9_move_in_date": extracted_data.get("move_in_date", "Vào ở ngay"),
+            "10_has_balcony": extracted_data.get("has_balcony", "Chưa rõ"),
+            "11_has_window": extracted_data.get("has_window", "Chưa rõ"),
+            "12_status": extracted_data.get("status", "TRỐNG"),
+            "zalo_user_id": zalo_user_id,
+            "landlord_phone": phone,
+            "created_at": created_at,
+            "updated_at": now_str,
+            "raw_data": extracted_data
+        }
+
+        qdrant_client.upsert(
+            collection_name=COLLECTION_NAME,
+            points=[PointStruct(id=new_point_id, vector=vector, payload=payload)],
+            wait=True
+        )
+        return True
+    except Exception as e:
+        print("❌ [QDRANT UPSERT EXCEPTION]:", e)
+        return False
+
+
 # --- 5. TƯƠNG TÁC ZALO OA API ---
 def upload_image_to_zalo(image_url_or_path: str) -> str:
     access_token = os.environ.get("ZALO_ACCESS_TOKEN")
@@ -245,10 +329,10 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
         return False
 
 
-# --- 6. LUỒNG XỬ LÝ AI ZALO (CHỈ CÒN TÌM KIẾM PHÒNG) ---
+# --- 6. LUỒNG XỬ LÝ AI ZALO (CHỈ CHO PHÉP TÌM PHÒNG) ---
 def process_zalo_ai_logic(
     message_text: str, 
-    user_id: str = "SYSTEM",
+    user_id: str = "SYSTEM"
 ):
     try:
         relevant_rooms = search_rooms_by_vector(message_text, top_k=5)
@@ -257,21 +341,21 @@ def process_zalo_ai_logic(
 Bạn là Trợ lý AI Chuyên Tư vấn và Tìm kiếm Phòng trọ trên Zalo.
 
 MỤC TIÊU DUY NHẤT:
-Hỗ trợ khách hàng TÌM KIẾM phòng trọ theo nhu cầu của họ (`SEARCH_ROOM`).
+Hỗ trợ khách hàng TÌM KIẾM phòng trọ theo yêu cầu (`SEARCH_ROOM`).
 
 LƯU Ý QUAN TRỌNG:
-- Kênh Zalo CHỈ DÀNH CHO KHÁCH TÌM PHÒNG.
-- Mọi thao tác QUẢN LÝ PHÒNG từ Chủ nhà (như Đăng phòng mới, Sửa thông tin, Đổi trạng thái Đã cho thuê/Còn trống) KHÔNG ĐƯỢC THỰC HIỆN TRÊN ZALO.
-- Nếu người dùng gửi yêu cầu thêm/sửa/xóa phòng hoặc đổi trạng thái phòng, hãy trả về `action`: "MANAGEMENT_NOT_ALLOWED".
+- Kênh Zalo CHỈ DÀNH CHO KHÁCH HÀNG TÌM PHÒNG.
+- Không cho phép Thêm, Sửa hay Đổi trạng thái phòng trên Zalo.
+- Nếu người dùng gửi nội dung đăng/thêm/sửa phòng hoặc đổi trạng thái (Đã cho thuê, Đã chốt...), trả về `action`: "MANAGEMENT_NOT_ALLOWED".
 
 DỮ LIỆU ĐẦU VÀO:
 - Tin nhắn người dùng: "{message_text}"
-- Danh sách phòng gợi ý từ database: {json.dumps(relevant_rooms, ensure_ascii=False)}
+- Danh sách phòng tìm được: {json.dumps(relevant_rooms, ensure_ascii=False)}
 
-TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
+TRẢ VỀ DUY NHẤT CHUỖI JSON DẠNG:
 {{
     "action": "SEARCH_ROOM" | "MANAGEMENT_NOT_ALLOWED",
-    "ai_reply": "Nội dung phản hồi chi tiết, thân thiện cho khách hàng..."
+    "ai_reply": "Nội dung trả lời chi tiết, thân thiện..."
 }}
 """
 
@@ -281,7 +365,7 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
 
         result_data = json.loads(raw_text)
         action = result_data.get("action")
-        ai_reply = result_data.get("ai_reply", "Dạ em có thể giúp gì cho anh/chị trong việc tìm phòng ạ?")
+        ai_reply = result_data.get("ai_reply", "Dạ em có thể giúp gì cho anh/chị ạ?")
 
         urls_to_send = []
 
@@ -293,16 +377,16 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
                     break
 
         elif action == "MANAGEMENT_NOT_ALLOWED":
-            ai_reply = "Dạ hiện tại kênh Zalo chỉ hỗ trợ Khách hàng Tìm kiếm phòng trọ ạ!\n\nNếu anh/chị là Chủ nhà muốn **Đăng phòng, Chỉnh sửa thông tin hoặc Cập nhật trạng thái phòng**, vui lòng đăng nhập vào **Trang Quản trị Web Admin** để thực hiện nhé!"
+            ai_reply = "Dạ kênh Zalo hiện chỉ hỗ trợ Khách hàng Tìm phòng trọ!\n\nĐể **Đăng mới, Sửa thông tin hoặc Cập nhật trạng thái phòng**, anh/chị vui lòng thực hiện trên **Trang Quản trị Web Admin** nhé!"
 
     except Exception as err:
         print("❌ [AI Logic Exception]:", err)
-        ai_reply = "Dạ hệ thống đang bận một chút, anh/chị vui lòng thử lại sau giây lát nhé!"
+        ai_reply = "Dạ hệ thống đang bận một chút, anh/chị thử lại sau giây lát nhé!"
 
     send_zalo_message(user_id, ai_reply, media_urls=urls_to_send)
 
 
-# --- 7. WEBHOOK RECEIVER ---
+# --- 7. ZALO WEBHOOK RECEIVER ---
 @app.post("/webhook/zalo")
 async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
     try:
@@ -314,7 +398,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
             return {"status": "ignored"}
 
         if "user_follow_oa" in event_name:
-            send_zalo_message(sender_id, "👋 Chào mừng bạn! Bạn đang cần tìm phòng trọ ở khu vực nào, giá khoảng bao nhiêu ạ?")
+            send_zalo_message(sender_id, "👋 Chào mừng bạn! Bạn cần tìm phòng trọ ở khu vực nào, giá khoảng bao nhiêu ạ?")
             return {"status": "success"}
 
         if event_name in ["user_send_text", "user_send_image", "user_send_file", "user_send_video"]:
@@ -329,9 +413,35 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
     return {"status": "success"}
 
 
-# --- 8. API DÀNH CHO DASHBOARD WEB ADMIN ---
+# --- 8. WEB ADMIN APIS & ROUTING ---
+class RoomCreateUpdateSchema(BaseModel):
+    address: str
+    room_name: Optional[str] = "Phòng trọ"
+    floor: Optional[str] = "Chưa rõ"
+    price: Optional[str] = "Chưa rõ"
+    is_private_bathroom: Optional[str] = "Chưa rõ"
+    appliances: Optional[str] = "Chưa rõ"
+    allow_pets: Optional[str] = "Chưa rõ"
+    media_urls: Optional[List[str]] = []
+    move_in_date: Optional[str] = "Vào ở ngay"
+    has_balcony: Optional[str] = "Chưa rõ"
+    has_window: Optional[str] = "Chưa rõ"
+    status: Optional[str] = "TRỐNG"
+    landlord_phone: Optional[str] = "Chưa rõ"
+
+
+@app.get("/admin", response_class=HTMLResponse)
+def admin_dashboard(request: Request):
+    """Giao diện Web Admin Dashboard"""
+    return templates.TemplateResponse(
+        request=request, 
+        name="admin.html"
+    )
+
+
 @app.get("/api/rooms")
 def get_all_rooms(limit: int = 100):
+    """Lấy danh sách phòng cho Web Admin"""
     try:
         records, _ = qdrant_client.scroll(
             collection_name=COLLECTION_NAME,
@@ -348,16 +458,162 @@ def get_all_rooms(limit: int = 100):
                 "room_name": p.get("2_room_name"),
                 "floor": p.get("3_floor"),
                 "price": p.get("4_price"),
+                "is_private_bathroom": p.get("5_is_private_bathroom"),
+                "appliances": p.get("6_appliances"),
+                "allow_pets": p.get("7_allow_pets"),
+                "media_urls": p.get("8_media_urls", []),
+                "move_in_date": p.get("9_move_in_date"),
+                "has_balcony": p.get("10_has_balcony"),
+                "has_window": p.get("11_has_window"),
                 "status": p.get("12_status"),
-                "landlord_phone": p.get("landlord_phone")
+                "landlord_phone": p.get("landlord_phone"),
+                "zalo_user_id": p.get("zalo_user_id"),
+                "created_at": p.get("created_at"),
+                "updated_at": p.get("updated_at")
             })
-        return JSONResponse(content={"status": "success", "data": results})
+        return {"status": "success", "data": results}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/api/rooms")
+def create_or_update_room_from_web(data: RoomCreateUpdateSchema, point_id: Optional[str] = None):
+    """Thêm/Sửa phòng trực tiếp từ Web Admin"""
+    extracted = {
+        "address": data.address,
+        "room_name": data.room_name,
+        "floor": data.floor,
+        "price": data.price,
+        "is_private_bathroom": data.is_private_bathroom,
+        "appliances": data.appliances,
+        "allow_pets": data.allow_pets,
+        "move_in_date": data.move_in_date,
+        "has_balcony": data.has_balcony,
+        "has_window": data.has_window,
+        "status": data.status,
+        "landlord_phone": data.landlord_phone
+    }
+    
+    success = upsert_room_to_db(
+        extracted_data=extracted,
+        media_urls=data.media_urls,
+        point_id=point_id,
+        zalo_user_id="ADMIN_WEB",
+        landlord_phone=data.landlord_phone
+    )
+    
+    if success:
+        return {"status": "success", "message": "Thao tác thành công!"}
+    raise HTTPException(status_code=500, detail="Không thể lưu thông tin vào Qdrant.")
+
+
+@app.delete("/api/rooms/{point_id}")
+def delete_room_from_web(point_id: str):
+    """Xóa phòng từ Web Admin"""
+    try:
+        qdrant_client.delete(
+            collection_name=COLLECTION_NAME,
+            points_selector=[point_id],
+            wait=True
+        )
+        return {"status": "success", "message": f"Đã xóa thành công phòng ID {point_id}"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi khi xóa: {str(e)}")
+
+
+@app.post("/api/rooms/upload-excel")
+async def upload_rooms_from_excel(file: UploadFile = File(...)):
+    """Upload danh sách phòng bằng file Excel từ Web Admin"""
+    if not (file.filename.endswith(".xlsx") or file.filename.endswith(".xls") or file.filename.endswith(".csv")):
+        raise HTTPException(status_code=400, detail="Chỉ hỗ trợ file .xlsx, .xls hoặc .csv")
+
+    try:
+        contents = await file.read()
+        if file.filename.endswith(".csv"):
+            df = pd.read_csv(io.BytesIO(contents))
+        else:
+            df = pd.read_excel(io.BytesIO(contents))
+
+        df = df.fillna("")
+
+        success_count = 0
+        failed_count = 0
+        error_logs = []
+
+        for index, row in df.iterrows():
+            address = str(row.get("Địa chỉ", row.get("address", ""))).strip()
+            
+            if not address or address.lower() in ["null", "none", "nan", ""]:
+                failed_count += 1
+                error_logs.append(f"Dòng {index + 2}: Thiếu địa chỉ phòng.")
+                continue
+
+            room_name = str(row.get("Tên phòng", row.get("room_name", "Phòng trọ"))).strip()
+            phone = str(row.get("SĐT Chủ nhà", row.get("landlord_phone", "Chưa rõ"))).strip()
+            
+            raw_media = str(row.get("Media URLs", row.get("media_urls", "")))
+            media_urls = [url.strip() for url in raw_media.split(",") if url.strip()] if raw_media else []
+
+            extracted_data = {
+                "address": address,
+                "room_name": room_name,
+                "floor": str(row.get("Tầng", row.get("floor", "Chưa rõ"))),
+                "price": str(row.get("Giá", row.get("price", "Chưa rõ"))),
+                "is_private_bathroom": str(row.get("WC Khép kín", row.get("is_private_bathroom", "Chưa rõ"))),
+                "appliances": str(row.get("Đồ đạc", row.get("appliances", "Chưa rõ"))),
+                "allow_pets": str(row.get("Thú cưng", row.get("allow_pets", "Chưa rõ"))),
+                "move_in_date": str(row.get("Ngày ở", row.get("move_in_date", "Vào ở ngay"))),
+                "has_balcony": str(row.get("Ban công", row.get("has_balcony", "Chưa rõ"))),
+                "has_window": str(row.get("Cửa sổ", row.get("has_window", "Chưa rõ"))),
+                "status": str(row.get("Trạng thái", row.get("status", "TRỐNG"))).upper(),
+                "landlord_phone": phone
+            }
+
+            ok = upsert_room_to_db(
+                extracted_data=extracted_data,
+                media_urls=media_urls,
+                point_id=None,
+                zalo_user_id="EXCEL_IMPORT",
+                landlord_phone=phone
+            )
+
+            if ok:
+                success_count += 1
+            else:
+                failed_count += 1
+                error_logs.append(f"Dòng {index + 2}: Lỗi khi tạo Vector/Lưu Qdrant.")
+
+        return {
+            "status": "success",
+            "message": f"Nhập file hoàn tất: Thành công {success_count} phòng, thất bại {failed_count} phòng.",
+            "details": {
+                "success_count": success_count,
+                "failed_count": failed_count,
+                "errors": error_logs
+            }
+        }
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Lỗi khi xử lý file Excel: {str(e)}")
+
+
+TEMPLATE_FILE_PATH = os.path.join(os.path.dirname(__file__), "templates", "Mau_Nhap_Danh_Sach_Phong.xlsx")
+
+@app.get("/api/rooms/download-template")
+def download_excel_template():
+    """Tải file mẫu Excel"""
+    if not os.path.exists(TEMPLATE_FILE_PATH):
+        raise HTTPException(status_code=404, detail="File mẫu không tồn tại trên hệ thống server!")
+    
+    return FileResponse(
+        path=TEMPLATE_FILE_PATH,
+        filename="Mau_Nhap_Danh_Sach_Phong.xlsx",
+        media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    )
 
 
 # --- 9. MAIN ENTRY POINT ---
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 8000))
-    print(f"🚀 Server Zalo Tìm Phòng đang chạy tại cổng {port}...")
+    print(f"🚀 Server đang chạy tại cổng {port}...")
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
