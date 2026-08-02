@@ -37,6 +37,10 @@ templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
 ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "123456")
 
+# --- 0. BỘ NHỚ ĐỆM TẠM THỜI (PENDING MEDIA CACHE) ---
+PENDING_MEDIA_CACHE: Dict[str, dict] = {}
+CACHE_TTL_SECONDS = 600  # Bộ nhớ đệm tự hủy sau 10 phút
+
 # --- API ĐĂNG NHẬP & ĐỔI MẬT KHẨU ---
 class AdminLoginSchema(BaseModel):
     username: str
