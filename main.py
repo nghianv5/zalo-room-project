@@ -22,8 +22,11 @@ from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
 import re
 from qdrant_client.http import models
+import pytz
 
 app = FastAPI()
+
+VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
 
 app.add_middleware(
     CORSMiddleware,
@@ -77,24 +80,26 @@ def change_admin_password(data: AdminChangePasswordSchema):
 
 def parse_move_in_date(date_str: str) -> float:
     """
-    Chuyển đổi các chuỗi ngày sang Timestamp (Unix Timestamp).
-    Nếu là "Vào ở ngay" hoặc không xác định -> Mặc định là ngày hôm nay.
+    Chuyển đổi các chuỗi ngày sang Unix Timestamp theo múi giờ Việt Nam (UTC+7).
     """
+    now_vn = datetime.now(VN_TZ)
+    
     if not date_str or str(date_str).strip().lower() in ["vào ở ngay", "ngay", "chưa rõ", "none", "nan", ""]:
-        return datetime.now().timestamp()
+        return now_vn.timestamp()
 
     text = str(date_str).strip()
     
-    # 1. Thử parse các định dạng ngày chuẩn: "DD/MM/YYYY", "YYYY-MM-DD", "DD-MM-YYYY"
+    # Parse các định dạng ngày chuẩn và gán múi giờ Việt Nam
     for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
         try:
             dt = datetime.strptime(text, fmt)
-            return dt.timestamp()
+            # Gán timezone Việt Nam vào đối tượng datetime
+            dt_vn = VN_TZ.localize(dt)
+            return dt_vn.timestamp()
         except ValueError:
             pass
 
-    # Mặc định trả về thời gian hiện tại nếu không nhận diện được format
-    return datetime.now().timestamp()
+    return now_vn.timestamp()
     
 # --- CẤU HÌNH MEDIA ---
 MEDIA_DIR = "static/media"
@@ -302,7 +307,9 @@ def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYS
         if not vector:
             return False
 
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        # Lấy thời gian hiện tại chuẩn Giờ Việt Nam
+        now_vn = datetime.now(VN_TZ)
+        now_str = now_vn.strftime("%Y-%m-%d %H:%M:%S")
         created_at = now_str
 
         if point_id:
@@ -931,14 +938,19 @@ async def get_rooms_filter(
         )
 
     # 3. Lọc theo khoảng thời gian phòng trống
+    # Trong API get_rooms_filter:
     if from_date or to_date:
         time_range = {}
         if from_date:
             dt_from = datetime.strptime(from_date, "%Y-%m-%d")
-            time_range["gte"] = dt_from.timestamp()
+            dt_from_vn = VN_TZ.localize(dt_from)
+            time_range["gte"] = dt_from_vn.timestamp()
+            
         if to_date:
-            dt_to = datetime.strptime(to_date, "%Y-%m-%d")
-            time_range["lte"] = dt_to.timestamp()
+            # Lấy đến cuối ngày to_date (23:59:59)
+            dt_to = datetime.strptime(to_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+            dt_to_vn = VN_TZ.localize(dt_to)
+            time_range["lte"] = dt_to_vn.timestamp()
 
         must_conditions.append(
             models.FieldCondition(
