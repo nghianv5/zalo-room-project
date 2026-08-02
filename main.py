@@ -27,7 +27,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
     allow_credentials=True,
-    allow_methods=["*"],  # Cho phép tất cả phương thức GET, POST, PUT, DELETE...
+    allow_methods=["*"],
     allow_headers=["*"],
 )
 
@@ -222,25 +222,21 @@ def upsert_room_to_db(
         if not vector:
             return False
 
-        new_point_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, f"{address.strip().lower()}_{str(room_name).strip().lower()}"))
         now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
         created_at = now_str
 
-        if point_id and point_id != new_point_id:
+        # Nếu cập nhật phòng cũ có point_id
+        if point_id:
+            new_point_id = point_id
             try:
                 old_records = qdrant_client.retrieve(collection_name=COLLECTION_NAME, ids=[point_id])
                 if old_records and old_records[0].payload:
                     created_at = old_records[0].payload.get("created_at", now_str)
-                qdrant_client.delete(collection_name=COLLECTION_NAME, points_selector=[point_id])
             except Exception:
                 pass
-        elif point_id and point_id == new_point_id:
-            try:
-                records = qdrant_client.retrieve(collection_name=COLLECTION_NAME, ids=[point_id])
-                if records and records[0].payload:
-                    created_at = records[0].payload.get("created_at", now_str)
-            except Exception:
-                pass
+        else:
+            # Nếu thêm mới: Tạo UUID ngẫu nhiên duy nhất
+            new_point_id = str(uuid.uuid4())
 
         payload = {
             "1_address": address,
@@ -501,13 +497,9 @@ def get_all_rooms(limit: int = 100):
 @app.post("/api/rooms")
 def create_or_update_room(
     data: RoomCreateUpdateSchema, 
-    point_id: Optional[str] = None  # Nhận point_id từ Query Param (?point_id=...)
+    point_id: Optional[str] = None
 ):
-    """
-    Tạo mới hoặc Cập nhật phòng trọ từ Web Admin.
-    - Nếu có point_id: Cập nhật phòng tương ứng.
-    - Nếu không có point_id: Thêm phòng mới.
-    """
+    """Tạo mới hoặc Cập nhật phòng trọ từ Web Admin"""
     extracted = {
         "address": data.address,
         "room_name": data.room_name,
@@ -615,7 +607,6 @@ TRẢ VỀ DUY NHẤT 1 MẢNG JSON CÁC OBJECT ĐÃ ĐƯỢC CHUẨN HÓA:
 
 
 # --- 8.2. API UPLOAD EXCEL TÍCH HỢP AI TỰ ĐỘNG CHUẨN HÓA & LƯU DB ---
-# Sửa lại URL chuẩn khớp với Frontend: /api/rooms/upload-excel
 @app.post("/api/rooms/upload-excel")
 async def upload_and_process_excel(file: UploadFile = File(...)):
     """Upload Excel -> AI Đọc & Chuẩn hóa dữ liệu -> Lưu trực tiếp vào Qdrant DB"""
@@ -645,16 +636,14 @@ async def upload_and_process_excel(file: UploadFile = File(...)):
             # 2. Duyệt từng dòng đã chuẩn hóa và lưu Qdrant
             for index, item in enumerate(normalized_batch):
                 try:
-                    # Kiểm tra dữ liệu chuẩn bằng Pydantic Model
                     valid_data = RoomStandardSchema(**item)
                     
-                    # Chuyển đổi định dạng phù hợp cho hàm upsert_room_to_db
                     extracted = {
                         "address": valid_data.address,
                         "room_name": valid_data.room_name,
                         "floor": valid_data.floor,
                         "price": f"{valid_data.price:,} VNĐ" if valid_data.price else "Chưa rõ",
-                        "is_private_bathroom": "Có" if valid_data.is_private_bathroom else "Không",
+                        "is_private_bathroom": "Khép kín" if valid_data.is_private_bathroom else "Chung WC",
                         "appliances": ", ".join(valid_data.appliances) if valid_data.appliances else "Chưa rõ",
                         "allow_pets": "Có" if valid_data.allow_pets else "Không",
                         "move_in_date": "Vào ở ngay",
@@ -664,12 +653,10 @@ async def upload_and_process_excel(file: UploadFile = File(...)):
                         "landlord_phone": valid_data.landlord_phone
                     }
 
-                    # Trích xuất media_urls nếu file Excel thô có kèm cột ảnh
                     raw_row = df_chunk.iloc[index] if index < len(df_chunk) else {}
                     raw_media = str(raw_row.get("Media URLs", raw_row.get("media_urls", "")))
                     media_urls = [u.strip() for u in raw_media.split(",") if u.strip()] if raw_media else []
 
-                    # 3. Lưu trực tiếp vào Database Qdrant
                     ok = upsert_room_to_db(
                         extracted_data=extracted,
                         media_urls=media_urls,

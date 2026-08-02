@@ -62,11 +62,11 @@
                 </div>
             </div>
 
-            <!-- 🔍 BỘ LỌC DỮ LIỆU TẤT CẢ CÁC TRƯỜNG -->
+            <!-- BỘ LỌC DỮ LIỆU -->
             <div class="bg-gray-50 p-4 rounded-lg border mb-6 text-xs">
                 <div class="flex justify-between items-center mb-3">
                     <h3 class="font-bold text-gray-700 text-sm flex items-center gap-1">
-                        🔍 Bộ Lọc Tìm Kiếm Chi Tiết (Tất cả trường)
+                        🔍 Bộ Lọc Tìm Kiếm Chi Tiết
                     </h3>
                     <div class="flex gap-2">
                         <button onclick="resetFilters()" class="text-blue-600 hover:underline font-semibold">🔄 Xóa bộ lọc</button>
@@ -75,27 +75,22 @@
                 </div>
 
                 <div id="filterPanel" class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                    <!-- 1. Địa chỉ -->
                     <div>
                         <label class="block font-semibold text-gray-600 mb-1">📍 Địa chỉ:</label>
                         <input type="text" id="filterAddress" oninput="applyFilters()" placeholder="Nhập địa chỉ..." class="w-full border p-2 rounded bg-white">
                     </div>
-                    <!-- 2. Tên phòng -->
                     <div>
                         <label class="block font-semibold text-gray-600 mb-1">🚪 Tên / Số phòng:</label>
                         <input type="text" id="filterRoomName" oninput="applyFilters()" placeholder="VD: P201..." class="w-full border p-2 rounded bg-white">
                     </div>
-                    <!-- 3. Vị trí tầng -->
                     <div>
                         <label class="block font-semibold text-gray-600 mb-1">🏢 Tầng:</label>
                         <input type="text" id="filterFloor" oninput="applyFilters()" placeholder="VD: Tầng 2..." class="w-full border p-2 rounded bg-white">
                     </div>
-                    <!-- 4. Giá thuê -->
                     <div>
                         <label class="block font-semibold text-gray-600 mb-1">💵 Giá thuê:</label>
                         <input type="text" id="filterPrice" oninput="applyFilters()" placeholder="VD: 3.5 triệu..." class="w-full border p-2 rounded bg-white">
                     </div>
-                    <!-- 5. WC Khép kín -->
                     <div>
                         <label class="block font-semibold text-gray-600 mb-1">🚿 Vệ sinh (WC):</label>
                         <select id="filterBathroom" onchange="applyFilters()" class="w-full border p-2 rounded bg-white">
@@ -105,14 +100,12 @@
                             <option value="Chưa rõ">Chưa rõ</option>
                         </select>
                     </div>
-                    <!-- 6. Thiết bị / Nội thất -->
                     <div>
                         <label class="block font-semibold text-gray-600 mb-1">🛏️ Thiết bị / Nội thất:</label>
-                        <input type="text" id="filterAppliances" oninput="applyFilters()" placeholder="VD: Điều hòa, tủ lạnh..." class="w-full border p-2 rounded bg-white">
+                        <input type="text" id="filterAppliances" oninput="applyFilters()" placeholder="VD: Điều hòa..." class="w-full border p-2 rounded bg-white">
                     </div>
-                    <!-- 7. Cho nuôi pet -->
                     <div>
-                        <label class="block font-semibold text-gray-600 mb-1">🐶 Cho nuôi Vật nuôi:</label>
+                        <label class="block font-semibold text-gray-600 mb-1">🐶 Vật nuôi:</label>
                         <select id="filterPets" onchange="applyFilters()" class="w-full border p-2 rounded bg-white">
                             <option value="">-- Tất cả --</option>
                             <option value="Có">Có</option>
@@ -120,46 +113,13 @@
                             <option value="Chưa rõ">Chưa rõ</option>
                         </select>
                     </div>
-                    <!-- 8. Ngày ở -->
-                    <div>
-                        <label class="block font-semibold text-gray-600 mb-1">📅 Ngày chuyển vào:</label>
-                        <input type="text" id="filterMoveInDate" oninput="applyFilters()" placeholder="VD: Vào ở ngay..." class="w-full border p-2 rounded bg-white">
-                    </div>
-                    <!-- 9. Ban công -->
-                    <div>
-                        <label class="block font-semibold text-gray-600 mb-1">🪴 Ban công:</label>
-                        <select id="filterBalcony" onchange="applyFilters()" class="w-full border p-2 rounded bg-white">
-                            <option value="">-- Tất cả --</option>
-                            <option value="Có">Có ban công</option>
-                            <option value="Không">Không</option>
-                            <option value="Chưa rõ">Chưa rõ</option>
-                        </select>
-                    </div>
-                    <!-- 10. Cửa sổ -->
-                    <div>
-                        <label class="block font-semibold text-gray-600 mb-1">🪟 Cửa sổ:</label>
-                        <select id="filterWindow" onchange="applyFilters()" class="w-full border p-2 rounded bg-white">
-                            <option value="">-- Tất cả --</option>
-                            <option value="Có">Có cửa sổ</option>
-                            <option value="Thoáng">Cửa sổ thoáng</option>
-                            <option value="Không">Không</option>
-                            <option value="Chưa rõ">Chưa rõ</option>
-                        </select>
-                    </div>
-                    <!-- 11. Trạng thái -->
                     <div>
                         <label class="block font-semibold text-gray-600 mb-1">🏷️ Trạng thái phòng:</label>
                         <select id="filterStatus" onchange="applyFilters()" class="w-full border p-2 rounded bg-white">
                             <option value="">-- Tất cả --</option>
                             <option value="TRỐNG">🟢 TRỐNG</option>
                             <option value="ĐÃ CHO THUÊ">🔴 ĐÃ CHO THUÊ</option>
-                            <option value="ĐANG CÓ NGHĨA VỤ">🟡 ĐANG CÓ NGHĨA VỤ</option>
                         </select>
-                    </div>
-                    <!-- 12. SĐT Chủ nhà -->
-                    <div>
-                        <label class="block font-semibold text-gray-600 mb-1">📞 SĐT Chủ nhà:</label>
-                        <input type="text" id="filterPhone" oninput="applyFilters()" placeholder="Nhập SĐT..." class="w-full border p-2 rounded bg-white">
                     </div>
                 </div>
             </div>
@@ -178,7 +138,7 @@
                             <th class="p-2 border">Ban công / Cửa sổ</th>
                             <th class="p-2 border">Thú cưng / Ngày ở</th>
                             <th class="p-2 border">Trạng thái</th>
-                            <th class="p-2 border">Media (Hình ảnh)</th>
+                            <th class="p-2 border">Media</th>
                             <th class="p-2 border">Thông tin Quản lý</th>
                             <th class="p-2 border text-center">Hành động</th>
                         </tr>
@@ -205,7 +165,7 @@
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-gray-700">2. Tên / Số phòng:</label>
-                        <input type="text" id="room_name" class="w-full border p-2 rounded text-sm" placeholder="VD: P201 / Tầng 2">
+                        <input type="text" id="room_name" class="w-full border p-2 rounded text-sm" placeholder="VD: P201">
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-gray-700">3. Vị trí tầng:</label>
@@ -236,8 +196,8 @@
                         </select>
                     </div>
                     <div>
-                        <label class="block text-xs font-semibold text-gray-700">8. Ngày có thể chuyển vào:</label>
-                        <input type="text" id="move_in_date" class="w-full border p-2 rounded text-sm" placeholder="VD: Vào ở ngay / 15/08">
+                        <label class="block text-xs font-semibold text-gray-700">8. Ngày chuyển vào:</label>
+                        <input type="text" id="move_in_date" class="w-full border p-2 rounded text-sm" placeholder="VD: Vào ở ngay">
                     </div>
                     <div>
                         <label class="block text-xs font-semibold text-gray-700">9. Ban công:</label>
@@ -261,7 +221,6 @@
                         <select id="status" class="w-full border p-2 rounded text-sm bg-yellow-50 font-medium">
                             <option value="TRỐNG">🟢 TRỐNG</option>
                             <option value="ĐÃ CHO THUÊ">🔴 ĐÃ CHO THUÊ</option>
-                            <option value="ĐANG CÓ NGHĨA VỤ">🟡 ĐANG CÓ NGHĨA VỤ</option>
                         </select>
                     </div>
                     <div>
@@ -269,7 +228,7 @@
                         <input type="text" id="landlord_phone" class="w-full border p-2 rounded text-sm" placeholder="VD: 0987654321">
                     </div>
                     <div class="col-span-2">
-                        <label class="block text-xs font-semibold text-gray-700">13. Media URLs (Link ảnh, phân cách bằng dấu phẩy):</label>
+                        <label class="block text-xs font-semibold text-gray-700">13. Media URLs (phân cách bằng dấu phẩy):</label>
                         <textarea id="media_urls" rows="2" class="w-full border p-2 rounded text-sm" placeholder="https://res.cloudinary.com/..., https://..."></textarea>
                     </div>
                 </div>
@@ -282,7 +241,7 @@
         </div>
     </div>
 
-    <!-- MODAL UPLOAD FILE EXCEL -->
+    <!-- MODAL UPLOAD EXCEL -->
     <div id="excelModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
         <div class="bg-white rounded-lg p-6 w-full max-w-md shadow-xl">
             <div class="flex justify-between items-center mb-3">
@@ -293,7 +252,7 @@
             </div>
             
             <p class="text-xs text-gray-500 mb-4 leading-relaxed">
-                Tải lên file <code>.xlsx</code> hoặc <code>.csv</code>. Nếu chưa có file mẫu chuẩn, vui lòng bấm nút <strong>Tải File Mẫu</strong> ở trên.
+                Tải lên file <code>.xlsx</code> hoặc <code>.csv</code> để AI tự động trích xuất và lưu dữ liệu.
             </p>
 
             <form id="excelForm" onsubmit="uploadExcel(event)">
@@ -316,7 +275,6 @@
         const API_URL = "/api/rooms";
         let allRoomsData = [];
 
-        // --- AUTHENTICATION ---
         function checkAuth() {
             const isAuth = localStorage.getItem("isAdminLoggedIn");
             if (isAuth === "true") {
@@ -348,7 +306,6 @@
             checkAuth();
         }
 
-        // --- LOAD ROOMS ---
         async function loadRooms() {
             try {
                 const res = await fetch(API_URL);
@@ -360,7 +317,6 @@
             }
         }
 
-        // --- RENDER TABLE ---
         function renderTable(rooms) {
             const tbody = document.getElementById("roomTableBody");
             tbody.innerHTML = "";
@@ -369,7 +325,7 @@
             updateDeleteButton();
 
             if (!rooms || rooms.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="10" class="p-4 text-center text-gray-500">Không tìm thấy phòng phù hợp với bộ lọc.</td></tr>`;
+                tbody.innerHTML = `<tr><td colspan="10" class="p-4 text-center text-gray-500">Không tìm thấy phòng phù hợp.</td></tr>`;
                 return;
             }
 
@@ -393,7 +349,7 @@
                             <div class="font-semibold text-green-700">${r.price || '-'}</div>
                         </td>
                         <td class="p-2 border">
-                            <div>WC khép kín: ${r.is_private_bathroom || '-'}</div>
+                            <div>WC: ${r.is_private_bathroom || '-'}</div>
                             <div class="text-gray-500 truncate max-w-[150px]" title="${r.appliances}">${r.appliances || '-'}</div>
                         </td>
                         <td class="p-2 border">
@@ -416,7 +372,7 @@
                         </td>
                         <td class="p-2 border text-[11px]">
                             <div>📞 ${r.landlord_phone || '-'}</div>
-                            <div class="text-gray-500">👤 User: ${r.zalo_user_id || '-'}</div>
+                            <div class="text-gray-500">👤 ${r.zalo_user_id || '-'}</div>
                             <div class="text-gray-400">🕒 ${r.updated_at || r.created_at || '-'}</div>
                         </td>
                         <td class="p-2 border text-center space-x-1">
@@ -428,7 +384,6 @@
             });
         }
 
-        // --- BỘ LỌC TẤT CẢ CÁC TRƯỜNG ---
         function applyFilters() {
             const vAddress = document.getElementById("filterAddress").value.toLowerCase().trim();
             const vRoomName = document.getElementById("filterRoomName").value.toLowerCase().trim();
@@ -437,11 +392,7 @@
             const vBathroom = document.getElementById("filterBathroom").value;
             const vAppliances = document.getElementById("filterAppliances").value.toLowerCase().trim();
             const vPets = document.getElementById("filterPets").value;
-            const vMoveInDate = document.getElementById("filterMoveInDate").value.toLowerCase().trim();
-            const vBalcony = document.getElementById("filterBalcony").value;
-            const vWindow = document.getElementById("filterWindow").value;
             const vStatus = document.getElementById("filterStatus").value;
-            const vPhone = document.getElementById("filterPhone").value.trim();
 
             const filtered = allRoomsData.filter(r => {
                 const matchAddress = !vAddress || (r.address && r.address.toLowerCase().includes(vAddress));
@@ -451,21 +402,15 @@
                 const matchBathroom = !vBathroom || r.is_private_bathroom === vBathroom;
                 const matchAppliances = !vAppliances || (r.appliances && r.appliances.toLowerCase().includes(vAppliances));
                 const matchPets = !vPets || r.allow_pets === vPets;
-                const matchMoveInDate = !vMoveInDate || (r.move_in_date && r.move_in_date.toLowerCase().includes(vMoveInDate));
-                const matchBalcony = !vBalcony || r.has_balcony === vBalcony;
-                const matchWindow = !vWindow || r.has_window === vWindow;
                 const matchStatus = !vStatus || r.status === vStatus;
-                const matchPhone = !vPhone || (r.landlord_phone && r.landlord_phone.includes(vPhone));
 
                 return matchAddress && matchRoomName && matchFloor && matchPrice && 
-                       matchBathroom && matchAppliances && matchPets && matchMoveInDate && 
-                       matchBalcony && matchWindow && matchStatus && matchPhone;
+                       matchBathroom && matchAppliances && matchPets && matchStatus;
             });
 
             renderTable(filtered);
         }
 
-        // Reset bộ lọc về trạng thái ban đầu
         function resetFilters() {
             document.getElementById("filterAddress").value = "";
             document.getElementById("filterRoomName").value = "";
@@ -474,15 +419,10 @@
             document.getElementById("filterBathroom").value = "";
             document.getElementById("filterAppliances").value = "";
             document.getElementById("filterPets").value = "";
-            document.getElementById("filterMoveInDate").value = "";
-            document.getElementById("filterBalcony").value = "";
-            document.getElementById("filterWindow").value = "";
             document.getElementById("filterStatus").value = "";
-            document.getElementById("filterPhone").value = "";
             applyFilters();
         }
 
-        // Thu gọn / Mở rộng bảng lọc
         function toggleFilterPanel() {
             const panel = document.getElementById("filterPanel");
             const btn = document.getElementById("btnToggleFilter");
@@ -495,7 +435,6 @@
             }
         }
 
-        // --- CHECKBOX & DELETE MULTIPLE ---
         function updateDeleteButton() {
             const checkboxes = document.querySelectorAll('.room-checkbox:checked');
             const btnDelete = document.getElementById('btnDeleteSelected');
@@ -521,20 +460,18 @@
 
             if (selectedIds.length === 0) return;
 
-            if (confirm(`Bạn có chắc chắn muốn xóa ${selectedIds.length} phòng đã chọn?`)) {
+            if (confirm(`Xác nhận xóa ${selectedIds.length} phòng đã chọn?`)) {
                 try {
                     await Promise.all(selectedIds.map(id => 
                         fetch(`${API_URL}/${id}`, { method: "DELETE" })
                     ));
                     loadRooms();
                 } catch (err) {
-                    console.error("Lỗi khi xóa hàng loạt:", err);
-                    alert("Có lỗi xảy ra khi xóa một số phòng.");
+                    console.error("Lỗi xóa hàng loạt:", err);
                 }
             }
         }
 
-        // --- CRUD PHÒNG ---
         async function saveRoom(e) {
             e.preventDefault();
             const id = document.getElementById("roomId").value;
@@ -569,13 +506,12 @@
         }
 
         async function deleteRoom(id) {
-            if (confirm("Bạn có chắc chắn muốn xóa phòng này khỏi cơ sở dữ liệu?")) {
+            if (confirm("Bạn có chắc chắn muốn xóa phòng này?")) {
                 await fetch(`${API_URL}/${id}`, { method: "DELETE" });
                 loadRooms();
             }
         }
 
-        // --- MODAL UTILS ---
         function openModal() {
             document.getElementById("roomForm").reset();
             document.getElementById("roomId").value = "";
@@ -629,7 +565,7 @@
             formData.append("file", fileInput.files[0]);
 
             statusDiv.className = "text-xs mb-3 text-blue-700 bg-blue-50 p-2 rounded font-medium";
-            statusDiv.innerText = "⏳ Đang phân tích file Excel, tạo Vector Embedding và lưu dữ liệu...";
+            statusDiv.innerText = "⏳ Đang phân tích file Excel và lưu dữ liệu...";
             statusDiv.classList.remove("hidden");
             btnSubmit.disabled = true;
 
@@ -660,7 +596,6 @@
             }
         }
 
-        // Kích hoạt check auth
         checkAuth();
     </script>
 </body>
