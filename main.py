@@ -99,7 +99,7 @@ try:
 except Exception as e:
     print("❌ Lỗi khởi tạo Qdrant:", e)
 
-# --- SCHEMA DỮ LIỆU PHÒNG TRỌ CHUẨN MỚI ---
+# --- SCHEMA DỮ LIỆU PHÒNG TRỌ CHUẨN MỚI theo 8 MỤC YÊU CẦU ---
 class RoomCreateUpdateSchema(BaseModel):
     # 1. Địa chỉ
     address: str
@@ -119,7 +119,7 @@ class RoomCreateUpdateSchema(BaseModel):
     has_fingerprint_lock: Optional[str] = "Chưa rõ"   # Có khoá vân tay không
     parking_info: Optional[str] = "Chưa rõ"          # Có chỗ để xe máy, oto không
     max_occupants: Optional[str] = "Chưa rõ"         # Ở tối đa bao nhiêu người
-    appliances: Optional[str] = "Chưa rõ"             # Các tiện ích khác
+    appliances: Optional[str] = "Chưa rõ"             # Các tiện ích/thiết bị khác
     # 5. Phí dịch vụ
     service_fees: Optional[str] = "Chưa rõ"           # Điện, nước, dịch vụ...
     # 6. Ảnh, video phòng
@@ -128,7 +128,7 @@ class RoomCreateUpdateSchema(BaseModel):
     move_in_date: Optional[str] = "Vào ở ngay"
     # 8. Trạng thái phòng (TRỐNG / ĐÃ CHO THUÊ)
     status: Optional[str] = "TRỐNG"
-    # Thông tin liên hệ
+    # Thông tin liên hệ chủ nhà
     landlord_phone: Optional[str] = "Chưa rõ"
 
 def get_text_embedding(text: str, retries: int = 3) -> List[float]:
@@ -233,7 +233,7 @@ def get_all_rooms(
         for r in records:
             p = r.payload or {}
 
-            # Lọc cơ bản
+            # Lọc Backend cơ bản
             if address and address.lower() not in str(p.get("1_address", "")).lower(): continue
             if room_name and room_name.lower() not in str(p.get("2_room_name", "")).lower(): continue
             if status and p.get("8_status") != status: continue
