@@ -321,11 +321,12 @@ def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYS
             media_list = [x.strip() for x in media_list.split(",") if x.strip()]
 
         # Lấy chuỗi giá từ AI hoặc Fallback thủ công
-        raw_price = room_data.get("price", "")
+        raw_price = data.get("price", "")
 
         # Tạo trường giá dạng số để lọc/tìm kiếm
         price_number = parse_price_to_number(raw_price)
-        
+        # Parse timestamp cho ngày chuyển vào ở
+        move_in_ts = parse_move_in_date(data.get("move_in_date"))
         # Tìm đoạn khởi tạo payload trong upsert_room_to_db và sửa lại thành:
         payload = {
             "address": address,
@@ -347,7 +348,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYS
             "service_fees": str(data.get("service_fees", "Chưa rõ")),
             "media_urls": media_list,
             "move_in_date": str(data.get("move_in_date", "Vào ở ngay")),
-            "move_in_timestamp": parse_move_in_date(data.get("move_in_date")),
+            "move_in_timestamp": move_in_ts,
             "status": str(data.get("status", "TRỐNG")),
             "landlord_phone": phone,
             "zalo_user_id": zalo_user_id,
