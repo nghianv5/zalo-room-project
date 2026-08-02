@@ -99,7 +99,7 @@ try:
 except Exception as e:
     print("❌ Lỗi khởi tạo Qdrant:", e)
 
-# --- SCHEMA DỮ LIỆU PHÒNG TRỌ CHUẨN MỚI theo 8 MỤC YÊU CẦU ---
+# --- SCHEMA DỮ LIỆU PHÒNG TRỌ CHUẨN ĐẦY ĐỦ THEO 8 MỤC YÊU CẦU ---
 class RoomCreateUpdateSchema(BaseModel):
     # 1. Địa chỉ
     address: str
@@ -109,7 +109,7 @@ class RoomCreateUpdateSchema(BaseModel):
     price: Optional[str] = "Chưa rõ"
     # 4. Thông tin phòng chi tiết
     floor: Optional[str] = "Chưa rõ"                  # Tầng bao nhiêu
-    is_private_bathroom: Optional[str] = "Chưa rõ"   # Khép kín (Có / Không / Chung)
+    is_private_bathroom: Optional[str] = "Chưa rõ"   # Phòng khép kín hay không (có WC riêng không)
     has_ac: Optional[str] = "Chưa rõ"                 # Có điều hoà không
     has_heater: Optional[str] = "Chưa rõ"             # Có nóng lạnh không
     has_washer: Optional[str] = "Chưa rõ"             # Có máy giặt không
@@ -119,16 +119,16 @@ class RoomCreateUpdateSchema(BaseModel):
     has_fingerprint_lock: Optional[str] = "Chưa rõ"   # Có khoá vân tay không
     parking_info: Optional[str] = "Chưa rõ"          # Có chỗ để xe máy, oto không
     max_occupants: Optional[str] = "Chưa rõ"         # Ở tối đa bao nhiêu người
-    appliances: Optional[str] = "Chưa rõ"             # Các tiện ích/thiết bị khác
+    other_amenities: Optional[str] = "Chưa rõ"       # Các thông tin/tiện ích khác
     # 5. Phí dịch vụ
-    service_fees: Optional[str] = "Chưa rõ"           # Điện, nước, dịch vụ...
+    service_fees: Optional[str] = "Chưa rõ"           # Điện, nước, internet, vệ sinh...
     # 6. Ảnh, video phòng
     media_urls: Optional[List[str]] = []
     # 7. Thời gian khách vào ở được
     move_in_date: Optional[str] = "Vào ở ngay"
-    # 8. Trạng thái phòng (TRỐNG / ĐÃ CHO THUÊ)
+    # 8. Trạng thái phòng trống hay đã cho thuê
     status: Optional[str] = "TRỐNG"
-    # Thông tin liên hệ chủ nhà
+    # Thông tin liên hệ
     landlord_phone: Optional[str] = "Chưa rõ"
 
 def get_text_embedding(text: str, retries: int = 3) -> List[float]:
@@ -154,7 +154,8 @@ def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYS
         room_name = data.get("room_name", "Phòng trọ")
         phone = data.get("landlord_phone", "Chưa rõ")
 
-        text_to_embed = f"Địa chỉ: {address} Tên phòng: {room_name} Giá: {data.get('price', '')} Đồ đạc: {data.get('appliances', '')} Phí dịch vụ: {data.get('service_fees', '')}"
+        # Gom văn bản tổng hợp để làm vector hóa tìm kiếm
+        text_to_embed = f"Địa chỉ: {address} Tên phòng: {room_name} Giá: {data.get('price', '')} Đồ đạc: AC:{data.get('has_ac')}, Heater:{data.get('has_heater')}, Washer:{data.get('has_washer')}, {data.get('other_amenities', '')} Phí dịch vụ: {data.get('service_fees', '')}"
         vector = get_text_embedding(text_to_embed)
         if not vector:
             return False
@@ -173,6 +174,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYS
         else:
             new_point_id = str(uuid.uuid4())
 
+        # Lưu đầy đủ chuẩn xác 8 mục dữ liệu vào Database Qdrant Payload
         payload = {
             "1_address": address,
             "2_room_name": room_name,
@@ -188,7 +190,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYS
             "4_has_fingerprint_lock": data.get("has_fingerprint_lock", "Chưa rõ"),
             "4_parking_info": data.get("parking_info", "Chưa rõ"),
             "4_max_occupants": data.get("max_occupants", "Chưa rõ"),
-            "4_appliances": data.get("appliances", "Chưa rõ"),
+            "4_other_amenities": data.get("other_amenities", "Chưa rõ"),
             "5_service_fees": data.get("service_fees", "Chưa rõ"),
             "6_media_urls": data.get("media_urls", []),
             "7_move_in_date": data.get("move_in_date", "Vào ở ngay"),
@@ -233,7 +235,7 @@ def get_all_rooms(
         for r in records:
             p = r.payload or {}
 
-            # Lọc Backend cơ bản
+            # Lọc Backend
             if address and address.lower() not in str(p.get("1_address", "")).lower(): continue
             if room_name and room_name.lower() not in str(p.get("2_room_name", "")).lower(): continue
             if status and p.get("8_status") != status: continue
@@ -255,7 +257,7 @@ def get_all_rooms(
                 "has_fingerprint_lock": p.get("4_has_fingerprint_lock"),
                 "parking_info": p.get("4_parking_info"),
                 "max_occupants": p.get("4_max_occupants"),
-                "appliances": p.get("4_appliances"),
+                "other_amenities": p.get("4_other_amenities"),
                 "service_fees": p.get("5_service_fees"),
                 "media_urls": p.get("6_media_urls", []),
                 "move_in_date": p.get("7_move_in_date"),
