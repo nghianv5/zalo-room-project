@@ -331,7 +331,7 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
             data.get("Địa chỉ & Tên phòng") or
             data.get("1. Địa chỉ & 2. Tên phòng")
         )
-        
+        print("lỗi kết nối gemini-2.5-flash, dùng manual_fallback")
         if not raw_address or pd.isna(raw_address) or str(raw_address).strip().lower() in ["nan", "none", "null", "", "chưa rõ"]:
             return None
 
