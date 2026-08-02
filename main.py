@@ -20,6 +20,8 @@ from datetime import datetime
 from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, Field
 from fastapi.middleware.cors import CORSMiddleware
+import re
+from qdrant_client.http import models
 
 app = FastAPI()
 
@@ -105,6 +107,78 @@ try:
 except Exception as e:
     print("❌ Lỗi khởi tạo Qdrant:", e)
 
+
+@app.get("/api/admin/rooms")
+async def get_rooms_filter(
+    min_price: Optional[float] = None,
+    max_price: Optional[float] = None,
+    status: Optional[str] = None
+):
+    must_conditions = []
+
+    # 1. Lọc theo khoảng giá bằng Range Query của Qdrant
+    if min_price is not None or max_price is not None:
+        price_range = {}
+        if min_price is not None:
+            price_range["gte"] = min_price  # Lớn hơn hoặc bằng min_price
+        if max_price is not None:
+            price_range["lte"] = max_price  # Nhỏ hơn hoặc bằng max_price
+
+        must_conditions.append(
+            models.FieldCondition(
+                key="price_num",
+                range=models.Range(**price_range)
+            )
+        )
+
+    # 2. Lọc theo trạng thái phòng (nếu có)
+    if status:
+        must_conditions.append(
+            models.FieldCondition(
+                key="status",
+                match=models.MatchValue(value=status)
+            )
+        )
+
+    # Truy vấn dữ liệu từ Qdrant
+    query_filter = models.Filter(must=must_conditions) if must_conditions else None
+    
+    records = qdrant_client.scroll(
+        collection_name=COLLECTION_NAME,
+        scroll_filter=query_filter,
+        limit=50
+    )[0]
+
+    return [rec.payload for rec.payload in records]
+    
+def parse_price_to_number(price_str: str) -> float:
+    """
+    Chuyển đổi chuỗi giá (ví dụ: '3.5 triệu', '3,500,000đ', '4tr5') thành số thực
+    """
+    if not price_str or price_str in ["Chưa rõ", "Thỏa thuận", "None", "nan"]:
+        return 0.0
+
+    text = str(price_str).lower().replace(",", ".").strip()
+    
+    # Trường hợp: "3.5 triệu", "3,5 tr", "4tr5"
+    if "triệu" in text or "tr" in text:
+        # Xử lý dạng "4tr5" -> "4.5"
+        text = re.sub(r'(\d+)\s*(?:triệu|tr)\s*(\d+)', r'\1.\2', text)
+        match = re.search(r'(\d+(?:\.\d+)?)', text)
+        if match:
+            return float(match.group(1)) * 1_000_000
+
+    # Trường hợp: "3.500.000", "3500000"
+    digits_only = re.sub(r'[^\d]', '', text)
+    if digits_only:
+        val = float(digits_only)
+        # Nếu nhập số quá nhỏ (ví dụ nhập 3.5 thay vì 3500000)
+        if val < 100: 
+            return val * 1_000_000
+        return val
+
+    return 0.0
+    
 # --- SCHEMA DỮ LIỆU PHÒNG TRỌ CHUẨN ĐẦY ĐỦ THEO 8 MỤC YÊU CẦU ---
 class RoomCreateUpdateSchema(BaseModel):
     # 1. Địa chỉ
@@ -210,10 +284,17 @@ def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYS
         if isinstance(media_list, str):
             media_list = [x.strip() for x in media_list.split(",") if x.strip()]
 
+        # Lấy chuỗi giá từ AI hoặc Fallback thủ công
+        raw_price = room_data.get("price", "")
+
+        # Tạo trường giá dạng số để lọc/tìm kiếm
+        price_number = parse_price_to_number(raw_price)
+        
         payload = {
             "1_address": address,
             "2_room_name": room_name,
             "3_price": str(data.get("price", "Chưa rõ")),
+            "price_num": price_number,
             "4_floor": str(data.get("floor", "Chưa rõ")),
             "4_is_private_bathroom": str(data.get("is_private_bathroom", "Chưa rõ")),
             "4_has_ac": str(data.get("has_ac", "Chưa rõ")),

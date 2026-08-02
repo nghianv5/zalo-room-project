@@ -84,10 +84,11 @@
                             <label class="block font-semibold text-gray-600 mb-1">2. Tên / Số phòng:</label>
                             <input type="text" id="filterRoomName" oninput="applyFilters()" placeholder="VD: Phòng 302..." class="w-full border p-2 rounded bg-white">
                         </div>
-                        <div>
-                            <label class="block font-semibold text-gray-600 mb-1">3. Giá thuê:</label>
-                            <input type="text" id="filterPrice" oninput="applyFilters()" placeholder="VD: 3.5 triệu..." class="w-full border p-2 rounded bg-white">
-                        </div>
+						<div class="filter-box" style="display: flex; gap: 10px; margin-bottom: 20px;">
+						  <input type="number" id="minPrice" placeholder="Giá từ (VD: 500000)">
+						  <input type="number" id="maxPrice" placeholder="Giá đến (VD: 15000000)">
+						  <button onclick="searchRooms()">Giá thuê</button>
+						</div>
                         <div>
                             <label class="block font-semibold text-gray-600 mb-1">8. Trạng thái phòng:</label>
                             <select id="filterStatus" onchange="applyFilters()" class="w-full border p-2 rounded bg-white font-semibold">
