@@ -350,9 +350,8 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
                     contents=text,
                     config=types.EmbedContentConfig(output_dimensionality=768)
                 )
-        if response and response.text:
-            cleaned_data = json.loads(response.text)
-            return cleaned_data
+        if response and response.embedding and response.embedding.values:
+            return response.embedding.values
     except Exception as e:
         print("⚠️ Lỗi AI Validation:", e)
     
