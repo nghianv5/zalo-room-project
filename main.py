@@ -415,6 +415,28 @@ def download_room_template():
         filename="Mau_Nhap_Danh_Sach_Phong.xlsx",
         media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     )
+# --- 7. HÀM QUẢN LÝ PENDING MEDIA CACHE ---
+def get_and_clear_pending_media(user_id: str) -> list:
+    if user_id in PENDING_MEDIA_CACHE:
+        cached_data = PENDING_MEDIA_CACHE.pop(user_id)
+        if time.time() - cached_data["timestamp"] <= CACHE_TTL_SECONDS:
+            return cached_data["urls"]
+    return []
+
+
+def add_pending_media(user_id: str, new_urls: list):
+    if not new_urls:
+        return
+    current_urls = []
+    if user_id in PENDING_MEDIA_CACHE:
+        if time.time() - PENDING_MEDIA_CACHE[user_id]["timestamp"] <= CACHE_TTL_SECONDS:
+            current_urls = PENDING_MEDIA_CACHE[user_id]["urls"]
+
+    merged_urls = list(dict.fromkeys(current_urls + new_urls))
+    PENDING_MEDIA_CACHE[user_id] = {
+        "urls": merged_urls,
+        "timestamp": time.time()
+    }
 
 
 # --- 8. LUỒNG XỬ LÝ AI VÀ LOGIC DỮ LIỆU PHÒNG ---
