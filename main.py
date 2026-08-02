@@ -111,7 +111,7 @@ gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 
     
-COLLECTION_NAME = "rooms_v16_structured"
+COLLECTION_NAME = "rooms_v01"
 VECTOR_SIZE = 768
 
 qdrant_client = QdrantClient(
