@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quản Lý Phòng Trọ - Admin Dashboard</title>
-    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="[https://cdn.tailwindcss.com](https://cdn.tailwindcss.com)"></script>
 </head>
 <body class="bg-gray-100 min-h-screen">
 
@@ -62,11 +62,11 @@
                 </div>
             </div>
 
-            <!-- BỘ LỌC DỮ LIỆU CÁC TRƯỜNG -->
+            <!-- BỘ LỌC DỮ LIỆU BỔ SUNG KHOẢNG GIÁ & KHOẢNG THỜI GIAN -->
             <div class="bg-gray-50 p-4 rounded-lg border mb-6 text-xs">
                 <div class="flex justify-between items-center mb-3">
                     <h3 class="font-bold text-gray-700 text-sm flex items-center gap-1">
-                        🔍 BỘ LỌC TÌM KIẾM THEO CẤU TRÚC DỮ LIỆU
+                        🔍 BỘ LỌC TÌM KIẾM NÂNG CAO
                     </h3>
                     <div class="flex gap-2">
                         <button onclick="resetFilters()" class="text-blue-600 hover:underline font-semibold">🔄 Xóa bộ lọc</button>
@@ -84,11 +84,27 @@
                             <label class="block font-semibold text-gray-600 mb-1">2. Tên / Số phòng:</label>
                             <input type="text" id="filterRoomName" oninput="applyFilters()" placeholder="VD: Phòng 302..." class="w-full border p-2 rounded bg-white">
                         </div>
-						<div class="filter-box" style="display: flex; gap: 10px; margin-bottom: 20px;">
-						  <input type="number" id="minPrice" placeholder="Giá từ (VD: 500000)">
-						  <input type="number" id="maxPrice" placeholder="Giá đến (VD: 15000000)">
-						  <button onclick="searchRooms()">Giá thuê</button>
-						</div>
+                        
+                        <!-- LỌC THEO KHOẢNG GIÁ -->
+                        <div class="col-span-1 sm:col-span-2 bg-blue-50/50 p-2 rounded border border-blue-100">
+                            <label class="block font-semibold text-blue-900 mb-1">3. Khoảng Giá Thuê (VNĐ):</label>
+                            <div class="flex items-center gap-2">
+                                <input type="number" id="filterMinPrice" oninput="applyFilters()" placeholder="Giá từ (VD: 2000000)" class="w-full border p-2 rounded bg-white">
+                                <span>-</span>
+                                <input type="number" id="filterMaxPrice" oninput="applyFilters()" placeholder="Giá đến (VD: 5000000)" class="w-full border p-2 rounded bg-white">
+                            </div>
+                        </div>
+
+                        <!-- LỌC THEO KHOẢNG THỜI GIAN TRỐNG -->
+                        <div class="col-span-1 sm:col-span-2 bg-amber-50/50 p-2 rounded border border-amber-100">
+                            <label class="block font-semibold text-amber-900 mb-1">7. Khoảng Thời Gian Phòng Trống:</label>
+                            <div class="flex items-center gap-2">
+                                <input type="date" id="filterFromDate" onchange="applyFilters()" class="w-full border p-2 rounded bg-white">
+                                <span>tới</span>
+                                <input type="date" id="filterToDate" onchange="applyFilters()" class="w-full border p-2 rounded bg-white">
+                            </div>
+                        </div>
+
                         <div>
                             <label class="block font-semibold text-gray-600 mb-1">8. Trạng thái phòng:</label>
                             <select id="filterStatus" onchange="applyFilters()" class="w-full border p-2 rounded bg-white font-semibold">
@@ -129,7 +145,7 @@
                 </div>
             </div>
 
-            <!-- BẢNG DANH SÁCH PHÒNG THEO DÚNG 8 MỤC -->
+            <!-- BẢNG DANH SÁCH PHÒNG -->
             <div class="overflow-x-auto">
                 <table class="min-w-full border-collapse border border-gray-200 text-xs text-left">
                     <thead>
@@ -156,7 +172,7 @@
         </div>
     </div>
 
-    <!-- MODAL FORM THÊM / SỬA PHÒNG THEO ĐÚNG 8 MỤC DỮ LIỆU -->
+    <!-- MODAL FORM THÊM / SỬA PHÒNG -->
     <div id="roomModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
         <div class="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
             <h2 id="modalTitle" class="text-xl font-bold mb-4 text-gray-800">Thêm Phòng Mới</h2>
@@ -164,28 +180,22 @@
                 <input type="hidden" id="roomId">
                 
                 <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3 text-xs">
-                    <!-- 1. Địa chỉ -->
                     <div class="md:col-span-2">
                         <label class="block font-bold text-gray-700 mb-1">1. Địa chỉ (*):</label>
                         <input type="text" id="address" required class="w-full border p-2 rounded" placeholder="VD: Số 123 Nguyễn Trãi, Thanh Xuân, Hà Nội">
                     </div>
-                    <!-- 2. Tên phòng -->
                     <div>
                         <label class="block font-bold text-gray-700 mb-1">2. Tên / Số phòng (*):</label>
                         <input type="text" id="room_name" required class="w-full border p-2 rounded" placeholder="VD: Phòng 302">
                     </div>
-
-                    <!-- 3. Giá thuê -->
                     <div>
                         <label class="block font-bold text-gray-700 mb-1">3. Giá thuê (*):</label>
                         <input type="text" id="price" required class="w-full border p-2 rounded" placeholder="VD: 3.5 triệu/tháng">
                     </div>
-                    <!-- 7. Thời gian ở -->
                     <div>
                         <label class="block font-bold text-gray-700 mb-1">7. Thời gian khách vào ở được:</label>
-                        <input type="text" id="move_in_date" class="w-full border p-2 rounded" placeholder="VD: Vào ở ngay / 15/10">
+                        <input type="text" id="move_in_date" class="w-full border p-2 rounded" placeholder="VD: Vào ở ngay / 2026-09-01">
                     </div>
-                    <!-- 8. Trạng thái phòng -->
                     <div>
                         <label class="block font-bold text-gray-700 mb-1">8. Trạng thái phòng:</label>
                         <select id="status" class="w-full border p-2 rounded font-bold bg-yellow-50">
@@ -194,7 +204,7 @@
                         </select>
                     </div>
 
-                    <!-- 4. THÔNG TIN PHÒNG CHI TIẾT -->
+                    <!-- THÔNG TIN PHÒNG CHI TIẾT -->
                     <div class="md:col-span-3 bg-blue-50 p-3 rounded-md border border-blue-200 grid grid-cols-2 md:grid-cols-4 gap-3">
                         <div class="col-span-full font-bold text-blue-900 border-b border-blue-200 pb-1">
                             4. Thông tin phòng chi tiết:
@@ -282,21 +292,18 @@
                         </div>
                     </div>
 
-                    <!-- 5. Phí dịch vụ -->
                     <div class="md:col-span-2">
                         <label class="block font-bold text-gray-700 mb-1">5. Phí dịch vụ (Điện, nước, internet...):</label>
                         <input type="text" id="service_fees" class="w-full border p-2 rounded" placeholder="VD: Điện 3.8k/số, Nước 100k/người, Mạng 100k/phòng">
                     </div>
-                    <!-- SĐT liên hệ -->
                     <div>
                         <label class="block font-bold text-gray-700 mb-1">SĐT Chủ nhà liên hệ:</label>
                         <input type="text" id="landlord_phone" class="w-full border p-2 rounded" placeholder="VD: 0987654321">
                     </div>
 
-                    <!-- 6. Ảnh, video phòng -->
                     <div class="md:col-span-3">
                         <label class="block font-bold text-gray-700 mb-1">6. Ảnh, Video phòng (URLs phân cách bằng dấu phẩy):</label>
-                        <textarea id="media_urls" rows="2" class="w-full border p-2 rounded" placeholder="https://res.cloudinary.com/.../img1.jpg, https://res.cloudinary.com/.../video.mp4"></textarea>
+                        <textarea id="media_urls" rows="2" class="w-full border p-2 rounded" placeholder="[https://res.cloudinary.com/.../img1.jpg](https://res.cloudinary.com/.../img1.jpg), [https://res.cloudinary.com/.../video.mp4](https://res.cloudinary.com/.../video.mp4)"></textarea>
                     </div>
                 </div>
 
@@ -308,7 +315,7 @@
         </div>
     </div>
 
-    <!-- MODAL ĐỔI MẬT KHẨU -->
+    <!-- MODAL ĐỔI MẬT KHẨU KHU VỰC -->
     <div id="changePasswordModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
         <div class="bg-white rounded-lg p-6 w-full max-w-md">
             <h2 class="text-lg font-bold mb-4 text-gray-800">🔑 Đổi Mật Khẩu Admin</h2>
@@ -333,10 +340,8 @@
 	<!-- MODAL UPLOAD EXCEL / CSV -->
 	<div id="excelModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
 		<div class="bg-white rounded-lg p-6 w-full max-w-md">
-			<!-- TIÊU ĐỀ KHU VỰC TẢI MẪU -->
 			<div class="flex justify-between items-center mb-2">
 				<h2 class="text-lg font-bold text-gray-800">📊 Nhập Danh Sách Phòng</h2>
-				<!-- NÚT TẢI FILE MẪU -->
 				<a href="/api/rooms/download-template" download class="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2 py-1 rounded hover:bg-blue-100 font-semibold flex items-center gap-1">
 					📥 Tải File Mẫu
 				</a>
@@ -404,9 +409,23 @@
             checkAuth();
         }
 
+        // TẢI PHÒNG KÈM BỘ LỌC TỪ API SERVER
         async function loadRooms() {
             try {
-                const res = await fetch(API_URL);
+                const minPrice = document.getElementById("filterMinPrice").value;
+                const maxPrice = document.getElementById("filterMaxPrice").value;
+                const fromDate = document.getElementById("filterFromDate").value;
+                const toDate = document.getElementById("filterToDate").value;
+                const status = document.getElementById("filterStatus").value;
+
+                let url = '/api/admin/rooms?';
+                if (minPrice) url += `min_price=${minPrice}&`;
+                if (maxPrice) url += `max_price=${maxPrice}&`;
+                if (fromDate) url += `from_date=${fromDate}&`;
+                if (toDate) url += `to_date=${toDate}&`;
+                if (status) url += `status=${status}&`;
+
+                const res = await fetch(url);
                 const result = await res.json();
                 allRoomsData = result.data || [];
                 applyFilters();
@@ -473,12 +492,10 @@
             });
         }
 
-        // BỘ LỌC TÌM KIẾM
+        // BỘ LỌC TÌM KIẾM TRÊN CLIENT DÀNH CHO CÁC TRƯỜNG CHỮ
         function applyFilters() {
             const vAddress = document.getElementById("filterAddress").value.toLowerCase().trim();
             const vRoomName = document.getElementById("filterRoomName").value.toLowerCase().trim();
-            const vPrice = document.getElementById("filterPrice").value.toLowerCase().trim();
-            const vStatus = document.getElementById("filterStatus").value;
             const vBathroom = document.getElementById("filterBathroom").value;
             const vAC = document.getElementById("filterAC").value;
             const vPets = document.getElementById("filterPets").value;
@@ -487,15 +504,12 @@
             const filtered = allRoomsData.filter(r => {
                 const matchAddress = !vAddress || (r.address && r.address.toLowerCase().includes(vAddress));
                 const matchRoomName = !vRoomName || (r.room_name && r.room_name.toLowerCase().includes(vRoomName));
-                const matchPrice = !vPrice || (r.price && r.price.toLowerCase().includes(vPrice));
-                const matchStatus = !vStatus || r.status === vStatus;
                 const matchBathroom = !vBathroom || r.is_private_bathroom === vBathroom;
                 const matchAC = !vAC || r.has_ac === vAC;
                 const matchPets = !vPets || r.allow_pets === vPets;
                 const matchPhone = !vPhone || (r.landlord_phone && r.landlord_phone.includes(vPhone));
 
-                return matchAddress && matchRoomName && matchPrice && matchStatus && 
-                       matchBathroom && matchAC && matchPets && matchPhone;
+                return matchAddress && matchRoomName && matchBathroom && matchAC && matchPets && matchPhone;
             });
 
             renderTable(filtered);
@@ -504,14 +518,24 @@
         function resetFilters() {
             document.getElementById("filterAddress").value = "";
             document.getElementById("filterRoomName").value = "";
-            document.getElementById("filterPrice").value = "";
+            document.getElementById("filterMinPrice").value = "";
+            document.getElementById("filterMaxPrice").value = "";
+            document.getElementById("filterFromDate").value = "";
+            document.getElementById("filterToDate").value = "";
             document.getElementById("filterStatus").value = "";
             document.getElementById("filterBathroom").value = "";
             document.getElementById("filterAC").value = "";
             document.getElementById("filterPets").value = "";
             document.getElementById("filterPhone").value = "";
-            applyFilters();
+            loadRooms();
         }
+
+        // Tự động gọi lại API nạp lại danh sách phòng khi nhập Giá hoặc Ngày ở
+        document.getElementById("filterMinPrice").addEventListener("change", loadRooms);
+        document.getElementById("filterMaxPrice").addEventListener("change", loadRooms);
+        document.getElementById("filterFromDate").addEventListener("change", loadRooms);
+        document.getElementById("filterToDate").addEventListener("change", loadRooms);
+        document.getElementById("filterStatus").addEventListener("change", loadRooms);
 
         function toggleFilterPanel() {
             const panel = document.getElementById("filterPanel");
@@ -630,7 +654,6 @@
             document.getElementById("roomModal").classList.remove("hidden");
         }
 
-        // ĐỔI MẬT KHẨU LOGIC
         function openChangePasswordModal() {
             document.getElementById("oldPass").value = "";
             document.getElementById("newPass").value = "";
@@ -668,7 +691,6 @@
             }
         }
 
-        // UPLOAD EXCEL LOGIC
         function openExcelModal() {
             document.getElementById("excelFileInput").value = "";
             document.getElementById("uploadMsg").classList.add("hidden");
