@@ -329,23 +329,33 @@
         </div>
     </div>
 
-    <!-- MODAL UPLOAD EXCEL / CSV -->
-    <div id="excelModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-        <div class="bg-white rounded-lg p-6 w-full max-w-md">
-            <h2 class="text-lg font-bold mb-2 text-gray-800">📊 Nhập Danh Sách Phòng Tự Động Từ Excel / CSV</h2>
-            <p class="text-xs text-gray-500 mb-4">Các cột cần có trong file Excel/CSV: <i>Địa chỉ, Tên phòng, Giá thuê, Tầng, WC khép kín, Điều hòa, Nóng lạnh, Máy giặt, Cho nuôi thú cưng, Phí dịch vụ, SĐT chủ nhà,...</i></p>
-            <form onsubmit="handleUploadExcel(event)">
-                <div class="mb-4">
-                    <input type="file" id="excelFileInput" accept=".xlsx, .xls, .csv" required class="w-full border p-2 rounded text-sm">
-                </div>
-                <div id="uploadMsg" class="hidden text-xs p-2 rounded mb-4 text-center"></div>
-                <div class="flex justify-end gap-2">
-                    <button type="button" onclick="closeExcelModal()" class="px-4 py-2 border rounded text-sm">Hủy</button>
-                    <button type="submit" id="btnSubmitExcel" class="px-4 py-2 bg-emerald-600 text-white rounded text-sm font-medium hover:bg-emerald-700">Tải Lên & Nhập</button>
-                </div>
-            </form>
-        </div>
-    </div>
+	<!-- MODAL UPLOAD EXCEL / CSV -->
+	<div id="excelModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+		<div class="bg-white rounded-lg p-6 w-full max-w-md">
+			<!-- TIÊU ĐỀ KHU VỰC TẢI MẪU -->
+			<div class="flex justify-between items-center mb-2">
+				<h2 class="text-lg font-bold text-gray-800">📊 Nhập Danh Sách Phòng</h2>
+				<!-- NÚT TẢI FILE MẪU -->
+				<a href="/api/rooms/download-template" download class="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2 py-1 rounded hover:bg-blue-100 font-semibold flex items-center gap-1">
+					📥 Tải File Mẫu
+				</a>
+			</div>
+			<p class="text-xs text-gray-500 mb-4">
+				Tải tệp mẫu về điền thông tin hoặc chọn tệp Excel/CSV có sẵn để AI kiểm tra và nhập vào hệ thống.
+			</p>
+			
+			<form onsubmit="handleUploadExcel(event)">
+				<div class="mb-4">
+					<input type="file" id="excelFileInput" accept=".xlsx, .xls, .csv" required class="w-full border p-2 rounded text-sm">
+				</div>
+				<div id="uploadMsg" class="hidden text-xs p-2 rounded mb-4 text-center"></div>
+				<div class="flex justify-end gap-2">
+					<button type="button" onclick="closeExcelModal()" class="px-4 py-2 border rounded text-sm">Hủy</button>
+					<button type="submit" id="btnSubmitExcel" class="px-4 py-2 bg-emerald-600 text-white rounded text-sm font-medium hover:bg-emerald-700">Tải Lên & Nhập</button>
+				</div>
+			</form>
+		</div>
+	</div>
 
     <!-- JAVASCRIPT LOGIC -->
     <script>
