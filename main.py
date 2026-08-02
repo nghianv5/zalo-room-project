@@ -299,22 +299,21 @@ def delete_room_from_web(point_id: str):
 # --- HÀM AI DÙNG GEMINI KIỂM TRA & CHUẨN HÓA DỮ LIỆU ---
 def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
     """
-    Sử dụng Gemini để kiểm tra, sửa lỗi văn bản và chuẩn hóa dữ liệu hàng từ Excel/CSV.
-    Có tích hợp Fallback thủ công nếu Gemini API gặp sự cố.
+    Sử dụng Gemini để kiểm tra và chuẩn hóa dữ liệu Excel.
+    Nếu AI lỗi, tự động chuyển sang Fallback thủ công.
     """
-    
-    # --- 1. XỬ LÝ FALLBACK THỦ CÔNG (Nếu không có Gemini API Key) ---
     def manual_fallback(data: dict) -> Optional[dict]:
-        # Tự động quét các biến thể tên cột địa chỉ bằng tiếng Việt/tiếng Anh
+        # Bóc tách địa chỉ linh hoạt từ nhiều tên cột tiếng Việt
         raw_address = (
             data.get("address") or 
             data.get("Địa chỉ") or 
             data.get("1. Địa chỉ") or 
-            data.get("Địa chỉ & Tên phòng")
+            data.get("Địa chỉ & Tên phòng") or
+            data.get("1. Địa chỉ & 2. Tên phòng")
         )
         
-        # Nếu không có địa chỉ hoặc giá trị rác/NaN thì loại bỏ dòng này
-        if not raw_address or pd.isna(raw_address) or str(raw_address).strip().lower() in ["nan", "none", "null", ""]:
+        # Nếu dòng hoàn toàn trống địa chỉ thì bỏ qua
+        if not raw_address or pd.isna(raw_address) or str(raw_address).strip().lower() in ["nan", "none", "null", "", "chưa rõ"]:
             return None
 
         return {
@@ -340,11 +339,9 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
             "media_urls": []
         }
 
-    # Nếu chưa khởi tạo gemini_client thì gọi ngay fallback thủ công
     if not gemini_client:
         return manual_fallback(row_dict)
 
-    # --- 2. GỌI GEMINI AI XỬ LÝ VÀ CHUẨN HÓA DỮ LIỆU ---
     prompt = f"""
     Bạn là một trợ lý AI kiểm định dữ liệu phòng trọ. 
     Hãy phân tích dữ liệu đầu vào từ 1 dòng file Excel sau đây và chuyển thành JSON chuẩn.
@@ -353,13 +350,13 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
     {json.dumps(row_dict, ensure_ascii=False)}
 
     Yêu cầu chuẩn hóa:
-    - "address": Địa chỉ chi tiết (nếu không có địa chỉ cụ thể hoặc là dữ liệu rác/trống, hãy trả về null).
+    - "address": Địa chỉ chi tiết (nếu không có địa chỉ cụ thể hoặc dữ liệu trống/rác, trả về null).
     - "room_name": Tên/số phòng (mặc định "Phòng trọ" nếu thiếu).
-    - "price": Giá thuê (ví dụ: "3.5 triệu/tháng").
-    - "is_private_bathroom", "has_ac", "has_heater", "has_washer", "allow_pets", "has_balcony", "has_window", "has_fingerprint_lock": Chỉ trả về đúng 1 trong 3 giá trị: "Có", "Không", hoặc "Chưa rõ".
-    - "status": Chỉ trả về "TRỐNG" hoặc "ĐÃ CHO THUÊ".
+    - "price": Giá thuê.
+    - "is_private_bathroom", "has_ac", "has_heater", "has_washer", "allow_pets", "has_balcony", "has_window", "has_fingerprint_lock": Trả về đúng 1 trong 3 giá trị: "Có", "Không", hoặc "Chưa rõ".
+    - "status": Trả về "TRỐNG" hoặc "ĐÃ CHO THUÊ".
 
-    Format JSON duy nhất cần trả về:
+    Format JSON duy nhất:
     {{
         "address": string hoặc null,
         "room_name": string,
@@ -386,8 +383,7 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
     
     try:
         response = gemini_client.models.generate_content(
-            # Đổi sang tên model chuẩn hỗ trợ hiện tại
-            model="gemini-2.0-flash", 
+            model="gemini-1.5-flash", # Đã cập nhật sang model ổn định
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json"
@@ -396,19 +392,15 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
         
         if response and response.text:
             raw_text = response.text.strip()
-            
-            # Xóa các vạch markdown ```json ... ``` nếu Gemini lỡ sinh ra
             if raw_text.startswith("```"):
                 raw_text = re.sub(r"^```(?:json)?\n?", "", raw_text)
                 raw_text = re.sub(r"\n?```$", "", raw_text)
                 
-            cleaned_data = json.loads(raw_text)
-            return cleaned_data
+            return json.loads(raw_text)
             
     except Exception as e:
         print("⚠️ Lỗi AI Validation, chuyển sang Fallback thủ công:", e)
     
-    # Nếu Gemini API bị lỗi, gọi Fallback để không làm gián đoạn việc lưu Excel
     return manual_fallback(row_dict)
 
 # --- API UPLOAD EXCEL / CSV CÓ AI CHECK ---
@@ -434,22 +426,18 @@ async def upload_excel_rooms(file: UploadFile = File(...)):
 
     for _, row in df.iterrows():
         raw_row_dict = row.to_dict()
-        print("ai_validate_and_extract_room")
         # 1. Gọi AI Kiểm tra và Chuẩn hóa dữ liệu
         validated_data = ai_validate_and_extract_room(raw_row_dict)
 
         # 2. Kiểm tra nếu AI phát hiện dữ liệu không hợp lệ (không có địa chỉ)
         if not validated_data or not validated_data.get("address"):
-            print("Khong co dia chi")
             ai_rejected_count += 1
             continue
 
         # 3. Tiến hành Lưu vào Database (Qdrant)
         if upsert_room_to_db(data=validated_data, zalo_user_id="EXCEL_AI_IMPORT"):
-            print("upsert_room_to_db success")
             success_count += 1
         else:
-            print("upsert_room_to_db fail")
             fail_count += 1
 
     return {
