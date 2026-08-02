@@ -87,7 +87,7 @@ gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 import google.genai
 import importlib.metadata
-
+print("google-genai")
 print(importlib.metadata.version("google-genai"))
 
     
