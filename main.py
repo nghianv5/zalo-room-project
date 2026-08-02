@@ -171,7 +171,7 @@ async def get_rooms_filter(
         limit=50
     )[0]
 
-    return [rec.payload for rec.payload in records]
+    return [rec.payload for rec in records]
     
 def parse_price_to_number(price_str: str) -> float:
     """
