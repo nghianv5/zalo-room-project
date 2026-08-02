@@ -481,6 +481,37 @@ def search_rooms_by_vector(query_text: str, top_k: int = 5) -> List[dict]:
         print("❌ [VECTOR SEARCH ERROR]:", e)
         return []
 
+# --- 4. TƯƠNG TÁC GEMINI GENERATIVE ---
+def generate_content_with_retry(prompt: str, mime_type: str = "application/json", retries: int = 3) -> str:
+    if not gemini_client:
+        return ""
+
+    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
+
+    for model_name in models_to_try:
+        for attempt in range(retries):
+            try:
+                config = types.GenerateContentConfig()
+                if mime_type:
+                    config.response_mime_type = mime_type
+
+                response = gemini_client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=config
+                )
+                if response and response.text:
+                    return response.text.strip()
+
+            except Exception as e:
+                err_msg = str(e)
+                if "503" in err_msg or "429" in err_msg or "UNAVAILABLE" in err_msg:
+                    time.sleep(2 ** attempt)
+                else:
+                    print(f"❌ [GEMINI ERROR]: Model '{model_name}': {e}")
+                    break
+
+    return ""
 
 def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
     access_token = os.environ.get("ZALO_ACCESS_TOKEN")
