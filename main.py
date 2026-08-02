@@ -443,6 +443,45 @@ def add_pending_media(user_id: str, new_urls: list):
     }
 
 
+# --- 5. TƯƠNG TÁC DATABASE QDRANT (CẬP NHẬT QUERY_POINTS) ---
+# --- SỬA HÀM search_rooms_by_vector ---
+def search_rooms_by_vector(query_text: str, top_k: int = 5) -> List[dict]:
+    query_vector = get_text_embedding(query_text)
+    
+    if not query_vector:
+        try:
+            records, _ = qdrant_client.scroll(collection_name=COLLECTION_NAME, limit=top_k, with_payload=True)
+            results = []
+            for rec in records:
+                if rec.payload:
+                    p = rec.payload
+                    p["id"] = rec.id  # <--- GÁN THÊM ID VÀO DỰ PHÒNG
+                    results.append(p)
+            return results
+        except Exception as e:
+            print("❌ Lỗi scroll dự phòng:", e)
+            return []
+
+    try:
+        search_result = qdrant_client.query_points(
+            collection_name=COLLECTION_NAME,
+            query=query_vector,
+            limit=top_k,
+            with_payload=True
+        )
+        
+        results = []
+        for hit in search_result.points:
+            if hit.payload:
+                p = hit.payload
+                p["id"] = hit.id  # <--- THÊM DÒNG NÀY: Lưu lại Point ID thực tế của Qdrant
+                results.append(p)
+        return results
+    except Exception as e:
+        print("❌ [VECTOR SEARCH ERROR]:", e)
+        return []
+
+
 def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
     access_token = os.environ.get("ZALO_ACCESS_TOKEN")
     if not access_token:
