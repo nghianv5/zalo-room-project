@@ -5,6 +5,9 @@ from typing import Dict, Optional
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
 
+
+# 👈 Đổi/Thêm dòng này
+router = APIRouter(tags=["Auth"])
 # --- BỘ NHỚ TẠM LƯU MÃ OTP KHÔI PHỤC MẬT KHẨU ---
 FORGOT_PASSWORD_OTP_CACHE: Dict[str, dict] = {} # { "phone": {"otp": "123456", "expire": timestamp} }
 
@@ -41,7 +44,7 @@ def get_zalo_id_by_phone(phone: str) -> Optional[str]:
 
 
 # --- 1. API ĐĂNG NHẬP USER ---
-@app.post("/api/user/login")
+@router.post("/api/user/login")
 def user_login(data: UserLoginSchema):
     phone = data.phone.strip()
     password = data.password.strip()
@@ -63,8 +66,8 @@ def user_login(data: UserLoginSchema):
 
 
 # --- 2. API YÊU CẦU GỬI OTP QUA ZALO OA ---
-@app.post("/api/user/request-reset-otp")
-def request_reset_otp(data: RequestOTPSchema):
+@router.post("/api/user/login")
+def user_login(data: UserLoginSchema):
     phone = data.phone.strip()
     if not phone:
         raise HTTPException(status_code=400, detail="Vui lòng nhập số điện thoại!")
@@ -101,7 +104,7 @@ def request_reset_otp(data: RequestOTPSchema):
 
 
 # --- 3. API XÁC NHẬN OTP & ĐỔI MẬT KHẨU MỚI ---
-@app.post("/api/user/reset-password")
+@router.post("/api/user/reset-password")
 def reset_password(data: ResetPasswordSchema):
     phone = data.phone.strip()
     otp = data.otp.strip()
@@ -141,6 +144,6 @@ def reset_password(data: ResetPasswordSchema):
 
 
 # --- ROUTE RENDER GIAO DIỆN ---
-@app.get("/login-user", response_class=HTMLResponse)
+@router.get("/login-user", response_class=HTMLResponse)
 def login_user_page(request: Request):
     return templates.TemplateResponse(request=request, name="login_user.html")
