@@ -24,6 +24,10 @@ import re
 from qdrant_client.http import models
 import pytz
 
+from user_login import router as auth_router # 👈 Import router
+app = FastAPI()
+app.include_router(auth_router)
+
 app = FastAPI()
 
 VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
