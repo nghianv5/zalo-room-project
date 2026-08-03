@@ -851,7 +851,7 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
                 # ❌ KHÔNG TRUYỀN existing_point_id KHI THÊM MỚI PHÒNG
                 # Điều này đảm bảo phòng mới độc lập 100%, không bao giờ xóa nhầm các phòng cũ có địa chỉ tương tự
                 upsert_room_to_db(
-                    extracted_data=extracted,
+                    data=extracted,
                     media_urls=all_current_media,
                     point_id=None, # Ép tạo phòng độc lập
                     zalo_user_id=user_id
@@ -873,7 +873,7 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
             if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
                 # Truyền existing_point_id vào để nếu ĐỔI ĐỊA CHỈ thì sẽ xóa record cũ
                 upsert_room_to_db(
-                    extracted_data=extracted,
+                    data=extracted,
                     media_urls=all_current_media,
                     point_id=existing_point_id,
                     zalo_user_id=user_id
