@@ -400,6 +400,9 @@ def get_all_rooms(
             with_vectors=False
         )
         results = []
+        
+        print(" get_all_rooms", records)
+        
         for r in records:
             p = r.payload or {}
 
