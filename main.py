@@ -292,7 +292,12 @@ def get_text_embedding(text: str, retries: int = 3) -> List[float]:
 
     return []
 
-def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYSTEM") -> bool:
+def upsert_room_to_db(
+    data: dict, 
+    point_id: str = None, 
+    zalo_user_id: str = "SYSTEM",
+    media_urls: Optional[List[str]] = None  # ✅ Thêm tham số này để nhận media_urls truyền vào
+) -> bool:
     try:
         address = str(data.get("address", "")).strip()
         room_name = str(data.get("room_name", "Phòng trọ")).strip()
@@ -301,13 +306,21 @@ def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYS
         if not address:
             return False
 
+        # Nếu có media_urls truyền rời thì ưu tiên dùng, nếu không thì lấy từ trong dict 'data'
+        if media_urls is not None:
+            media_list = media_urls
+        else:
+            media_list = data.get("media_urls", [])
+
+        if isinstance(media_list, str):
+            media_list = [x.strip() for x in media_list.split(",") if x.strip()]
+
         # Gom văn bản tổng hợp để làm vector hóa tìm kiếm
         text_to_embed = f"Địa chỉ: {address} Tên phòng: {room_name} Giá: {data.get('price', '')} Đồ đạc: AC:{data.get('has_ac')}, Heater:{data.get('has_heater')}, Washer:{data.get('has_washer')}, {data.get('other_amenities', '')} Phí dịch vụ: {data.get('service_fees', '')}"
         vector = get_text_embedding(text_to_embed)
         if not vector:
             return False
 
-        # Lấy thời gian hiện tại chuẩn Giờ Việt Nam
         now_vn = datetime.now(VN_TZ)
         now_str = now_vn.strftime("%Y-%m-%d %H:%M:%S")
         created_at = now_str
@@ -323,18 +336,11 @@ def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYS
         else:
             new_point_id = str(uuid.uuid4())
 
-        media_list = data.get("media_urls", [])
-        if isinstance(media_list, str):
-            media_list = [x.strip() for x in media_list.split(",") if x.strip()]
-
-        # Lấy chuỗi giá từ AI hoặc Fallback thủ công
+        # Lấy giá và tính toán timestamp
         raw_price = data.get("price", "")
-
-        # Tạo trường giá dạng số để lọc/tìm kiếm
         price_number = parse_price_to_number(raw_price)
-        # Parse timestamp cho ngày chuyển vào ở
         move_in_ts = parse_move_in_date(data.get("move_in_date"))
-        # Tìm đoạn khởi tạo payload trong upsert_room_to_db và sửa lại thành:
+
         payload = {
             "address": address,
             "room_name": room_name,
