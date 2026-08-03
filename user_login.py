@@ -1,4 +1,9 @@
+from pydantic import BaseModel
+import time
 import random
+from typing import Dict, Optional
+from fastapi import APIRouter, HTTPException, Request
+from fastapi.responses import HTMLResponse
 
 # --- BỘ NHỚ TẠM LƯU MÃ OTP KHÔI PHỤC MẬT KHẨU ---
 FORGOT_PASSWORD_OTP_CACHE: Dict[str, dict] = {} # { "phone": {"otp": "123456", "expire": timestamp} }
