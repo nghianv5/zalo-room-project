@@ -60,6 +60,7 @@ CACHE_TTL_SECONDS = 600  # Bộ nhớ đệm tự hủy sau 10 phút
 class RegisterUserSchema(BaseModel):
     phone: str
     password: str
+    otp: str
 
 class RequestOTPSchema(BaseModel):
     phone: str
@@ -118,7 +119,7 @@ async def register_user(req: RegisterUserSchema):
     otp = req.otp.strip()
 
     # 1. Kiểm tra OTP từ cache Zalo (do request_register_otp tạo ra)
-    cached_otp = FORGOT_PASSWORD_OTP_CACHE.get(phone)
+    cached_otp = FORGOT_PASSWORD_OTP_CACHE.get(f"REGISTER_{phone}")
     if not cached_otp or str(cached_otp) != otp:
         raise HTTPException(status_code=400, detail="Mã OTP Zalo không chính xác hoặc đã hết hạn!")
 

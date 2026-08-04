@@ -203,46 +203,6 @@
 	</div>
 
 
-	<!-- ================= 2. MODAL ĐĂNG KÝ MỚI (Thêm mới) ================= -->
-	<div id="registerModal" class="hidden fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-	  <div class="bg-white p-6 rounded-xl shadow-2xl w-96 max-w-full">
-		<h2 class="text-xl font-bold mb-4 text-center text-gray-800">ĐĂNG KÝ TÀI KHOẢN</h2>
-		
-		<!-- SĐT + Nút gửi OTP Zalo -->
-		<div class="mb-3">
-		  <label class="block text-sm font-medium text-gray-700 mb-1">Số điện thoại (Đã quan tâm OA)</label>
-		  <div class="flex gap-2">
-			<input type="text" id="regPhone" class="w-full border rounded p-2 outline-none" placeholder="09xxxxxxx">
-			<button onclick="handleRequestOTP()" class="bg-indigo-600 hover:bg-indigo-700 text-white text-xs px-3 py-2 rounded font-semibold whitespace-nowrap">
-			  Gửi OTP Zalo
-			</button>
-		  </div>
-		</div>
-
-		<!-- Nhập OTP -->
-		<div class="mb-3">
-		  <label class="block text-sm font-medium text-gray-700 mb-1">Mã OTP Zalo (6 số)</label>
-		  <input type="text" id="regOTP" class="w-full border rounded p-2 outline-none" placeholder="Nhập mã OTP từ Zalo">
-		</div>
-
-		<!-- Nhập Mật khẩu -->
-		<div class="mb-4">
-		  <label class="block text-sm font-medium text-gray-700 mb-1">Mật khẩu mới</label>
-		  <input type="password" id="regPassword" class="w-full border rounded p-2 outline-none" placeholder="Tạo mật khẩu">
-		</div>
-
-		<button onclick="handleRegister()" class="w-full bg-green-600 hover:bg-green-700 text-white font-bold py-2 rounded mb-3">
-		  Xác nhận Đăng ký
-		</button>
-
-		<div class="text-center text-sm text-gray-600">
-		  Đã có tài khoản? 
-		  <button onclick="switchToLogin()" class="text-blue-600 font-bold hover:underline">
-			Đăng nhập
-		  </button>
-		</div>
-	  </div>
-	</div>
 	
     <!-- MODAL FORM THÊM / SỬA PHÒNG -->
     <div id="roomModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
@@ -599,10 +559,6 @@
 			} catch (err) {
 				console.error("Lỗi tải phòng:", err);
 			}
-		}
-		
-		}
-
 		}
 
 		
