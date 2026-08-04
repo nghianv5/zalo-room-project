@@ -347,38 +347,43 @@
         </div>
     </div>
 
-	<!-- ================= MODAL ĐĂNG KÝ USER QUA ZALO OA (LUỒNG MIỄN PHÍ) ================= -->
+	<!-- ================= MODAL ĐĂNG KÝ USER QUA ZALO OA ================= -->
 	<div id="registerModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
 	  <div class="bg-white p-6 rounded-lg w-96 max-w-full shadow-lg max-h-[90vh] overflow-y-auto">
 		<h2 class="text-xl font-bold mb-2">Đăng ký tài khoản User</h2>
-        <p class="text-xs text-gray-500 mb-4">Quét QR hoặc bấm nút mở Zalo OA để nhận mã OTP miễn phí</p>
+		<p class="text-xs text-gray-500 mb-4">Nhập số điện thoại để nhận mã xác thực OTP từ Zalo OA</p>
 		
-		<!-- Bước 1: Số điện thoại & Mở Zalo Chat -->
+		<!-- Bước 1: Số điện thoại & Nút Nhận OTP -->
 		<label class="block mb-1 text-sm font-medium">1. Số điện thoại đăng ký</label>
-		<input type="text" id="regPhone" class="w-full border p-2 rounded mb-3" placeholder="Nhập số điện thoại (VD: 0912345678)">
+		<div class="flex gap-2 mb-3">
+			<input type="text" id="regPhone" class="w-full border p-2 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="VD: 0912345678">
+			<button type="button" id="btnSendOTP" onclick="handleRequestOTP()" class="bg-blue-600 hover:bg-blue-700 text-white font-bold text-xs px-3 py-2 rounded whitespace-nowrap transition-all">
+				Gửi OTP
+			</button>
+		</div>
 
-        <!-- KHU VỰC HIỂN THỊ QR VÀ NÚT MỞ ZALO -->
-        <div class="mb-4 bg-blue-50 p-3 rounded-md border border-blue-100 text-center flex flex-col items-center">
-            <p class="text-xs text-blue-800 font-medium mb-3">Quét mã QR bằng ứng dụng Zalo, sau đó ấn <b>"Quan tâm"</b> hoặc nhắn <b>"OTP"</b></p>
-            
-            <!-- HIỂN THỊ MÃ QR TỰ ĐỘNG -->
-            <img id="zaloQRCode" src="" alt="Mã QR Zalo OA" class="w-32 h-32 mb-3 bg-white p-1 border rounded shadow-sm">
-			
-        </div>
+		<!-- KHU VỰC DỰ PHÒNG: QUÉT QR (Nếu chưa đăng ký ZNS) -->
+		<div class="mb-4 bg-blue-50 p-3 rounded-md border border-blue-100 text-center flex flex-col items-center">
+			<p class="text-xs text-blue-800 font-medium mb-2">Trường hợp không nhận được tin nhắn Zalo:</p>
+			<img id="zaloQRCode" src="" alt="Mã QR Zalo OA" class="w-28 h-28 mb-2 bg-white p-1 border rounded shadow-sm">
+			<button onclick="openZaloToGetOTP()" class="w-full py-1.5 px-3 bg-blue-500 hover:bg-blue-600 text-white rounded font-bold text-xs flex items-center justify-center gap-1">
+			   📲 Mở ứng dụng Zalo
+			</button>
+		</div>
 
 		<!-- Bước 2: Nhập OTP và Mật khẩu -->
 		<label class="block mb-1 text-sm font-medium">2. Mã OTP nhận từ Zalo</label>
-		<input type="text" id="regOTP" class="w-full border p-2 rounded mb-3" placeholder="Nhập 6 số OTP Zalo đã gửi">
+		<input type="text" id="regOTP" class="w-full border p-2 rounded mb-3 text-sm" placeholder="Nhập 6 số OTP">
 
 		<label class="block mb-1 text-sm font-medium">3. Mật khẩu mới</label>
-		<input type="password" id="regPassword" class="w-full border p-2 rounded mb-4" placeholder="Nhập mật khẩu">
+		<input type="password" id="regPassword" class="w-full border p-2 rounded mb-4 text-sm" placeholder="Nhập mật khẩu">
 
 		<div class="flex justify-between items-center pt-2 border-t">
 		  <button onclick="switchToLogin()" class="text-xs text-gray-500 hover:underline">Quay lại Đăng nhập</button>
-          <div class="flex gap-2">
-		    <button onclick="closeRegisterModal()" class="px-3 py-1.5 border rounded text-xs">Hủy</button>
-		    <button onclick="handleRegister()" class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white font-bold rounded text-xs">Xác nhận Đăng ký</button>
-          </div>
+		  <div class="flex gap-2">
+			<button onclick="closeRegisterModal()" class="px-3 py-1.5 border rounded text-xs">Hủy</button>
+			<button onclick="handleRegister()" class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white font-bold rounded text-xs">Xác nhận Đăng ký</button>
+		  </div>
 		</div>
 	  </div>
 	</div>
@@ -466,32 +471,70 @@
 			document.getElementById('loginModal').classList.remove('hidden');
 		}
 
-		// 1. Gửi OTP qua Zalo OA
+		// Hàm gửi yêu cầu nhận OTP tới Backend & Tạo hiệu ứng Đếm ngược 60 giây
 		async function handleRequestOTP() {
-			const phone = document.getElementById('regPhone').value.trim();
-			if (!phone) {
-				alert("Vui lòng nhập Số điện thoại!");
+			const phoneInput = document.getElementById('regPhone');
+			const btnSend = document.getElementById('btnSendOTP');
+			const phone = phoneInput.value.trim();
+
+			if (!phone || phone.length < 9) {
+				alert("Vui lòng nhập đúng Số điện thoại!");
+				phoneInput.focus();
 				return;
 			}
+
+			// Khóa nút để tránh bấm liên tục
+			btnSend.disabled = true;
+			btnSend.classList.add('opacity-50', 'cursor-not-allowed');
+			btnSend.innerText = "Đang gửi...";
 
 			try {
 				const res = await fetch('/api/user/request-register-otp', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ phone })
+					body: JSON.stringify({ phone: phone })
 				});
+				
 				const data = await res.json();
 
 				if (res.ok) {
-					alert("Mã OTP đã gửi về Zalo của bạn. Hãy kiểm tra tin nhắn!");
+					alert("✅ Mã OTP đã được gửi tới Zalo của số " + phone + ". Vui lòng kiểm tra tin nhắn Zalo!");
+					startOTPCountdown(60); // Đếm ngược 60s trước khi cho gửi lại
 				} else {
-					alert(data.detail || "Không thể gửi OTP. Hãy đảm bảo SĐT này đã Bấm Quan Tâm Zalo OA!");
+					alert("⚠️ " + (data.detail || "Không thể gửi OTP. Hãy kiểm tra lại SĐT hoặc quét mã QR!"));
+					resetOTPButton();
 				}
 			} catch (err) {
-				alert("Lỗi kết nối máy chủ khi gửi OTP!");
+				console.error("Lỗi:", err);
+				alert("❌ Lỗi kết nối tới máy chủ khi gửi OTP!");
+				resetOTPButton();
 			}
 		}
+		
+		// Hàm đếm ngược thời gian chờ gửi lại OTP
+		function startOTPCountdown(seconds) {
+			const btnSend = document.getElementById('btnSendOTP');
+			let timeLeft = seconds;
 
+			const timer = setInterval(() => {
+				if (timeLeft <= 0) {
+					clearInterval(timer);
+					resetOTPButton();
+				} else {
+					btnSend.innerText = `Thử lại (${timeLeft}s)`;
+					timeLeft--;
+				}
+			}, 1000);
+		}
+		
+		// Khôi phục nút Gửi OTP
+		function resetOTPButton() {
+			const btnSend = document.getElementById('btnSendOTP');
+			btnSend.disabled = false;
+			btnSend.classList.remove('opacity-50', 'cursor-not-allowed');
+			btnSend.innerText = "Gửi OTP";
+		}
+		
 		// 2. Xác nhận Đăng ký
 		async function handleRegister() {
 			const phone = document.getElementById('regPhone').value.trim();

@@ -189,40 +189,64 @@ async def login_user(req: LoginUserSchema):
         "role": user_data.get("role", "USER")
     }
 
+ZALO_ACCESS_TOKEN = os.environ.get("ZALO_ACCESS_TOKEN")  # Token cấp từ Zalo OA
+ZALO_TEMPLATE_ID = os.environ.get("YOUR_ZNS_TEMPLATE_ID")      # ID mẫu tin nhắn OTP đã được Zalo duyệt
+
+class RequestOTPModel(BaseModel):
+    phone: str
+
+def format_vietnam_phone(phone: str) -> str:
+    """Chuyển số điện thoại về dạng 84xxx cho Zalo API"""
+    phone = phone.strip()
+    if phone.startswith("0"):
+        return "84" + phone[1:]
+    return phone
+
 @app.post("/api/user/request-register-otp")
-def request_register_otp(data: RequestOTPSchema):
-    phone = data.phone.strip()
-    
-    if not phone:
-        raise HTTPException(status_code=400, detail="Vui lòng nhập số điện thoại!")
+async def request_register_otp(data: RequestOTPModel):
+    raw_phone = data.phone
+    if not raw_phone or len(raw_phone) < 9:
+        raise HTTPException(status_code=400, detail="Số điện thoại không hợp lệ")
 
-    # 🛑 1. CHECK CHỐNG TRÙNG SĐT
-    if check_phone_exists(phone):
-        raise HTTPException(
-            status_code=400, 
-            detail="Số điện thoại này đã được đăng ký tài khoản! Vui lòng đăng nhập hoặc chọn 'Quên mật khẩu'."
-        )
-
-    # 2. Lấy zalo_user_id tương ứng
-    zalo_id = get_zalo_id_by_phone(phone)
-    if not zalo_id or zalo_id in ["SYSTEM", "ADMIN_WEB"]:
-        raise HTTPException(
-            status_code=404, 
-            detail="Chưa tìm thấy Zalo của bạn! Vui lòng nhắn tin cho Zalo OA của chúng tôi trước để xác nhận SĐT."
-        )
-
-    # 3. Tạo và gửi OTP qua Zalo
+    # 1. Tạo OTP ngẫu nhiên 6 chữ số
     otp_code = str(random.randint(100000, 999999))
-    FORGOT_PASSWORD_OTP_CACHE[f"REGISTER_{phone}"] = {
-        "otp": otp_code,
-        "expire": time.time() + 300
+    otp_storage[raw_phone] = otp_code  # Lưu lại để đối chiếu khi user bấm Đăng ký
+
+    # 2. Định dạng lại SĐT sang chuẩn quốc tế (84...)
+    formatted_phone = format_vietnam_phone(raw_phone)
+
+    # 3. Gọi Zalo ZNS API để gửi OTP
+    zalo_url = "https://business.openapi.zalo.me/message/template"
+    headers = {
+        "access_token": ZALO_ACCESS_TOKEN,
+        "Content-Type": "json"
+    }
+    payload = {
+        "phone": formatted_phone,
+        "template_id": ZALO_TEMPLATE_ID,
+        "template_data": {
+            "otp": otp_code  # Tên biến trong Template ZNS của bạn
+        },
+        "tracking_id": f"otp_{raw_phone}_{otp_code}"
     }
 
-    msg = f"🔑 [MÃ XÁC NHẬN ĐĂNG KÝ]\nMã OTP của bạn là: {otp_code}\nHiệu lực trong 5 phút."
-    send_zalo_message(user_id=zalo_id, ai_reply=msg)
+    try:
+        response = requests.post(zalo_url, json=payload, headers=headers, timeout=10)
+        res_data = response.json()
 
-    return {"status": "success", "message": "Mã OTP đăng ký đã được gửi qua Zalo OA!"}
-
+        # Mã lỗi 0 nghĩa là Zalo đã tiếp nhận gửi tin nhắn thành công
+        if res_data.get("error") == 0:
+            return {"message": "Mã OTP đã được gửi thành công qua Zalo!"}
+        else:
+            # Nếu dùng Zalo OA thường (chưa đăng ký ZNS), hiển thị hướng dẫn fallback
+            print(f"Lỗi Zalo ZNS: {res_data}")
+            raise HTTPException(
+                status_code=400, 
+                detail=f"Chưa gửi được ZNS ({res_data.get('message')}). Bạn vui lòng quét mã QR/nhắn Zalo OA trước!"
+            )
+    except Exception as e:
+        print(f"Exception khi gửi Zalo OTP: {e}")
+        raise HTTPException(status_code=500, detail="Lỗi kết nối tới hệ thống gửi tin Zalo")
 def check_phone_exists(phone: str) -> bool:
     """
     Kiểm tra xem Số điện thoại đã được tạo tài khoản (có mật khẩu) chưa.
