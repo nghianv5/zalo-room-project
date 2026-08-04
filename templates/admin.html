@@ -316,20 +316,31 @@
         </div>
     </div>
 
-	<!-- Modal Đăng ký User -->
+	<!-- Modal Đăng ký User có OTP -->
 	<div id="registerModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
 	  <div class="bg-white p-6 rounded-lg w-96 shadow-lg">
-		<h2 class="text-xl font-bold mb-4">Đăng ký tài khoản</h2>
+		<h2 class="text-xl font-bold mb-4">Đăng ký tài khoản User</h2>
 		
-		<label class="block mb-2 text-sm font-medium">Số điện thoại</label>
-		<input type="text" id="regPhone" class="w-full border p-2 rounded mb-3" placeholder="Nhập số điện thoại">
+		<!-- Số điện thoại & Nút nhận OTP -->
+		<label class="block mb-1 text-sm font-medium">Số điện thoại (Đã quan tâm Zalo OA)</label>
+		<div class="flex gap-2 mb-3">
+		  <input type="text" id="regPhone" class="w-full border p-2 rounded" placeholder="09xxxxxxx">
+		  <button onclick="handleRequestOTP()" class="px-3 py-2 bg-blue-600 text-white rounded text-xs whitespace-nowrap">
+			Gửi OTP Zalo
+		  </button>
+		</div>
 
-		<label class="block mb-2 text-sm font-medium">Mật khẩu</label>
+		<!-- Ô nhập mã OTP Zalo -->
+		<label class="block mb-1 text-sm font-medium">Mã OTP Zalo</label>
+		<input type="text" id="regOTP" class="w-full border p-2 rounded mb-3" placeholder="Nhập 6 số OTP">
+
+		<!-- Ô nhập Mật khẩu -->
+		<label class="block mb-1 text-sm font-medium">Mật khẩu mới</label>
 		<input type="password" id="regPassword" class="w-full border p-2 rounded mb-4" placeholder="Nhập mật khẩu">
 
 		<div class="flex justify-end gap-2">
 		  <button onclick="closeRegisterModal()" class="px-4 py-2 border rounded">Hủy</button>
-		  <button onclick="handleRegister()" class="px-4 py-2 bg-green-600 text-white rounded">Đăng ký</button>
+		  <button onclick="handleRegister()" class="px-4 py-2 bg-green-600 text-white rounded">Xác nhận Đăng ký</button>
 		</div>
 	  </div>
 	</div>
@@ -399,13 +410,40 @@
             }
         }
 
-		// --- 1. HÀM ĐĂNG KÝ TÀI KHOẢN ---
+		// --- 1. Gọi hàm request_register_otp ---
+		async function handleRequestOTP() {
+			const phone = document.getElementById('regPhone').value.trim();
+			if (!phone) {
+				alert("Vui lòng nhập số điện thoại!");
+				return;
+			}
+
+			try {
+				const res = await fetch('/api/user/request-register-otp', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ phone })
+				});
+				const data = await res.json();
+
+				if (res.ok) {
+					alert("Mã OTP đã được gửi đến Zalo của bạn. Vui lòng kiểm tra tin nhắn!");
+				} else {
+					alert(data.detail || "Không thể gửi OTP. Hãy chắc chắn bạn đã Quan tâm Zalo OA!");
+				}
+			} catch (err) {
+				console.error("Lỗi gửi OTP:", err);
+			}
+		}
+
+		// --- 2. Gửi thông tin Đăng ký kèm OTP ---
 		async function handleRegister() {
 			const phone = document.getElementById('regPhone').value.trim();
+			const otp = document.getElementById('regOTP').value.trim();
 			const password = document.getElementById('regPassword').value.trim();
 
-			if (!phone || !password) {
-				alert("Vui lòng điền đầy đủ thông tin!");
+			if (!phone || !otp || !password) {
+				alert("Vui lòng điền đầy đủ SĐT, Mã OTP và Mật khẩu!");
 				return;
 			}
 
@@ -413,14 +451,13 @@
 				const res = await fetch('/api/user/register', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ phone, password })
+					body: JSON.stringify({ phone, otp, password })
 				});
 				const data = await res.json();
 
 				if (res.ok) {
-					alert("Đăng ký thành công! Hãy đăng nhập.");
+					alert("Đăng ký thành công! Bạn có thể đăng nhập ngay.");
 					closeRegisterModal();
-					openLoginModal(); // Mở modal đăng nhập
 				} else {
 					alert(data.detail || "Đăng ký thất bại!");
 				}

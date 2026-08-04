@@ -115,26 +115,23 @@ def get_zalo_id_by_phone(phone: str) -> Optional[str]:
 async def register_user(req: RegisterUserSchema):
     phone = req.phone.strip()
     password = req.password.strip()
+    otp = req.otp.strip()
 
-    if not phone or not password:
-        raise HTTPException(status_code=400, detail="Vui lòng nhập đầy đủ SĐT và mật khẩu!")
+    # 1. Kiểm tra OTP từ cache Zalo (do request_register_otp tạo ra)
+    cached_otp = FORGOT_PASSWORD_OTP_CACHE.get(phone)
+    if not cached_otp or str(cached_otp) != otp:
+        raise HTTPException(status_code=400, detail="Mã OTP Zalo không chính xác hoặc đã hết hạn!")
 
-    # Kiểm tra SĐT đã tồn tại trong collection users chưa
+    # 2. Kiểm tra SĐT đã tồn tại chưa
     existing_users, _ = qdrant_client.scroll(
         collection_name=USER_COLLECTION_NAME,
-        scroll_filter={
-            "must": [
-                {"key": "phone", "match": {"value": phone}}
-            ]
-        },
+        scroll_filter={"must": [{"key": "phone", "match": {"value": phone}}]},
         limit=1
     )
-
     if existing_users:
         raise HTTPException(status_code=400, detail="Số điện thoại này đã được đăng ký!")
 
-    # Lưu thông tin User mới vào database riêng
-    point_id = str(uuid.uuid4())
+    # 3. Lưu tài khoản mới vào Database riêng (users_collection)
     user_payload = {
         "phone": phone,
         "password": hash_password(password),
@@ -144,16 +141,17 @@ async def register_user(req: RegisterUserSchema):
 
     qdrant_client.upsert(
         collection_name=USER_COLLECTION_NAME,
-        points=[
-            {
-                "id": point_id,
-                "vector": [0.0] * 768,  # Dummy vector
-                "payload": user_payload
-            }
-        ]
+        points=[{
+            "id": str(uuid.uuid4()),
+            "vector": [0.0] * 768,
+            "payload": user_payload
+        }]
     )
 
-    return {"status": "success", "message": "Đăng ký thành công!"}
+    # 4. Đăng ký thành công thì xóa OTP trong cache
+    FORGOT_PASSWORD_OTP_CACHE.pop(phone, None)
+
+    return {"status": "success", "message": "Đăng ký tài khoản thành công!"}
 
 @app.post("/api/user/login")
 async def login_user(req: LoginUserSchema):
