@@ -48,6 +48,14 @@ ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "123456")
 PENDING_MEDIA_CACHE: Dict[str, dict] = {}
 CACHE_TTL_SECONDS = 600  # Bộ nhớ đệm tự hủy sau 10 phút
 
+class RegisterUserSchema(BaseModel):
+    phone: str
+    password: str
+    otp: str
+
+class RequestOTPSchema(BaseModel):
+    phone: str
+
 # --- API ĐĂNG NHẬP & ĐỔI MẬT KHẨU ---
 class AdminLoginSchema(BaseModel):
     username: str
@@ -67,70 +75,56 @@ def get_zalo_id_by_phone(phone: str) -> Optional[str]:
         return records[0].payload.get("zalo_user_id")
     return None
     
+# 2. Endpoint Đăng ký tài khoản
 @app.post("/api/user/register")
-def register_user(data: RegisterUserSchema):
-    phone = data.phone.strip()
-    password = data.password.strip()
-    otp = data.otp.strip()
+async def register_user(req: RegisterUserSchema):
+    # a. Kiểm tra OTP từ Cache
+    cached_otp = FORGOT_PASSWORD_OTP_CACHE.get(req.phone)
+    if not cached_otp or cached_otp != req.otp:
+        raise HTTPException(status_code=400, detail="Mã OTP không chính xác hoặc đã hết hạn!")
 
-    # 🛑 1. CHECK LẦN 2 CHỐNG TRÙNG DỮ LIỆU
-    if check_phone_exists(phone):
-        raise HTTPException(
-            status_code=400, 
-            detail="Tài khoản với số điện thoại này vừa được đăng ký xong!"
-        )
+    # b. Kiểm tra số điện thoại đã tồn tại chưa
+    if check_phone_exists(req.phone):
+        raise HTTPException(status_code=400, detail="Số điện thoại này đã được đăng ký!")
 
-    # 2. Kiểm tra OTP
-    cache_key = f"REGISTER_{phone}"
-    if cache_key not in FORGOT_PASSWORD_OTP_CACHE:
-        raise HTTPException(status_code=400, detail="Mã OTP không tồn tại hoặc đã hết hạn!")
+    # c. Mã hóa mật khẩu
+    hashed_password = hash_password(req.password) # Sử dụng hàm hash mật khẩu của bạn
 
-    cached = FORGOT_PASSWORD_OTP_CACHE[cache_key]
-    if time.time() > cached["expire"]:
-        del FORGOT_PASSWORD_OTP_CACHE[cache_key]
-        raise HTTPException(status_code=400, detail="Mã OTP đã hết hạn!")
+    # d. XÂY DỰNG PAYLOAD CHUẨN ĐỒNG BỘ (Sửa Lỗi 3)
+    user_payload = {
+        "is_user_account": True,        # Cờ nhận diện tài khoản người dùng
+        "landlord_phone": req.phone,   # Số điện thoại chủ nhà/user
+        "password": hashed_password,    # Mật khẩu đã hash
+        "role": "USER",                 # Phân quyền USER
+        "created_at": datetime.now().isoformat()
+    }
 
-    if cached["otp"] != otp:
-        raise HTTPException(status_code=400, detail="Mã OTP không chính xác!")
-
-    # 3. Tiến hành Lưu vào Qdrant
-    filter_user = models.Filter(
-        must=[models.FieldCondition(key="landlord_phone", match=models.MatchValue(value=phone))]
-    )
-    records, _ = qdrant_client.scroll(collection_name=COLLECTION_NAME, scroll_filter=filter_user)
-
-    if records:
-        # Nếu đã có data phòng/profile từ Zalo trước đó -> Cập nhật mật khẩu vào tất cả record của SĐT đó
-        for rec in records:
-            qdrant_client.set_payload(
-                collection_name=COLLECTION_NAME,
-                payload={"password": password},
-                points=[rec.id]
-            )
-    else:
-        # Nếu chưa từng có data -> Tạo mới 1 Record User duy nhất
-        zalo_id = get_zalo_id_by_phone(phone) or "USER_WEB"
-        qdrant_client.upsert(
-            collection_name=COLLECTION_NAME,
-            points=[
-                PointStruct(
-                    id=str(uuid.uuid4()),
-                    vector=[0.0] * 768, # Vector rỗng cho tài khoản user
-                    payload={
-                        "landlord_phone": phone,
-                        "password": password,
-                        "zalo_user_id": zalo_id,
-                        "role": "USER",
-                        "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
-                    }
-                )
-            ]
-        )
-
-    # Xóa OTP Cache sau khi đăng ký thành công
-    del FORGOT_PASSWORD_OTP_CACHE[cache_key]
+    # e. Lưu thông tin User vào Qdrant Collection (ví dụ: 'users' hoặc collection chung)
+    point_id = str(uuid.uuid4())
     
-    return {"status": "success", "message": "Đăng ký tài khoản thành công! Bạn có thể đăng nhập ngay."}
+    # Tạo vector giả lập hoặc vector rỗng nếu lưu chung collection với điểm dữ liệu khác
+    # Lưu ý: Cần đảm bảo kích thước vector khớp với Collection Qdrant của bạn (ví dụ: 768 chiều)
+    dummy_vector = [0.0] * 768  
+
+    qdrant_client.upsert(
+        collection_name="YOUR_USER_COLLECTION_NAME", # Thay tên collection tài khoản của bạn
+        points=[
+            {
+                "id": point_id,
+                "vector": dummy_vector,
+                "payload": user_payload
+            }
+        ]
+    )
+
+    # f. Xóa OTP sau khi dùng thành công
+    FORGOT_PASSWORD_OTP_CACHE.pop(req.phone, None)
+
+    return {
+        "status": "success",
+        "message": "Đăng ký tài khoản thành công!",
+        "phone": req.phone
+    }
 
 @app.post("/api/user/request-register-otp")
 def request_register_otp(data: RequestOTPSchema):
