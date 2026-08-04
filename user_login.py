@@ -4,7 +4,7 @@ import random
 from typing import Dict, Optional
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
-
+from main import templates, qdrant_client, COLLECTION_NAME, models, send_zalo_message
 
 # 👈 Đổi/Thêm dòng này
 router = APIRouter(tags=["Auth"])
