@@ -67,7 +67,132 @@ def get_zalo_id_by_phone(phone: str) -> Optional[str]:
     if records and records[0].payload:
         return records[0].payload.get("zalo_user_id")
     return None
+    
+@router.post("/api/user/register")
+def register_user(data: RegisterUserSchema):
+    phone = data.phone.strip()
+    password = data.password.strip()
+    otp = data.otp.strip()
 
+    # 🛑 1. CHECK LẦN 2 CHỐNG TRÙNG DỮ LIỆU
+    if check_phone_exists(phone):
+        raise HTTPException(
+            status_code=400, 
+            detail="Tài khoản với số điện thoại này vừa được đăng ký xong!"
+        )
+
+    # 2. Kiểm tra OTP
+    cache_key = f"REGISTER_{phone}"
+    if cache_key not in FORGOT_PASSWORD_OTP_CACHE:
+        raise HTTPException(status_code=400, detail="Mã OTP không tồn tại hoặc đã hết hạn!")
+
+    cached = FORGOT_PASSWORD_OTP_CACHE[cache_key]
+    if time.time() > cached["expire"]:
+        del FORGOT_PASSWORD_OTP_CACHE[cache_key]
+        raise HTTPException(status_code=400, detail="Mã OTP đã hết hạn!")
+
+    if cached["otp"] != otp:
+        raise HTTPException(status_code=400, detail="Mã OTP không chính xác!")
+
+    # 3. Tiến hành Lưu vào Qdrant
+    filter_user = models.Filter(
+        must=[models.FieldCondition(key="landlord_phone", match=models.MatchValue(value=phone))]
+    )
+    records, _ = qdrant_client.scroll(collection_name=COLLECTION_NAME, scroll_filter=filter_user)
+
+    if records:
+        # Nếu đã có data phòng/profile từ Zalo trước đó -> Cập nhật mật khẩu vào tất cả record của SĐT đó
+        for rec in records:
+            qdrant_client.set_payload(
+                collection_name=COLLECTION_NAME,
+                payload={"password": password},
+                points=[rec.id]
+            )
+    else:
+        # Nếu chưa từng có data -> Tạo mới 1 Record User duy nhất
+        zalo_id = get_zalo_id_by_phone(phone) or "USER_WEB"
+        qdrant_client.upsert(
+            collection_name=COLLECTION_NAME,
+            points=[
+                PointStruct(
+                    id=str(uuid.uuid4()),
+                    vector=[0.0] * 768, # Vector rỗng cho tài khoản user
+                    payload={
+                        "landlord_phone": phone,
+                        "password": password,
+                        "zalo_user_id": zalo_id,
+                        "role": "USER",
+                        "created_at": time.strftime("%Y-%m-%d %H:%M:%S")
+                    }
+                )
+            ]
+        )
+
+    # Xóa OTP Cache sau khi đăng ký thành công
+    del FORGOT_PASSWORD_OTP_CACHE[cache_key]
+    
+    return {"status": "success", "message": "Đăng ký tài khoản thành công! Bạn có thể đăng nhập ngay."}
+
+@router.post("/api/user/request-register-otp")
+def request_register_otp(data: RequestOTPSchema):
+    phone = data.phone.strip()
+    
+    if not phone:
+        raise HTTPException(status_code=400, detail="Vui lòng nhập số điện thoại!")
+
+    # 🛑 1. CHECK CHỐNG TRÙNG SĐT
+    if check_phone_exists(phone):
+        raise HTTPException(
+            status_code=400, 
+            detail="Số điện thoại này đã được đăng ký tài khoản! Vui lòng đăng nhập hoặc chọn 'Quên mật khẩu'."
+        )
+
+    # 2. Lấy zalo_user_id tương ứng
+    zalo_id = get_zalo_id_by_phone(phone)
+    if not zalo_id or zalo_id in ["SYSTEM", "ADMIN_WEB"]:
+        raise HTTPException(
+            status_code=404, 
+            detail="Chưa tìm thấy Zalo của bạn! Vui lòng nhắn tin cho Zalo OA của chúng tôi trước để xác nhận SĐT."
+        )
+
+    # 3. Tạo và gửi OTP qua Zalo
+    otp_code = str(random.randint(100000, 999999))
+    FORGOT_PASSWORD_OTP_CACHE[f"REGISTER_{phone}"] = {
+        "otp": otp_code,
+        "expire": time.time() + 300
+    }
+
+    msg = f"🔑 [MÃ XÁC NHẬN ĐĂNG KÝ]\nMã OTP của bạn là: {otp_code}\nHiệu lực trong 5 phút."
+    send_zalo_message(user_id=zalo_id, ai_reply=msg)
+
+    return {"status": "success", "message": "Mã OTP đăng ký đã được gửi qua Zalo OA!"}
+
+def check_phone_exists(phone: str) -> bool:
+    """
+    Kiểm tra xem Số điện thoại đã được tạo tài khoản (có mật khẩu) chưa.
+    Trả về True nếu ĐÃ TỒN TẠI tài khoản, False nếu CHƯA.
+    """
+    filter_user = models.Filter(
+        must=[
+            models.FieldCondition(key="landlord_phone", match=models.MatchValue(value=phone))
+        ]
+    )
+    # Tìm kiếm trong Qdrant
+    records, _ = qdrant_client.scroll(
+        collection_name=COLLECTION_NAME, 
+        scroll_filter=filter_user, 
+        limit=10
+    )
+    
+    if not records:
+        return False
+
+    # Nếu tìm thấy bất kỳ record nào đã có trường password -> SĐT này đã có tài khoản
+    for rec in records:
+        if rec.payload and rec.payload.get("password"):
+            return True
+            
+    return False
 @app.post("/api/admin/login")
 def admin_login(data: AdminLoginSchema):
     username = data.username.strip()
