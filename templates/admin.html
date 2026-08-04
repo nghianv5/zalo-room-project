@@ -465,13 +465,7 @@
 			// Đưa link Zalo vào API tạo QR (dùng encodeURIComponent đúng cách)
 			document.getElementById('zaloQRCode').src = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(zaloUrl)}`;
 		}
-
-		// Switch Modal
-		function switchToRegister() {
-			document.getElementById('loginModal').classList.add('hidden');
-			document.getElementById('registerModal').classList.remove('hidden');
-		}
-
+		
 		function switchToLogin() {
 			document.getElementById('registerModal').classList.add('hidden');
 			document.getElementById('loginModal').classList.remove('hidden');
