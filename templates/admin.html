@@ -452,7 +452,19 @@
                 document.getElementById("adminDashboard").classList.add("hidden");
             }
         }
-
+		
+		const ZALO_OA_ID = "{{ ZALO_OA_ID }}";
+		// 2. Cập nhật hàm mở Modal Đăng ký
+		function switchToRegister() {
+			document.getElementById('loginModal').classList.add('hidden');
+			document.getElementById('registerModal').classList.remove('hidden');
+			
+			// Tạo link Zalo OA
+			const zaloUrl = `https://zalo.me/${ZALO_OA_ID}`;
+			
+			// Đưa link Zalo vào API tạo QR (dùng encodeURIComponent đúng cách)
+			document.getElementById('zaloQRCode').src = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(zaloUrl)}`;
+		}
 
 		// Switch Modal
 		function switchToRegister() {
