@@ -61,15 +61,99 @@ class AdminChangePasswordSchema(BaseModel):
     old_password: str
     new_password: str
 
+# --- HELPER: LẤY ZALO ID THEO SĐT ---
+def get_zalo_id_by_phone(phone: str) -> Optional[str]:
+    filter_user = models.Filter(
+        must=[models.FieldCondition(key="landlord_phone", match=models.MatchValue(value=phone))]
+    )
+    records, _ = qdrant_client.scroll(collection_name=COLLECTION_NAME, scroll_filter=filter_user, limit=1)
+    if records and records[0].payload:
+        return records[0].payload.get("zalo_user_id")
+    return None
+
 @app.post("/api/admin/login")
 def admin_login(data: AdminLoginSchema):
-    current_user = os.environ.get("ADMIN_USERNAME", ADMIN_USERNAME)
-    current_pass = os.environ.get("ADMIN_PASSWORD", ADMIN_PASSWORD)
+    username = data.username.strip()
+    password = data.password.strip()
 
-    if data.username == current_user and data.password == current_pass:
-        return {"status": "success", "message": "Đăng nhập thành công!"}
-    
-    raise HTTPException(status_code=401, detail="Tài khoản hoặc mật khẩu không chính xác!")
+    if not username or not password:
+        raise HTTPException(status_code=400, detail="Vui lòng nhập đầy đủ tài khoản và mật khẩu!")
+
+    # 1. TRƯỜNG HỢP ADMIN SUPER
+    if username == "adminsuper":
+        # Tìm tài khoản adminsuper trong DB
+        filter_admin = models.Filter(
+            must=[
+                models.FieldCondition(key="username", match=models.MatchValue(value="adminsuper"))
+            ]
+        )
+        records, _ = qdrant_client.scroll(collection_name=COLLECTION_NAME, scroll_filter=filter_admin, limit=1)
+        
+        # Nếu chưa có account adminsuper trong Qdrant thì tự tạo mặc định (VD: pass là 123456)
+        if not records:
+            if password == "123456":
+                # Khởi tạo siêu admin vào Qdrant
+                qdrant_client.upsert(
+                    collection_name=COLLECTION_NAME,
+                    points=[
+                        PointStruct(
+                            id=str(uuid.uuid4()),
+                            vector=[0.0] * VECTOR_SIZE,
+                            payload={
+                                "username": "adminsuper",
+                                "password": "123456",
+                                "role": "SUPER_ADMIN"
+                            }
+                        )
+                    ]
+                )
+                return {
+                    "status": "success",
+                    "role": "SUPER_ADMIN",
+                    "username": "adminsuper",
+                    "message": "Đăng nhập Super Admin thành công!"
+                }
+            else:
+                raise HTTPException(status_code=401, detail="Mật khẩu Super Admin không chính xác!")
+        
+        # Kiểm tra mật khẩu trong DB
+        admin_payload = records[0].payload
+        if admin_payload.get("password") == password:
+            return {
+                "status": "success",
+                "role": "SUPER_ADMIN",
+                "username": "adminsuper",
+                "message": "Đăng nhập Super Admin thành công!"
+            }
+        raise HTTPException(status_code=401, detail="Mật khẩu Super Admin không chính xác!")
+
+    # 2. TRƯỜNG HỢP USER THÔNG THƯỜNG (ĐĂNG NHẬP BẰNG SỐ ĐIỆN THOẠI)
+    filter_user = models.Filter(
+        must=[
+            models.FieldCondition(key="landlord_phone", match=models.MatchValue(value=username))
+        ]
+    )
+    records, _ = qdrant_client.scroll(collection_name=COLLECTION_NAME, scroll_filter=filter_user, limit=1)
+
+    if not records:
+        raise HTTPException(status_code=404, detail="Số điện thoại chưa được đăng ký tài khoản!")
+
+    # Lấy thông tin user từ record tìm được
+    user_payload = records[0].payload
+    saved_password = user_payload.get("password")
+
+    if not saved_password:
+        raise HTTPException(status_code=400, detail="SĐT này chưa khởi tạo mật khẩu!")
+
+    if saved_password != password:
+        raise HTTPException(status_code=401, detail="Mật khẩu không chính xác!")
+
+    return {
+        "status": "success",
+        "role": "USER",
+        "username": username, # Đây là SĐT của chủ nhà
+        "message": "Đăng nhập thành công!"
+    }
 
 @app.post("/api/admin/change-password")
 def change_admin_password(data: AdminChangePasswordSchema):
@@ -154,49 +238,6 @@ try:
     )
 except Exception as e:
     pass
-
-@app.get("/api/admin/rooms")
-async def get_rooms_filter(
-    min_price: Optional[float] = None,
-    max_price: Optional[float] = None,
-    status: Optional[str] = None
-):
-    must_conditions = []
-
-    # 1. Lọc theo khoảng giá bằng Range Query của Qdrant
-    if min_price is not None or max_price is not None:
-        price_range = {}
-        if min_price is not None:
-            price_range["gte"] = min_price  # Lớn hơn hoặc bằng min_price
-        if max_price is not None:
-            price_range["lte"] = max_price  # Nhỏ hơn hoặc bằng max_price
-
-        must_conditions.append(
-            models.FieldCondition(
-                key="price_num",
-                range=models.Range(**price_range)
-            )
-        )
-
-    # 2. Lọc theo trạng thái phòng (nếu có)
-    if status:
-        must_conditions.append(
-            models.FieldCondition(
-                key="status",
-                match=models.MatchValue(value=status)
-            )
-        )
-
-    # Truy vấn dữ liệu từ Qdrant
-    query_filter = models.Filter(must=must_conditions) if must_conditions else None
-    
-    records = qdrant_client.scroll(
-        collection_name=COLLECTION_NAME,
-        scroll_filter=query_filter,
-        limit=50
-    )[0]
-
-    return [rec.payload for rec in records]
     
 def parse_price_to_number(price_str: str) -> float:
     """
@@ -396,48 +437,70 @@ def get_all_rooms(
     address: Optional[str] = None,
     room_name: Optional[str] = None,
     status: Optional[str] = None,
+    username: Optional[str] = None,       # Nhận username/SĐT từ client gửi lên
     landlord_phone: Optional[str] = None
 ):
     try:
+        must_conditions = []
+
+        # 🔒 PHÂN QUYỀN DỮ LIỆU
+        # Nếu KHÔNG PHẢI adminsuper thì BẮT BUỘC lọc theo SĐT của user đó
+        effective_phone = landlord_phone or (username if username != "adminsuper" else None)
+        
+        if effective_phone and effective_phone != "adminsuper":
+            must_conditions.append(
+                models.FieldCondition(
+                    key="landlord_phone",
+                    match=models.MatchValue(value=effective_phone)
+                )
+            )
+
+        if status:
+            must_conditions.append(
+                models.FieldCondition(key="status", match=models.MatchValue(value=status))
+            )
+
+        query_filter = models.Filter(must=must_conditions) if must_conditions else None
+
         records, _ = qdrant_client.scroll(
             collection_name=COLLECTION_NAME,
+            scroll_filter=query_filter,
             limit=limit,
             with_payload=True,
             with_vectors=False
         )
+
         results = []
-        
-        print(" get_all_rooms", records)
-        
         for r in records:
             p = r.payload or {}
 
-            if address and address.lower() not in str(p.get("1_address", "")).lower(): continue
-            if room_name and room_name.lower() not in str(p.get("2_room_name", "")).lower(): continue
-            if status and p.get("8_status") != status: continue
-            if landlord_phone and landlord_phone not in str(p.get("landlord_phone", "")): continue
+            # Kiểm tra thêm filter client-side nếu có
+            if address and address.lower() not in str(p.get("address", "")).lower(): 
+                continue
+            if room_name and room_name.lower() not in str(p.get("room_name", "")).lower(): 
+                continue
 
             results.append({
                 "id": r.id,
-                "address": p.get("1_address"),
-                "room_name": p.get("2_room_name"),
-                "price": p.get("3_price"),
-                "floor": p.get("4_floor"),
-                "is_private_bathroom": p.get("4_is_private_bathroom"),
-                "has_ac": p.get("4_has_ac"),
-                "has_heater": p.get("4_has_heater"),
-                "has_washer": p.get("4_has_washer"),
-                "allow_pets": p.get("4_allow_pets"),
-                "has_balcony": p.get("4_has_balcony"),
-                "has_window": p.get("4_has_window"),
-                "has_fingerprint_lock": p.get("4_has_fingerprint_lock"),
-                "parking_info": p.get("4_parking_info"),
-                "max_occupants": p.get("4_max_occupants"),
-                "other_amenities": p.get("4_other_amenities"),
-                "service_fees": p.get("5_service_fees"),
-                "media_urls": p.get("6_media_urls", []),
-                "move_in_date": p.get("7_move_in_date"),
-                "status": p.get("8_status"),
+                "address": p.get("address"),
+                "room_name": p.get("room_name"),
+                "price": p.get("price"),
+                "floor": p.get("floor"),
+                "is_private_bathroom": p.get("is_private_bathroom"),
+                "has_ac": p.get("has_ac"),
+                "has_heater": p.get("has_heater"),
+                "has_washer": p.get("has_washer"),
+                "allow_pets": p.get("allow_pets"),
+                "has_balcony": p.get("has_balcony"),
+                "has_window": p.get("has_window"),
+                "has_fingerprint_lock": p.get("has_fingerprint_lock"),
+                "parking_info": p.get("parking_info"),
+                "max_occupants": p.get("max_occupants"),
+                "other_amenities": p.get("other_amenities"),
+                "service_fees": p.get("service_fees"),
+                "media_urls": p.get("media_urls", []),
+                "move_in_date": p.get("move_in_date"),
+                "status": p.get("status"),
                 "landlord_phone": p.get("landlord_phone"),
                 "zalo_user_id": p.get("zalo_user_id"),
                 "created_at": p.get("created_at"),
@@ -921,25 +984,30 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
     send_zalo_message(user_id, ai_reply, media_urls=urls_to_send)
 
 
-
-
 @app.get("/api/admin/rooms")
 async def get_rooms_filter(
     min_price: Optional[float] = None,
     max_price: Optional[float] = None,
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
-    status: Optional[str] = None # Cho phép None nếu Admin muốn xem TẤT CẢ các phòng
+    status: Optional[str] = None,
+    username: Optional[str] = None # Nhận username để phân quyền[cite: 4]
 ):
     must_conditions = []
 
-    # 1. Lọc theo trạng thái phòng (nếu truyền lên status)
-    if status:
+    # 🔒 Phân quyền: Nếu không phải adminsuper thì chỉ lấy data của SĐT đó[cite: 4]
+    if username and username != "adminsuper":
         must_conditions.append(
             models.FieldCondition(
-                key="status",
-                match=models.MatchValue(value=status)
+                key="landlord_phone",
+                match=models.MatchValue(value=username)
             )
+        )
+
+    # 1. Lọc theo trạng thái phòng
+    if status:
+        must_conditions.append(
+            models.FieldCondition(key="status", match=models.MatchValue(value=status))
         )
 
     # 2. Lọc theo khoảng giá
@@ -947,48 +1015,37 @@ async def get_rooms_filter(
         price_range = {}
         if min_price is not None: price_range["gte"] = min_price
         if max_price is not None: price_range["lte"] = max_price
-        
         must_conditions.append(
             models.FieldCondition(key="price_num", range=models.Range(**price_range))
         )
 
-    # 3. Lọc theo khoảng thời gian phòng trống
-    # Trong API get_rooms_filter:
+    # 3. Lọc theo khoảng thời gian
     if from_date or to_date:
         time_range = {}
         if from_date:
             dt_from = datetime.strptime(from_date, "%Y-%m-%d")
-            dt_from_vn = VN_TZ.localize(dt_from)
-            time_range["gte"] = dt_from_vn.timestamp()
-            
+            time_range["gte"] = VN_TZ.localize(dt_from).timestamp()
         if to_date:
-            # Lấy đến cuối ngày to_date (23:59:59)
             dt_to = datetime.strptime(to_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
-            dt_to_vn = VN_TZ.localize(dt_to)
-            time_range["lte"] = dt_to_vn.timestamp()
+            time_range["lte"] = VN_TZ.localize(dt_to).timestamp()
 
         must_conditions.append(
-            models.FieldCondition(
-                key="move_in_timestamp",
-                range=models.Range(**time_range)
-            )
+            models.FieldCondition(key="move_in_timestamp", range=models.Range(**time_range))
         )
 
-    # Truy vấn Qdrant
     query_filter = models.Filter(must=must_conditions) if must_conditions else None
     
     records, _ = qdrant_client.scroll(
         collection_name=COLLECTION_NAME,
         scroll_filter=query_filter,
-        limit=100
+        limit=200
     )
 
-    # Sửa lỗi cú pháp trả về dữ liệu kèm theo ID phòng
     results = []
     for rec in records:
         if rec.payload:
             payload_data = rec.payload
-            payload_data["id"] = rec.id  # Gán ID để frontend thao tác sửa/xóa
+            payload_data["id"] = rec.id
             results.append(payload_data)
             
     return results
