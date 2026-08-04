@@ -4,7 +4,11 @@ import random
 from typing import Dict, Optional
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.responses import HTMLResponse
-from main import templates, qdrant_client, COLLECTION_NAME, models, send_zalo_message
+from fastapi.templating import Jinja2Templates
+
+# Thêm 2 dòng này để định nghĩa templates
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # 👈 Đổi/Thêm dòng này
 router = APIRouter(tags=["Auth"])
