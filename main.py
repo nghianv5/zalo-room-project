@@ -1031,7 +1031,7 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
     "ai_reply": "Mô tả chi tiết 12 thông tin dạng văn bản đẹp mắt..."
 }}
 """
-raw_text = generate_content_with_retry(system_prompt, mime_type="application/json")
+        raw_text = generate_content_with_retry(system_prompt, mime_type="application/json")
         if not raw_text:
             raise Exception("Gemini không phản hồi dữ liệu.")
 
