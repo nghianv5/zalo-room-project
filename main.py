@@ -4,6 +4,7 @@ import requests
 import uuid
 import time
 import io
+import random
 from typing import Dict, List, Optional
 import uvicorn
 from fastapi import FastAPI, Request, BackgroundTasks, UploadFile, File, HTTPException
@@ -25,8 +26,6 @@ from qdrant_client.http import models
 import pytz
 
 app = FastAPI()
-
-app.include_router(user_login_router) # 👈 Nhúng vào app
 
 
 VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
@@ -68,7 +67,7 @@ def get_zalo_id_by_phone(phone: str) -> Optional[str]:
         return records[0].payload.get("zalo_user_id")
     return None
     
-@router.post("/api/user/register")
+@app.post("/api/user/register")
 def register_user(data: RegisterUserSchema):
     phone = data.phone.strip()
     password = data.password.strip()
@@ -133,7 +132,7 @@ def register_user(data: RegisterUserSchema):
     
     return {"status": "success", "message": "Đăng ký tài khoản thành công! Bạn có thể đăng nhập ngay."}
 
-@router.post("/api/user/request-register-otp")
+@app.post("/api/user/request-register-otp")
 def request_register_otp(data: RequestOTPSchema):
     phone = data.phone.strip()
     
@@ -193,6 +192,7 @@ def check_phone_exists(phone: str) -> bool:
             return True
             
     return False
+
 @app.post("/api/admin/login")
 def admin_login(data: AdminLoginSchema):
     username = data.username.strip()
@@ -956,13 +956,14 @@ def process_zalo_ai_logic(
     message_text: str, 
     media_items: list = None, 
     user_id: str = "SYSTEM",
-) -> str:
+):
     incoming_media_urls = []
-    for item in media_items:
+    for item in (media_items or []):
         saved_url = save_media_file(item["url"], is_video=item.get("is_video", False))
         if saved_url:
             incoming_media_urls.append(saved_url)
 
+    # 1. Nếu chỉ gửi Media mà không gửi chữ -> Thêm vào Cache và phản hồi
     if not message_text.strip() and incoming_media_urls:
         add_pending_media(user_id, incoming_media_urls)
         total_pending = len(PENDING_MEDIA_CACHE.get(user_id, {}).get("urls", []))
@@ -970,7 +971,9 @@ def process_zalo_ai_logic(
         send_zalo_message(user_id, reply, media_urls=incoming_media_urls)
         return
 
-    pending_urls = get_and_clear_pending_media(user_id)
+    # 2. Lấy danh sách Media (Xem trước, CHƯA XÓA Cache)
+    cached_data = PENDING_MEDIA_CACHE.get(user_id, {})
+    pending_urls = cached_data.get("urls", []) if (time.time() - cached_data.get("timestamp", 0) <= CACHE_TTL_SECONDS) else []
     all_current_media = list(dict.fromkeys(pending_urls + incoming_media_urls))
     urls_to_send = all_current_media
 
@@ -1028,8 +1031,7 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
     "ai_reply": "Mô tả chi tiết 12 thông tin dạng văn bản đẹp mắt..."
 }}
 """
-
-        raw_text = generate_content_with_retry(system_prompt, mime_type="application/json")
+raw_text = generate_content_with_retry(system_prompt, mime_type="application/json")
         if not raw_text:
             raise Exception("Gemini không phản hồi dữ liệu.")
 
@@ -1038,66 +1040,50 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
         action = result_data.get("action")
         extracted = result_data.get("extracted_data", {})
 
-        # 1. Lấy ID phòng khớp nhất từ kết quả Vector Search (nếu có)
-        existing_point_id = None
-        if relevant_rooms and len(relevant_rooms) > 0:
-            existing_point_id = relevant_rooms[0].get("id")
+        existing_point_id = relevant_rooms[0].get("id") if (relevant_rooms and len(relevant_rooms) > 0) else None
 
-        # 2. Xử lý theo Action
         if action == "ADD_ROOM":
             address = str(extracted.get("address", "")).strip()
-            
             if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
-                # ❌ KHÔNG TRUYỀN existing_point_id KHI THÊM MỚI PHÒNG
-                # Điều này đảm bảo phòng mới độc lập 100%, không bao giờ xóa nhầm các phòng cũ có địa chỉ tương tự
-                upsert_room_to_db(
+                success = upsert_room_to_db(
                     data=extracted,
                     media_urls=all_current_media,
-                    point_id=None, # Ép tạo phòng độc lập
+                    point_id=None, 
                     zalo_user_id=user_id
                 )
-                print(f"➕ [ADD NEW ROOM SUCCESS]: Đã thêm phòng mới tại {address}")
+                if success:
+                    # ✅ CHỈ XÓA CACHE KHI ĐÃ LƯU DB THÀNH CÔNG
+                    get_and_clear_pending_media(user_id)
+                    print(f"➕ [ADD NEW ROOM SUCCESS]: Đã thêm phòng mới tại {address}")
 
         elif action == "SEARCH_ROOM" and relevant_rooms:
-            print(f"SEARCH_ROOM SUCCESS]")
             for room in relevant_rooms:
-                m_urls = room.get("8_media_urls") or room.get("media_urls")
+                m_urls = room.get("media_urls")
                 if m_urls and len(m_urls) > 0:
                     urls_to_send = m_urls
                     break
 
-        # 🔵 TRƯỜNG HỢP 2: CẬP NHẬT PHÒNG (UPDATE_ROOM)
         elif action == "UPDATE_ROOM":
             address = str(extracted.get("address", "")).strip()
-
             if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
-                # Truyền existing_point_id vào để nếu ĐỔI ĐỊA CHỈ thì sẽ xóa record cũ
-                upsert_room_to_db(
+                success = upsert_room_to_db(
                     data=extracted,
                     media_urls=all_current_media,
                     point_id=existing_point_id,
                     zalo_user_id=user_id
                 )
                 if success:
+                    get_and_clear_pending_media(user_id)
                     print(f"🔄 [UPDATE ROOM SUCCESS]: Cập nhật thành công phòng ID {existing_point_id}")
-            else:
-                print("⚠️ [UPDATE ROOM CANCELLED]: Thiếu địa chỉ phòng.")
 
-        # 🟡 TRƯỜNG HỢP 3: CẬP NHẬT TRẠNG THÁI (UPDATE_STATUS)
         elif action == "UPDATE_STATUS":
             new_status = extracted.get("status") or "ĐÃ CHO THUÊ"
-
             if existing_point_id:
-                # Cập nhật riêng trường status qua set_payload
                 success = update_room_status_in_db(
                     point_id=existing_point_id, 
                     new_status=new_status,
                     zalo_user_id=user_id
                 )
-                if success:
-                    print(f"✅ [UPDATE STATUS SUCCESS]: ID {existing_point_id} -> {new_status}")
-            else:
-                print("⚠️ [UPDATE STATUS WARN]: Không tìm thấy phòng khớp trong DB để đổi trạng thái.")
 
     except Exception as err:
         print("❌ [AI Logic Exception]:", err)
@@ -1171,6 +1157,127 @@ async def get_rooms_filter(
             results.append(payload_data)
             
     return results
+
+def process_excel_file(file_url: str, sender_id: str) -> int:
+    """Tải file Excel, đọc dữ liệu từng dòng và lưu vào Qdrant"""
+    try:
+        # 1. Tải file về tạm thời
+        res = requests.get(file_url, timeout=30)
+        if res.status_code != 200:
+            return 0
+            
+        temp_file = "temp_rooms.xlsx"
+        with open(temp_file, "wb") as f:
+            f.write(res.content)
+
+        # 2. Đọc file bằng Pandas (chuyển các ô trống thành chuỗi "")
+        df = pd.read_excel(temp_file).fillna("[Chưa cập nhật]")
+        
+        success_count = 0
+        
+        # 3. Duyệt từng dòng trong Excel
+        for _, row in df.iterrows():
+            # Áp vào cấu hình 12 trường thông tin
+            extracted_data = {
+                "address": str(row.get("Địa chỉ", "")).strip(),
+                "room_name": str(row.get("Tên phòng", "Phòng trọ")).strip(),
+                "floor": str(row.get("Tầng", "[Chưa cập nhật]")),
+                "price": str(row.get("Giá", "[Chưa cập nhật]")),
+                "is_private_bathroom": str(row.get("Vệ sinh", "[Chưa cập nhật]")),
+                "appliances": str(row.get("Thiết bị", "[Chưa cập nhật]")),
+                "allow_pets": str(row.get("Thú cưng", "[Chưa cập nhật]")),
+                "move_in_date": str(row.get("Ngày vào ở", "[Chưa cập nhật]")),
+                "has_balcony": str(row.get("Ban công", "[Chưa cập nhật]")),
+                "has_window": str(row.get("Cửa sổ", "[Chưa cập nhật]")),
+                "status": str(row.get("Trạng thái", "TRỐNG"))
+            }
+
+            # Lấy link ảnh/video nếu cột đó có dữ liệu
+            media_raw = str(row.get("Media", ""))
+            media_urls = [url.strip() for url in media_raw.split(",") if url.strip() and url != "[Chưa cập nhật]"]
+
+            if extracted_data["address"] and extracted_data["address"] != "[Chưa cập nhật]":
+                # Gọi hàm upsert để cập nhật hoặc thêm mới vào Qdrant
+                if upsert_room_to_db(extracted_data, media_urls, point_id=None , zalo_user_id=sender_id):
+                    success_count += 1
+
+        # Xóa file tạm
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
+
+        return success_count
+
+    except Exception as e:
+        print("❌ [EXCEL PROCESS ERROR]:", e)
+        return 0
+
+
+# --- SỬA HÀM update_room_status_in_db ---
+def update_room_status_in_db(point_id: str, new_status: str, zalo_user_id: str = "SYSTEM") -> bool:
+    """Cập nhật trạng thái phòng dựa trên Point ID thực tế tìm được"""
+    if not point_id:
+        print("❌ [UPDATE STATUS ERROR]: Không có point_id hợp lệ")
+        return False
+        
+    try:
+        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        qdrant_client.set_payload(
+            collection_name=COLLECTION_NAME,
+            payload={
+                "status": new_status,
+                "raw_data.status": new_status,
+                "updated_at": now_str,
+                "zalo_user_id": zalo_user_id
+            },
+            points=[point_id],
+            wait=True
+        )
+        print(f"🎉 [UPDATE STATUS SUCCESS]: Point ID {point_id} -> '{new_status}'")
+        return True
+    except Exception as e:
+        print("❌ [UPDATE STATUS ERROR]:", e)
+        return False
+
+# --- 2. HÀM LƯU FILE MEDIA VĨNH VIỄN ---
+def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
+    if not zalo_media_url:
+        return ""
+
+    resource_type = "video" if is_video else "image"
+
+    if CLOUDINARY_URL:
+        try:
+            res = cloudinary.uploader.upload(
+                zalo_media_url,
+                resource_type=resource_type,
+                folder="zalo_room_media"
+            )
+            url = res.get("secure_url", "")
+            if url:
+                print(f"✅ [Cloudinary Upload Success]: {url}")
+                return url
+        except Exception as e:
+            print(f"❌ [Cloudinary Error]: {e}, chuyển sang lưu local...")
+
+    try:
+        response = requests.get(zalo_media_url, timeout=15, stream=True)
+        if response.status_code == 200:
+            ext = ".mp4" if is_video else ".jpg"
+            filename = f"{uuid.uuid4().hex}{ext}"
+            filepath = os.path.join(MEDIA_DIR, filename)
+
+            with open(filepath, "wb") as f:
+                for chunk in response.iter_content(chunk_size=8192):
+                    f.write(chunk)
+
+            server_domain = os.environ.get("SERVER_DOMAIN", "http://localhost:8000").rstrip("/")
+            local_url = f"{server_domain}/static/media/{filename}"
+            print(f"✅ [Local Media Saved]: {local_url}")
+            return local_url
+    except Exception as e:
+        print(f"❌ [Local Save Error]: {e}")
+
+    return zalo_media_url
 
 # --- 9. WEBHOOK RECEIVER ---
 @app.post("/webhook/zalo")
