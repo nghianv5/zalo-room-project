@@ -66,7 +66,7 @@ def user_login(data: UserLoginSchema):
 
 
 # --- 2. API YÊU CẦU GỬI OTP QUA ZALO OA ---
-@router.post("/api/user/login")
+@router.post("/api/user/request-reset-otp")
 def user_login(data: UserLoginSchema):
     phone = data.phone.strip()
     if not phone:

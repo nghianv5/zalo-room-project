@@ -31,7 +31,6 @@ app = FastAPI()
 
 app.include_router(user_login_router) # 👈 Nhúng vào app
 
-app = FastAPI()
 
 VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
 
