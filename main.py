@@ -24,9 +24,6 @@ import re
 from qdrant_client.http import models
 import pytz
 
-from fastapi import FastAPI
-from user_login import router as user_login_router # 👈 Import router từ file user_login.py
-
 app = FastAPI()
 
 app.include_router(user_login_router) # 👈 Nhúng vào app
