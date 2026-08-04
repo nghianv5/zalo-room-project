@@ -316,6 +316,24 @@
         </div>
     </div>
 
+	<!-- Modal Đăng ký User -->
+	<div id="registerModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+	  <div class="bg-white p-6 rounded-lg w-96 shadow-lg">
+		<h2 class="text-xl font-bold mb-4">Đăng ký tài khoản</h2>
+		
+		<label class="block mb-2 text-sm font-medium">Số điện thoại</label>
+		<input type="text" id="regPhone" class="w-full border p-2 rounded mb-3" placeholder="Nhập số điện thoại">
+
+		<label class="block mb-2 text-sm font-medium">Mật khẩu</label>
+		<input type="password" id="regPassword" class="w-full border p-2 rounded mb-4" placeholder="Nhập mật khẩu">
+
+		<div class="flex justify-end gap-2">
+		  <button onclick="closeRegisterModal()" class="px-4 py-2 border rounded">Hủy</button>
+		  <button onclick="handleRegister()" class="px-4 py-2 bg-green-600 text-white rounded">Đăng ký</button>
+		</div>
+	  </div>
+	</div>
+
     <!-- MODAL ĐỔI MẬT KHẨU KHU VỰC -->
     <div id="changePasswordModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
         <div class="bg-white rounded-lg p-6 w-full max-w-md">
@@ -381,6 +399,91 @@
             }
         }
 
+		// --- 1. HÀM ĐĂNG KÝ TÀI KHOẢN ---
+		async function handleRegister() {
+			const phone = document.getElementById('regPhone').value.trim();
+			const password = document.getElementById('regPassword').value.trim();
+
+			if (!phone || !password) {
+				alert("Vui lòng điền đầy đủ thông tin!");
+				return;
+			}
+
+			try {
+				const res = await fetch('/api/user/register', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ phone, password })
+				});
+				const data = await res.json();
+
+				if (res.ok) {
+					alert("Đăng ký thành công! Hãy đăng nhập.");
+					closeRegisterModal();
+					openLoginModal(); // Mở modal đăng nhập
+				} else {
+					alert(data.detail || "Đăng ký thất bại!");
+				}
+			} catch (err) {
+				console.error("Lỗi đăng ký:", err);
+			}
+		}
+
+		// --- 2. HÀM ĐĂNG NHẬP USER ---
+		async function handleLogin() {
+			const phone = document.getElementById('loginPhone').value.trim();
+			const password = document.getElementById('loginPassword').value.trim();
+
+			try {
+				const res = await fetch('/api/user/login', {
+					method: 'POST',
+					headers: { 'Content-Type': 'application/json' },
+					body: JSON.stringify({ phone, password })
+				});
+				const data = await res.json();
+
+				if (res.ok) {
+					// Lưu SĐT user vào LocalStorage
+					localStorage.setItem('isLoggedIn', 'true');
+					localStorage.setItem('currentUserPhone', data.username);
+
+					closeLoginModal();
+					
+					// Tải lại danh sách phòng thuộc về User này
+					loadRoomsForCurrentUser();
+				} else {
+					alert(data.detail || "Đăng nhập thất bại!");
+				}
+			} catch (err) {
+				console.error("Lỗi đăng nhập:", err);
+			}
+		}
+
+		
+		// --- 3. HÀM TẢI DANH SÁCH PHÒNG LỌC THEO LANDLORD_PHONE ---
+		async function loadRoomsForCurrentUser() {
+			const currentUserPhone = localStorage.getItem('currentUserPhone');
+			if (!currentUserPhone) return;
+
+			try {
+				// Gửi tham số user_phone lên API để lấy đúng danh sách phòng của mình
+				const res = await fetch(`/api/rooms?user_phone=${encodeURIComponent(currentUserPhone)}`);
+				const result = await res.json();
+
+				if (result.status === 'success') {
+					renderRoomTable(result.data); // Hàm hiển thị bảng phòng trọ của bạn
+				}
+			} catch (err) {
+				console.error("Lỗi tải danh sách phòng:", err);
+			}
+		}
+
+		// Tự động tải phòng khi vừa load lại trang nếu đã đăng nhập
+		document.addEventListener("DOMContentLoaded", () => {
+			if (localStorage.getItem('isLoggedIn') === 'true') {
+				loadRoomsForCurrentUser();
+			}
+		});
         async function handleLogin(e) {
 			e.preventDefault();
 			const username = document.getElementById("adminUser").value;

@@ -41,20 +41,32 @@ app.add_middleware(
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
-ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "123456")
+USER_COLLECTION_NAME = "users_collection"
+
+    
+COLLECTION_NAME = "rooms_v01"
+VECTOR_SIZE = 768
+
+qdrant_client = QdrantClient(
+    url=os.environ.get("QDRANT_URL"),
+    api_key=os.environ.get("QDRANT_API_KEY")
+)
 
 # --- 0. BỘ NHỚ ĐỆM TẠM THỜI (PENDING MEDIA CACHE) ---
 PENDING_MEDIA_CACHE: Dict[str, dict] = {}
 CACHE_TTL_SECONDS = 600  # Bộ nhớ đệm tự hủy sau 10 phút
 
+# 1. Định nghĩa Schema cho Pydantic
 class RegisterUserSchema(BaseModel):
     phone: str
     password: str
-    otp: str
 
 class RequestOTPSchema(BaseModel):
     phone: str
+    
+class LoginUserSchema(BaseModel):
+    phone: str
+    password: str
 
 # --- API ĐĂNG NHẬP & ĐỔI MẬT KHẨU ---
 class AdminLoginSchema(BaseModel):
@@ -64,6 +76,29 @@ class AdminLoginSchema(BaseModel):
 class AdminChangePasswordSchema(BaseModel):
     old_password: str
     new_password: str
+    
+    
+# 2. Hàm hỗ trợ mã hóa mật khẩu đơn giản (hoặc dùng bcrypt/passlib)
+def hash_password(password: str) -> str:
+    return hashlib.sha256(password.encode()).hexdigest()
+
+# 3. Khởi tạo Collection 'users_collection' trong Qdrant nếu chưa có
+def init_user_collection():
+    try:
+        collections = qdrant_client.get_collections().collections
+        exists = any(c.name == USER_COLLECTION_NAME for c in collections)
+        if not exists:
+            # Tạo collection với vector dummy 768 chiều
+            qdrant_client.create_collection(
+                collection_name=USER_COLLECTION_NAME,
+                vectors_config={"size": 768, "distance": "Cosine"}
+            )
+            logger.info(f"Đã tạo collection riêng cho User: {USER_COLLECTION_NAME}")
+    except Exception as e:
+        logger.error(f"Lỗi khởi tạo user collection: {e}")
+
+# Gọi hàm khởi tạo khi ứng dụng start
+init_user_collection()
 
 # --- HELPER: LẤY ZALO ID THEO SĐT ---
 def get_zalo_id_by_phone(phone: str) -> Optional[str]:
@@ -78,52 +113,74 @@ def get_zalo_id_by_phone(phone: str) -> Optional[str]:
 # 2. Endpoint Đăng ký tài khoản
 @app.post("/api/user/register")
 async def register_user(req: RegisterUserSchema):
-    # a. Kiểm tra OTP từ Cache
-    cached_otp = FORGOT_PASSWORD_OTP_CACHE.get(req.phone)
-    if not cached_otp or cached_otp != req.otp:
-        raise HTTPException(status_code=400, detail="Mã OTP không chính xác hoặc đã hết hạn!")
+    phone = req.phone.strip()
+    password = req.password.strip()
 
-    # b. Kiểm tra số điện thoại đã tồn tại chưa
-    if check_phone_exists(req.phone):
+    if not phone or not password:
+        raise HTTPException(status_code=400, detail="Vui lòng nhập đầy đủ SĐT và mật khẩu!")
+
+    # Kiểm tra SĐT đã tồn tại trong collection users chưa
+    existing_users, _ = qdrant_client.scroll(
+        collection_name=USER_COLLECTION_NAME,
+        scroll_filter={
+            "must": [
+                {"key": "phone", "match": {"value": phone}}
+            ]
+        },
+        limit=1
+    )
+
+    if existing_users:
         raise HTTPException(status_code=400, detail="Số điện thoại này đã được đăng ký!")
 
-    # c. Mã hóa mật khẩu
-    hashed_password = hash_password(req.password) # Sử dụng hàm hash mật khẩu của bạn
-
-    # d. XÂY DỰNG PAYLOAD CHUẨN ĐỒNG BỘ (Sửa Lỗi 3)
+    # Lưu thông tin User mới vào database riêng
+    point_id = str(uuid.uuid4())
     user_payload = {
-        "is_user_account": True,        # Cờ nhận diện tài khoản người dùng
-        "landlord_phone": req.phone,   # Số điện thoại chủ nhà/user
-        "password": hashed_password,    # Mật khẩu đã hash
-        "role": "USER",                 # Phân quyền USER
+        "phone": phone,
+        "password": hash_password(password),
+        "role": "USER",
         "created_at": datetime.now().isoformat()
     }
 
-    # e. Lưu thông tin User vào Qdrant Collection (ví dụ: 'users' hoặc collection chung)
-    point_id = str(uuid.uuid4())
-    
-    # Tạo vector giả lập hoặc vector rỗng nếu lưu chung collection với điểm dữ liệu khác
-    # Lưu ý: Cần đảm bảo kích thước vector khớp với Collection Qdrant của bạn (ví dụ: 768 chiều)
-    dummy_vector = [0.0] * 768  
-
     qdrant_client.upsert(
-        collection_name="YOUR_USER_COLLECTION_NAME", # Thay tên collection tài khoản của bạn
+        collection_name=USER_COLLECTION_NAME,
         points=[
             {
                 "id": point_id,
-                "vector": dummy_vector,
+                "vector": [0.0] * 768,  # Dummy vector
                 "payload": user_payload
             }
         ]
     )
 
-    # f. Xóa OTP sau khi dùng thành công
-    FORGOT_PASSWORD_OTP_CACHE.pop(req.phone, None)
+    return {"status": "success", "message": "Đăng ký thành công!"}
 
+@app.post("/api/user/login")
+async def login_user(req: LoginUserSchema):
+    phone = req.phone.strip()
+    hashed_pwd = hash_password(req.password.strip())
+
+    # Kiểm tra trong DB users
+    users, _ = qdrant_client.scroll(
+        collection_name=USER_COLLECTION_NAME,
+        scroll_filter={
+            "must": [
+                {"key": "phone", "match": {"value": phone}},
+                {"key": "password", "match": {"value": hashed_pwd}}
+            ]
+        },
+        limit=1
+    )
+
+    if not users:
+        raise HTTPException(status_code=401, detail="Số điện thoại hoặc mật khẩu không chính xác!")
+
+    user_data = users[0].payload
     return {
         "status": "success",
-        "message": "Đăng ký tài khoản thành công!",
-        "phone": req.phone
+        "message": "Đăng nhập thành công!",
+        "username": user_data["phone"],
+        "role": user_data.get("role", "USER")
     }
 
 @app.post("/api/user/request-register-otp")
@@ -321,14 +378,7 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 
-    
-COLLECTION_NAME = "rooms_v01"
-VECTOR_SIZE = 768
 
-qdrant_client = QdrantClient(
-    url=os.environ.get("QDRANT_URL"),
-    api_key=os.environ.get("QDRANT_API_KEY")
-)
 
 try:
     if not qdrant_client.collection_exists(collection_name=COLLECTION_NAME):
