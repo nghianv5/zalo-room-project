@@ -1425,4 +1425,4 @@ if __name__ == "__main__":
 @app.get("/zalo_verifierCjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn.html", response_class=PlainTextResponse)
 async def verify_zalo_specific_file():
     # Zalo yêu cầu nội dung bên trong file html khớp với chuỗi xác minh của họ
-    return 200
+    return "200"
