@@ -46,9 +46,7 @@ class OTPLog(Base):
 SQLALCHEMY_DATABASE_URL = os.environ.get("SQLALCHEMY_DATABASE_URL")
 # Nếu dùng PostgreSQL: "postgresql://user:password@postgresserver/db"
 
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False} # check_same_thread chỉ dùng cho SQLite
-)
+engine = create_engine(SQLALCHEMY_DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
 # Tự động tạo bảng otp_logs trong DB nếu chưa tồn tại
