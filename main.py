@@ -28,17 +28,9 @@ from datetime import datetime, timedelta, timezone, date
 # 1. Thêm declarative_base vào import
 from sqlalchemy import Column, Integer, String, DateTime, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
-
-
-
-import os
-import re
-import random
-import requests
-from datetime import datetime, timedelta
 from fastapi import FastAPI, Request, Depends
-from sqlalchemy import create_engine, Column, String, DateTime
-from sqlalchemy.orm import declarative_base, sessionmaker, Session
+from sqlalchemy.orm import Session
+
 
 app = FastAPI()
 
@@ -1453,7 +1445,7 @@ def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
 
 # --- 9. WEBHOOK RECEIVER ---
 @app.post("/webhook/zalo")
-async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
+async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     try:
         data = await request.json()
         event_name = str(data.get("event_name", "")).strip()
