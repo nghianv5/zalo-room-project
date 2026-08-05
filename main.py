@@ -7,7 +7,7 @@ import io
 import random
 from typing import Dict, List, Optional
 import uvicorn
-from fastapi import FastAPI, Request, BackgroundTasks, UploadFile, File, HTTPException
+from fastapi import FastAPI, Request, BackgroundTasks, UploadFile, File, HTTPException, Depends
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from qdrant_client import QdrantClient
