@@ -8,7 +8,7 @@ import random
 from typing import Dict, List, Optional
 import uvicorn
 from fastapi import FastAPI, Request, BackgroundTasks, UploadFile, File, HTTPException, Depends
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
