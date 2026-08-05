@@ -151,7 +151,37 @@ def get_zalo_id_by_phone(phone: str) -> Optional[str]:
         return records[0].payload.get("zalo_user_id")
     return None
 
+def send_otp_via_zalo_oa(user_zalo_id: str, otp_code: str, access_token: str):
+    """
+    Gửi tin nhắn OTP trực tiếp từ Zalo OA tới người dùng.
+    :param user_zalo_id: User ID (ZID) của người dùng trên Zalo OA
+    :param otp_code: Mã OTP cần gửi
+    :param access_token: OA Access Token còn hạn
+    """
+    url = "https://openapi.zalo.me/v2.0/oa/message"
     
+    headers = {
+        "Content-Type": "application/json",
+        "access_token": access_token
+    }
+    
+    payload = {
+        "recipient": {
+            "user_id": user_zalo_id  # Lưu ý: Đây là Zalo User ID (ZID) người dùng cấp cho OA, không phải SĐT
+        },
+        "message": {
+            "text": f"Mã xác thực OTP của bạn là: {otp_code}. Mã có hiệu lực trong 5 phút. Vui lòng không chia sẻ mã này cho ai."
+        }
+    }
+    
+    response = requests.post(url, headers=headers, data=json.dumps(payload))
+    result = response.json()
+    
+    print("Zalo OA Send Message Result:", result)
+    return result
+class OTPRequest(BaseModel):
+    user_zalo_id: str  # Người dùng truyền Zalo User ID lên
+
 
 @app.post("/api/user/register")
 async def register_user(data: RegisterModel, db: Session = Depends(get_db)):
@@ -246,10 +276,17 @@ async def request_register_otp(data: RequestOTPModel, db: Session = Depends(get_
     db.add(new_otp)
     db.commit()
 
-    # ... [Logic gửi tin nhắn Zalo ZNS giữ nguyên] ...
+    # GỌI HÀM GỬI OTP TẠI ĐÂY:
+    result = send_otp_via_zalo_oa(
+        user_zalo_id=raw_phone,
+        otp_code=otp_code,
+        access_token=ZALO_ACCESS_TOKEN
+    )
+    
+    if result.get("error") != 0:
+        return {"success": False, "message": "Gửi OTP thất bại", "details": result}
     return {"message": "Mã OTP đã được gửi thành công!"}
-    
-    
+
     
 def check_phone_exists(phone: str) -> bool:
     """
