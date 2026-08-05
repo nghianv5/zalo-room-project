@@ -179,8 +179,6 @@ def send_otp_via_zalo_oa(user_zalo_id: str, otp_code: str, access_token: str):
     
     print("Zalo OA Send Message Result:", result)
     return result
-class OTPRequest(BaseModel):
-    user_zalo_id: str  # Người dùng truyền Zalo User ID lên
 
 
 @app.post("/api/user/register")
