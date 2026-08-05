@@ -114,7 +114,9 @@ async def read_root(request: Request):
     # Lấy biến môi trường, mặc định là chuỗi rỗng nếu chưa cài
     zalo_oa_id = os.getenv("ZALO_OA_ID", "")
     return templates.TemplateResponse(
-        "index.html", {"request": request, "ZALO_OA_ID": zalo_oa_id}
+        request=request,
+        name="index.html",
+        context={"ZALO_OA_ID": zalo_oa_id}
     )
     
 # 2. Hàm hỗ trợ mã hóa mật khẩu đơn giản (hoặc dùng bcrypt/passlib)
