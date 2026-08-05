@@ -64,22 +64,6 @@ def get_db():
         db.close()
 
 
-def send_zalo_message(user_id: str, message_text: str):
-    """Hàm gửi tin nhắn phản hồi về khung chat Zalo của user"""
-    url = "https://openapi.zalo.me/v2.0/oa/message"
-    headers = {
-        "Content-Type": "application/json",
-        "access_token": ZALO_ACCESS_TOKEN
-    }
-    payload = {
-        "recipient": {"user_id": user_id},
-        "message": {"text": message_text}
-    }
-    res = requests.post(url, headers=headers, json=payload)
-    return res.json()
-
-
-
 
 
 # 2. Khai báo Base (Dòng này bị thiếu trong code của bạn)
