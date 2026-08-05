@@ -1421,7 +1421,8 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
     
+# Viết route tĩnh trực tiếp cho đúng file Zalo yêu cầu
 @app.get("/zalo_verifierCjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn.html", response_class=PlainTextResponse)
-async def verify_zalo_domain_file(code: str):
-    # Trả về nội dung xác minh mà Zalo yêu cầu
-    return "CjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn"
+async def verify_zalo_specific_file():
+    # Zalo yêu cầu nội dung bên trong file html khớp với chuỗi xác minh của họ
+    return 200
