@@ -115,7 +115,7 @@ async def read_root(request: Request):
     zalo_oa_id = os.getenv("ZALO_OA_ID", "")
     return templates.TemplateResponse(
         request=request,
-        name="index.html",
+        name="form_send zalo_otp.html",
         context={"ZALO_OA_ID": zalo_oa_id}
     )
     
