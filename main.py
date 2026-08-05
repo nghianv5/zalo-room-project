@@ -26,6 +26,42 @@ import pytz
 from datetime import datetime, timedelta, timezone, date
 from sqlalchemy import Column, Integer, String, DateTime
 from sqlalchemy.orm import Session
+# 1. Thêm declarative_base vào import
+from sqlalchemy import Column, Integer, String, DateTime, create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
+
+# 2. Khai báo Base (Dòng này bị thiếu trong code của bạn)
+Base = declarative_base()
+
+# 3. Bây giờ bạn mới định nghĩa Class OTPLog(Base)
+class OTPLog(Base):
+    __tablename__ = "otp_logs"
+
+    id = Column(Integer, primary_key=True, index=True)
+    phone = Column(String, index=True)
+    otp_code = Column(String)
+    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    expires_at = Column(DateTime)
+    
+# Ví dụ cấu hình SQLite (hoặc thay bằng URL PostgreSQL của bạn trên Render)
+SQLALCHEMY_DATABASE_URL = environ.get("SQLALCHEMY_DATABASE_URL")
+# Nếu dùng PostgreSQL: "postgresql://user:password@postgresserver/db"
+
+engine = create_engine(
+    SQLALCHEMY_DATABASE_URL, connect_args={"check_same_thread": False} # check_same_thread chỉ dùng cho SQLite
+)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+
+# Tự động tạo bảng otp_logs trong DB nếu chưa tồn tại
+Base.metadata.create_all(bind=engine)
+
+# Hàm Dependency để lấy DB session cho các API
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
 
 app = FastAPI()
 
@@ -58,14 +94,10 @@ qdrant_client = QdrantClient(
 PENDING_MEDIA_CACHE: Dict[str, dict] = {}
 CACHE_TTL_SECONDS = 600  # Bộ nhớ đệm tự hủy sau 10 phút
 
-# 1. Định nghĩa Schema cho Pydantic
-class RegisterUserSchema(BaseModel):
+class RegisterModel(BaseModel):
     phone: str
-    password: str
     otp: str
-
-class RequestOTPSchema(BaseModel):
-    phone: str
+    password: str
     
 class LoginUserSchema(BaseModel):
     phone: str
@@ -120,19 +152,7 @@ def get_zalo_id_by_phone(phone: str) -> Optional[str]:
         return records[0].payload.get("zalo_user_id")
     return None
 
-class OTPLog(Base):
-    __tablename__ = "otp_logs"
-
-    id = Column(Integer, primary_key=True, index=True)
-    phone = Column(String, index=True)
-    otp_code = Column(String)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    expires_at = Column(DateTime)
     
-class RegisterModel(BaseModel):
-    phone: str
-    otp: str
-    password: str
 
 @app.post("/api/user/register")
 async def register_user(data: RegisterModel, db: Session = Depends(get_db)):
