@@ -24,8 +24,7 @@ import re
 from qdrant_client.http import models
 import pytz
 from datetime import datetime, timedelta, timezone, date
-from sqlalchemy import Column, Integer, String, DateTime
-from sqlalchemy.orm import Session
+
 # 1. Thêm declarative_base vào import
 from sqlalchemy import Column, Integer, String, DateTime, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
