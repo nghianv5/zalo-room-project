@@ -43,7 +43,7 @@ class OTPLog(Base):
     expires_at = Column(DateTime)
     
 # Ví dụ cấu hình SQLite (hoặc thay bằng URL PostgreSQL của bạn trên Render)
-SQLALCHEMY_DATABASE_URL = environ.get("SQLALCHEMY_DATABASE_URL")
+SQLALCHEMY_DATABASE_URL = os.environ.get("SQLALCHEMY_DATABASE_URL")
 # Nếu dùng PostgreSQL: "postgresql://user:password@postgresserver/db"
 
 engine = create_engine(
