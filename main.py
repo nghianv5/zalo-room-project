@@ -29,6 +29,67 @@ from datetime import datetime, timedelta, timezone, date
 from sqlalchemy import Column, Integer, String, DateTime, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
+
+
+import os
+import re
+import random
+import requests
+from datetime import datetime, timedelta
+from fastapi import FastAPI, Request, Depends
+from sqlalchemy import create_engine, Column, String, DateTime
+from sqlalchemy.orm import declarative_base, sessionmaker, Session
+
+app = FastAPI()
+
+# --- CONFIG DATABASE (SQLAlchemy) ---
+ZALO_ACCESS_TOKEN = os.environ.get("ZALO_ACCESS_TOKEN")  # Token cấp từ Zalo OA
+ZALO_TEMPLATE_ID = os.environ.get("YOUR_ZNS_TEMPLATE_ID")      # ID mẫu tin nhắn OTP đã được Zalo duyệt
+
+DATABASE_URL = os.environ.get("SQLALCHEMY_DATABASE_URL")
+engine = create_engine(DATABASE_URL)
+SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+Base = declarative_base()
+
+# Model lưu OTP và Mapping User ID - SĐT
+class ZaloOTP(Base):
+    __tablename__ = "zalo_otps"
+
+    id = Column(String, primary_key=True) # Dùng user_id làm ID chính hoặc UUID
+    user_id = Column(String, index=True)
+    phone = Column(String, index=True)
+    otp = Column(String)
+    expired_at = Column(DateTime)
+    updated_at = Column(DateTime, default=datetime.utcnow)
+
+Base.metadata.create_all(bind=engine)
+
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+
+def send_zalo_message(user_id: str, message_text: str):
+    """Hàm gửi tin nhắn phản hồi về khung chat Zalo của user"""
+    url = "https://openapi.zalo.me/v2.0/oa/message"
+    headers = {
+        "Content-Type": "application/json",
+        "access_token": ZALO_ACCESS_TOKEN
+    }
+    payload = {
+        "recipient": {"user_id": user_id},
+        "message": {"text": message_text}
+    }
+    res = requests.post(url, headers=headers, json=payload)
+    return res.json()
+
+
+
+
+
 # 2. Khai báo Base (Dòng này bị thiếu trong code của bạn)
 Base = declarative_base()
 
@@ -112,7 +173,7 @@ class AdminChangePasswordSchema(BaseModel):
 @app.get("/")
 async def read_root(request: Request):
     # Lấy biến môi trường, mặc định là chuỗi rỗng nếu chưa cài
-    zalo_oa_id = os.getenv("ZALO_OA_ID", "")
+    zalo_oa_id = os.environ.get("ZALO_OA_ID")
     return templates.TemplateResponse(
         request=request,
         name="form_send zalo_otp.html",
@@ -238,8 +299,6 @@ async def login_user(req: LoginUserSchema):
         "role": user_data.get("role", "USER")
     }
 
-ZALO_ACCESS_TOKEN = os.environ.get("ZALO_ACCESS_TOKEN")  # Token cấp từ Zalo OA
-ZALO_TEMPLATE_ID = os.environ.get("YOUR_ZNS_TEMPLATE_ID")      # ID mẫu tin nhắn OTP đã được Zalo duyệt
 
 class RequestOTPModel(BaseModel):
     phone: str
@@ -1427,6 +1486,59 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks):
                     background_tasks.add_task(handle_excel)
                     return {"status": "success"}
                     
+        # Bắt sự kiện người dùng gửi tin nhắn cho OA
+        if event_name == "user_send_text":
+            user_id = data.get("sender", {}).get("id")
+            raw_message = data.get("message", {}).get("text", "")
+            
+            # 1. Chuyển toàn bộ tin nhắn về chữ thường để BỎ PHÂN BIỆT CHỮ HOA/THƯỜNG
+            clean_message = raw_message.strip().lower()
+            
+            # 2. Kiểm tra xem tin nhắn có chứa từ khóa 'otp' hay không
+            if "otp" in clean_message:
+                # Dùng Regex tìm số điện thoại trong tin nhắn (định dạng 10 chữ số bắt đầu bằng 0)
+                phone_match = re.search(r'(0[3|5|7|8|9][0-9]{8})', clean_message)
+                
+                if phone_match:
+                    phone_number = phone_match.group(1)
+                    
+                    # 3. Tạo mã OTP (6 chữ số) và Thời gian hiệu lực (5 phút)
+                    otp_code = str(random.randint(100000, 999999))
+                    now = datetime.utcnow()
+                    expired_at = now + timedelta(minutes=5)
+                    
+                    # 4. Lưu thông tin vào Database (Nếu có rồi thì Cập nhật, chưa có thì Tạo mới)
+                    db_record = db.query(ZaloOTP).filter(ZaloOTP.user_id == user_id).first()
+                    if db_record:
+                        db_record.phone = phone_number
+                        db_record.otp = otp_code
+                        db_record.expired_at = expired_at
+                        db_record.updated_at = now
+                    else:
+                        db_record = ZaloOTP(
+                            id=user_id,
+                            user_id=user_id,
+                            phone=phone_number,
+                            otp=otp_code,
+                            expired_at=expired_at,
+                            updated_at=now
+                        )
+                        db.add(db_record)
+                    
+                    db.commit()
+                    
+                    # 5. Phản hồi lại tin nhắn chứa mã OTP cho người dùng
+                    reply_text = f"Mã OTP xác thực của bạn là: {otp_code}\nMã có hiệu lực trong 5 phút (đến {expired_at.strftime('%H:%M:%S')}). Vui lòng không chia sẻ mã này."
+                    send_zalo_message(user_id=user_id, message_text=reply_text)
+                    
+                    return {"status": "success", "message": "OTP generated and sent"}
+                
+                else:
+                    # Trường hợp nhắn 'otp' nhưng quên không kèm Số điện thoại
+                    reply_text = "Cú pháp không đúng! Vui lòng nhắn theo cú pháp: OTP <Số điện thoại> (Ví dụ: OTP 0333593681)"
+                    send_zalo_message(user_id=user_id, message_text=reply_text)
+                    return {"status": "invalid_syntax"}
+        
         
         if event_name in ["user_send_text", "user_send_image", "user_send_file", "user_send_video"]:
             message_obj = data.get("message", {})
