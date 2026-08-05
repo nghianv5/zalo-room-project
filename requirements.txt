@@ -11,3 +11,4 @@ openpyxl
 jinja2>=3.1.2
 python-multipart
 pytz
+sqlalchemy
