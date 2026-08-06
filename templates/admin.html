@@ -835,46 +835,79 @@
                 loadRooms();
             }
         }
+		
+		// Gọi API Lấy Danh Sách Phòng
+		async function fetchRooms() {
+			// Lấy user đang đăng nhập từ LocalStorage
+			const currentUser = localStorage.getItem("currentUser"); // Có thể là "adminpro" hoặc "0333593681"
+
+			if (!currentUser) {
+				alert("Vui lòng đăng nhập!");
+				return;
+			}
+
+			try {
+				const response = await fetch(`/api/rooms?username=${encodeURIComponent(currentUser)}`);
+				const result = await response.json();
+
+				if (result.status === "success") {
+					console.log("Danh sách phòng nhận được:", result.data);
+					// Render bảng tại đây...
+				}
+			} catch (error) {
+				console.error("Lỗi khi tải dữ liệu:", error);
+			}
+		}
 
         async function saveRoom(e) {
-            e.preventDefault();
-            const id = document.getElementById("roomId").value;
-            const rawMedia = document.getElementById("media_urls").value;
-            const mediaArray = rawMedia ? rawMedia.split(",").map(item => item.trim()).filter(Boolean) : [];
+			e.preventDefault();
+			const id = document.getElementById("roomId").value;
+			const rawMedia = document.getElementById("media_urls").value;
+			const mediaArray = rawMedia ? rawMedia.split(",").map(item => item.trim()).filter(Boolean) : [];
 
-            const payload = {
-                address: document.getElementById("address").value,
-                room_name: document.getElementById("room_name").value,
-                price: document.getElementById("price").value,
-                floor: document.getElementById("floor").value,
-                is_private_bathroom: document.getElementById("is_private_bathroom").value,
-                has_ac: document.getElementById("has_ac").value,
-                has_heater: document.getElementById("has_heater").value,
-                has_washer: document.getElementById("has_washer").value,
-                allow_pets: document.getElementById("allow_pets").value,
-                has_balcony: document.getElementById("has_balcony").value,
-                has_window: document.getElementById("has_window").value,
-                has_fingerprint_lock: document.getElementById("has_fingerprint_lock").value,
-                parking_info: document.getElementById("parking_info").value,
-                max_occupants: document.getElementById("max_occupants").value,
-                other_amenities: document.getElementById("other_amenities").value,
-                service_fees: document.getElementById("service_fees").value,
-                move_in_date: document.getElementById("move_in_date").value,
-                status: document.getElementById("status").value,
-                landlord_phone: document.getElementById("landlord_phone").value,
-                media_urls: mediaArray
-            };
+			const payload = {
+				address: document.getElementById("address").value,
+				room_name: document.getElementById("room_name").value,
+				price: document.getElementById("price").value,
+				floor: document.getElementById("floor").value,
+				is_private_bathroom: document.getElementById("is_private_bathroom").value,
+				has_ac: document.getElementById("has_ac").value,
+				has_heater: document.getElementById("has_heater").value,
+				has_washer: document.getElementById("has_washer").value,
+				allow_pets: document.getElementById("allow_pets").value,
+				has_balcony: document.getElementById("has_balcony").value,
+				has_window: document.getElementById("has_window").value,
+				has_fingerprint_lock: document.getElementById("has_fingerprint_lock").value,
+				parking_info: document.getElementById("parking_info").value,
+				max_occupants: document.getElementById("max_occupants").value,
+				other_amenities: document.getElementById("other_amenities").value,
+				service_fees: document.getElementById("service_fees").value,
+				move_in_date: document.getElementById("move_in_date").value,
+				status: document.getElementById("status").value,
+				landlord_phone: document.getElementById("landlord_phone").value,
+				media_urls: mediaArray
+			};
 
-            const url = id ? `${API_URL}?point_id=${id}` : API_URL;
-            await fetch(url, {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload)
-            });
+			try {
+				let url = API_URL;
+				if (id) url += `?point_id=${id}`;
 
-            closeModal();
-            loadRooms();
-        }
+				const res = await fetch(url, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify(payload)
+				});
+
+				if (res.ok) {
+					closeModal();
+					loadRooms();
+				} else {
+					alert("❌ Lưu thất bại, vui lòng kiểm tra lại dữ liệu!");
+				}
+			} catch (err) {
+				console.error("Lỗi khi lưu phòng:", err);
+			}
+		}
 
         async function deleteRoom(id) {
             if (confirm("Bạn có chắc chắn muốn xóa phòng này?")) {

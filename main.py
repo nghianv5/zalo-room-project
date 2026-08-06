@@ -44,8 +44,8 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
 
 # Model lưu OTP và Mapping User ID - SĐT
-class ZaloOTP(Base):
-    __tablename__ = "zalo_otps"
+class UserWeb(Base):
+    __tablename__ = "user_web"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id = Column(String, unique=True, index=True, nullable=True)
@@ -74,7 +74,6 @@ def get_db():
     finally:
         db.close()
 
-app = FastAPI()
 
 
 VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
@@ -101,6 +100,10 @@ qdrant_client = QdrantClient(
 # --- 0. BỘ NHỚ ĐỆM TẠM THỜI (PENDING MEDIA CACHE) ---
 PENDING_MEDIA_CACHE: Dict[str, dict] = {}
 CACHE_TTL_SECONDS = 600  # Bộ nhớ đệm tự hủy sau 10 phút
+
+class UnifiedLoginSchema(BaseModel):
+    username: str  # Có thể là "adminpro" hoặc Số điện thoại
+    password: str
 
 class RegisterModel(BaseModel):
     phone: str
@@ -165,13 +168,12 @@ def send_otp_via_zalo_oa(user_zalo_id: str, otp: str, access_token: str):
     print("Zalo OA Send Message Result:", result)
     return result
 
-
 @app.post("/api/user/register")
 async def register_user(data: RegisterModel, db: Session = Depends(get_db)):
     now = datetime.now(timezone.utc)
 
     # 1. Tìm bản ghi theo SĐT
-    account = db.query(ZaloOTP).filter(ZaloOTP.phone == data.phone).first()
+    account = db.query(UserWeb).filter(UserWeb.phone == data.phone).first()
 
     if not account:
         raise HTTPException(
@@ -223,19 +225,67 @@ async def register_user(data: RegisterModel, db: Session = Depends(get_db)):
         "message": "Đăng ký tài khoản thành công!"
     }
 
+
+# --- API ĐĂNG NHẬP DÙNG BẢNG user_web ---
+@app.post("/api/login")
+def unified_login(data: UnifiedLoginSchema, db: Session = Depends(get_db)):
+    phone_input = data.phone.strip()
+    password_input = data.password.strip()
+
+    if not phone_input or not password_input:
+        raise HTTPException(status_code=400, detail="Vui lòng nhập đầy đủ tài khoản/SĐT và mật khẩu!")
+
+    # 1. TRƯỜNG HỢP ADMINPRO (Super Admin)
+    if phone_input == "adminpro":
+        # Tìm adminpro trong bảng user_web
+        admin_acc = db.query(UserWeb).filter(UserWeb.phone == "adminpro").first()
+        
+        # Nếu chưa có account adminpro trong DB -> Khởi tạo mặc định
+        if not admin_acc:
+            if password_input == "123456":
+                salt = bcrypt.gensalt()
+                hashed_pw = bcrypt.hashpw("123456".encode('utf-8'), salt).decode('utf-8')
+                new_admin = UserWeb(
+                    phone="adminpro",
+                    password=hashed_pw,
+                    user_id="ADMIN_SUPER"
+                )
+                db.add(new_admin)
+                db.commit()
+                return {"status": "success", "role": "SUPER_ADMIN", "username": "adminpro"}
+            else:
+                raise HTTPException(status_code=401, detail="Mật khẩu Admin không chính xác!")
+
+        # Kiểm tra mật khẩu Admin
+        if bcrypt.checkpw(password_input.encode('utf-8'), admin_acc.password.encode('utf-8')):
+            return {"status": "success", "role": "SUPER_ADMIN", "username": "adminpro"}
+        else:
+            raise HTTPException(status_code=401, detail="Mật khẩu Admin không chính xác!")
+
+    # 2. TRƯỜNG HỢP USER THƯỜNG (SĐT)
+    account = db.query(UserWeb).filter(UserWeb.phone == phone_input).first()
+    
+    if not account or not account.password:
+        raise HTTPException(status_code=400, detail="Số điện thoại chưa được đăng ký hoặc chưa khởi tạo mật khẩu!")
+
+    # Xác thực mật khẩu Hash
+    if not bcrypt.checkpw(password_input.encode('utf-8'), account.password.encode('utf-8')):
+        raise HTTPException(status_code=401, detail="Mật khẩu không chính xác!")
+
+    return {"status": "success", "role": "USER", "username": account.phone}
+
+
+
 @app.post("/api/user/login")
 def user_login(data: LoginUserSchema, db: Session = Depends(get_db)):
-    account = db.query(ZaloOTP).filter(ZaloOTP.phone == data.phone).first()
-
+    account = db.query(UserWeb).filter(UserWeb.phone == data.phone).first()
     if not account or not account.password:
         raise HTTPException(status_code=400, detail="Tài khoản không tồn tại hoặc chưa hoàn tất đăng ký!")
 
-    # Kiểm tra mật khẩu mã hóa
     if not bcrypt.checkpw(data.password.encode('utf-8'), account.password.encode('utf-8')):
         raise HTTPException(status_code=401, detail="Mật khẩu không chính xác!")
 
     return {"status": "success", "message": "Đăng nhập thành công!", "phone": account.phone}
-
 
 class RequestOTPModel(BaseModel):
     phone: str
@@ -258,10 +308,10 @@ async def request_register_otp(data: RequestOTPModel, db: Session = Depends(get_
     expired_at = now + timedelta(minutes=5) # Hết hạn sau 5 phút
 
     # Xóa các OTP cũ của SĐT này (nếu có) để tránh rác DB
-    db.query(ZaloOTP).filter(ZaloOTP.phone == raw_phone).delete()
+    db.query(UserWeb).filter(UserWeb.phone == raw_phone).delete()
 
     # Lưu bản ghi OTP mới
-    new_otp = ZaloOTP(
+    new_otp = UserWeb(
         phone=raw_phone,
         otp=otp,
         created_at=now,
@@ -662,27 +712,27 @@ def upsert_room_to_db(
 def admin_dashboard(request: Request):
     return templates.TemplateResponse(request=request, name="admin.html")
 
+
+# --- API LẤY DANH SÁCH PHÒNG LỌC THEO TÀI KHOẢN ---
+
 @app.get("/api/rooms")
 def get_all_rooms(
     limit: int = 500,
     address: Optional[str] = None,
     room_name: Optional[str] = None,
     status: Optional[str] = None,
-    username: Optional[str] = None,       # Nhận username/SĐT từ client gửi lên
-    landlord_phone: Optional[str] = None
+    username: Optional[str] = None  # Truyền username/phone từ Client
 ):
     try:
         must_conditions = []
 
-        # 🔒 PHÂN QUYỀN DỮ LIỆU
-        # Nếu KHÔNG PHẢI adminsuper thì BẮT BUỘC lọc theo SĐT của user đó
-        effective_phone = landlord_phone or (username if username != "adminsuper" else None)
-        
-        if effective_phone and effective_phone != "adminsuper":
+        # 🔒 KIỂM TRA PHÂN QUYỀN VỚI BẢNG USER
+        # Nếu username KHÔNG PHẢI là "adminpro", lọc tất cả phòng theo landlord_phone = username
+        if username and username != "adminpro":
             must_conditions.append(
                 models.FieldCondition(
                     key="landlord_phone",
-                    match=models.MatchValue(value=effective_phone)
+                    match=models.MatchValue(value=username)
                 )
             )
 
@@ -705,7 +755,6 @@ def get_all_rooms(
         for r in records:
             p = r.payload or {}
 
-            # Kiểm tra thêm filter client-side nếu có
             if address and address.lower() not in str(p.get("address", "")).lower(): 
                 continue
             if room_name and room_name.lower() not in str(p.get("room_name", "")).lower(): 
@@ -741,13 +790,7 @@ def get_all_rooms(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
-@app.post("/api/rooms")
-def create_or_update_room(data: RoomCreateUpdateSchema, point_id: Optional[str] = None):
-    extracted = data.dict()
-    success = upsert_room_to_db(data=extracted, point_id=point_id, zalo_user_id="ADMIN_WEB")
-    if success:
-        return {"status": "success", "message": "Thao tác thành công!"}
-    raise HTTPException(status_code=500, detail="Lỗi lưu dữ liệu.")
+
 
 @app.delete("/api/rooms/{point_id}")
 def delete_room_from_web(point_id: str):
@@ -1445,10 +1488,10 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                     expired_at = now + timedelta(minutes=5)
 
                     # 1. Kiểm tra xem SĐT này đã tồn tại trong DB chưa
-                    existing_phone_record = db.query(ZaloOTP).filter(ZaloOTP.phone == phone_number).first()
+                    existing_phone_record = db.query(UserWeb).filter(UserWeb.phone == phone_number).first()
                     
                     # 2. Kiểm tra xem Zalo User ID này đã tồn tại trong DB chưa
-                    existing_user_record = db.query(ZaloOTP).filter(ZaloOTP.user_id == user_id).first()
+                    existing_user_record = db.query(UserWeb).filter(UserWeb.user_id == user_id).first()
 
                     if existing_phone_record and existing_phone_record.user_id != user_id:
                         # TRƯỜNG HỢP: SĐT đã được đăng ký bởi 1 Zalo ID khác trước đó.
@@ -1464,7 +1507,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                         existing_user_record.updated_at = now
                     else:
                         # TRƯỜNG HỢP: Cả Zalo ID và SĐT đều hoàn toàn mới
-                        new_record = ZaloOTP(
+                        new_record = UserWeb(
                             id=user_id,
                             user_id=user_id,
                             phone=phone_number,
