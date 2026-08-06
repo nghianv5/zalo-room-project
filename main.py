@@ -52,6 +52,7 @@ class ZaloOTP(Base):
     user_id = Column(String, unique=True, index=True)
     phone = Column(String, unique=True, index=True)  # <-- THÊM unique=True VÀO ĐÂY
     otp = Column(String)
+    password = Column(String)
     expired_at = Column(DateTime)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
@@ -90,9 +91,6 @@ app.add_middleware(
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
-USER_COLLECTION_NAME = "users_collection"
-
-    
 COLLECTION_NAME = "rooms_v01"
 VECTOR_SIZE = 768
 
@@ -137,39 +135,13 @@ async def read_root(request: Request):
 def hash_password(password: str) -> str:
     return hashlib.sha256(password.encode()).hexdigest()
 
-# 3. Khởi tạo Collection 'users_collection' trong Qdrant nếu chưa có
-def init_user_collection():
-    try:
-        collections = qdrant_client.get_collections().collections
-        exists = any(c.name == USER_COLLECTION_NAME for c in collections)
-        if not exists:
-            # Tạo collection với vector dummy 768 chiều
-            qdrant_client.create_collection(
-                collection_name=USER_COLLECTION_NAME,
-                vectors_config={"size": 768, "distance": "Cosine"}
-            )
-            logger.info(f"Đã tạo collection riêng cho User: {USER_COLLECTION_NAME}")
-    except Exception as e:
-        logger.error(f"Lỗi khởi tạo user collection: {e}")
 
-# Gọi hàm khởi tạo khi ứng dụng start
-init_user_collection()
 
-# --- HELPER: LẤY ZALO ID THEO SĐT ---
-def get_zalo_id_by_phone(phone: str) -> Optional[str]:
-    filter_user = models.Filter(
-        must=[models.FieldCondition(key="landlord_phone", match=models.MatchValue(value=phone))]
-    )
-    records, _ = qdrant_client.scroll(collection_name=COLLECTION_NAME, scroll_filter=filter_user, limit=1)
-    if records and records[0].payload:
-        return records[0].payload.get("zalo_user_id")
-    return None
-
-def send_otp_via_zalo_oa(user_zalo_id: str, otp_code: str, access_token: str):
+def send_otp_via_zalo_oa(user_zalo_id: str, otp: str, access_token: str):
     """
     Gửi tin nhắn OTP trực tiếp từ Zalo OA tới người dùng.
     :param user_zalo_id: User ID (ZID) của người dùng trên Zalo OA
-    :param otp_code: Mã OTP cần gửi
+    :param otp: Mã OTP cần gửi
     :param access_token: OA Access Token còn hạn
     """
     url = "https://openapi.zalo.me/v2.0/oa/message"
@@ -184,7 +156,7 @@ def send_otp_via_zalo_oa(user_zalo_id: str, otp_code: str, access_token: str):
             "user_id": user_zalo_id  # Lưu ý: Đây là Zalo User ID (ZID) người dùng cấp cho OA, không phải SĐT
         },
         "message": {
-            "text": f"Mã xác thực OTP của bạn là: {otp_code}. Mã có hiệu lực trong 5 phút. Vui lòng không chia sẻ mã này cho ai."
+            "text": f"Mã xác thực OTP của bạn là: {otp}. Mã có hiệu lực trong 5 phút. Vui lòng không chia sẻ mã này cho ai."
         }
     }
     
@@ -213,7 +185,7 @@ async def register_user(data: RegisterModel, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Mã OTP đã hết hạn (quá 5 phút). Vui lòng lấy mã mới!")
 
     # 3. Kiểm tra mã OTP có chính xác không
-    if otp_record.otp_code != data.otp:
+    if otp_record.otp != data.otp:
         raise HTTPException(status_code=400, detail="Mã OTP không chính xác!")
 
     # OTP HỢP LỆ -> Xóa OTP đã dùng & Tiến hành tạo tài khoản
@@ -230,17 +202,7 @@ async def login_user(req: LoginUserSchema):
     hashed_pwd = hash_password(req.password.strip())
 
     # Kiểm tra trong DB users
-    users, _ = qdrant_client.scroll(
-        collection_name=USER_COLLECTION_NAME,
-        scroll_filter={
-            "must": [
-                {"key": "phone", "match": {"value": phone}},
-                {"key": "password", "match": {"value": hashed_pwd}}
-            ]
-        },
-        limit=1
-    )
-
+    #pending
     if not users:
         raise HTTPException(status_code=401, detail="Số điện thoại hoặc mật khẩu không chính xác!")
 
@@ -269,7 +231,7 @@ async def request_register_otp(data: RequestOTPModel, db: Session = Depends(get_
     if not raw_phone or len(raw_phone) < 9:
         raise HTTPException(status_code=400, detail="Số điện thoại không hợp lệ")
 
-    otp_code = str(random.randint(100000, 999999))
+    otp = str(random.randint(100000, 999999))
     now = datetime.now(timezone.utc)
     expired_at = now + timedelta(minutes=5) # Hết hạn sau 5 phút
 
@@ -279,7 +241,7 @@ async def request_register_otp(data: RequestOTPModel, db: Session = Depends(get_
     # Lưu bản ghi OTP mới
     new_otp = ZaloOTP(
         phone=raw_phone,
-        otp_code=otp_code,
+        otp=otp,
         created_at=now,
         expired_at=expired_at
     )
@@ -289,7 +251,7 @@ async def request_register_otp(data: RequestOTPModel, db: Session = Depends(get_
     # GỌI HÀM GỬI OTP TẠI ĐÂY:
     result = send_otp_via_zalo_oa(
         user_zalo_id=raw_phone,
-        otp_code=otp_code,
+        otp=otp,
         access_token=ZALO_ACCESS_TOKEN
     )
     
@@ -1456,7 +1418,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                 if phone_match:
                     phone_number = phone_match.group(1)
                     
-                    otp_code = str(random.randint(100000, 999999))
+                    otp = str(random.randint(100000, 999999))
                     now = datetime.utcnow()
                     expired_at = now + timedelta(minutes=5)
 
@@ -1475,7 +1437,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                     if existing_user_record:
                         # TRƯỜNG HỢP: Zalo ID này đã tồn tại (dù đổi SĐT mới hay dùng lại SĐT cũ)
                         existing_user_record.phone = phone_number
-                        existing_user_record.otp = otp_code
+                        existing_user_record.otp = otp
                         existing_user_record.expired_at = expired_at
                         existing_user_record.updated_at = now
                     else:
@@ -1484,7 +1446,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                             id=user_id,
                             user_id=user_id,
                             phone=phone_number,
-                            otp=otp_code,
+                            otp=otp,
                             expired_at=expired_at,
                             updated_at=now
                         )
@@ -1493,7 +1455,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                     db.commit()
                     
                     # 5. Phản hồi lại tin nhắn chứa mã OTP cho người dùng
-                    reply_text = f"Mã OTP xác thực của bạn là: {otp_code}\nMã có hiệu lực trong 5 phút (đến {expired_at.strftime('%H:%M:%S')}). Vui lòng không chia sẻ mã này."
+                    reply_text = f"Mã OTP xác thực của bạn là: {otp}\nMã có hiệu lực trong 5 phút (đến {expired_at.strftime('%H:%M:%S')}). Vui lòng không chia sẻ mã này."
                     send_zalo_message(user_id=user_id, ai_reply = reply_text)
                     
                     return {"status": "success", "message": "OTP generated and sent"}
