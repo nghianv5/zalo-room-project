@@ -7,7 +7,7 @@ import io
 import random
 from typing import Dict, List, Optional
 import uvicorn
-from fastapi import FastAPI, Request, BackgroundTasks, UploadFile, File, HTTPException, Depends
+from fastapi import FastAPI, Request, BackgroundTasks, UploadFile, File, HTTPException, Depends, Header
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from qdrant_client import QdrantClient
@@ -712,7 +712,6 @@ def get_current_user(
             detail="Không tìm thấy thông tin người dùng!"
         )
     return user
-    
     
 @app.get("/api/rooms")
 def get_rooms(
