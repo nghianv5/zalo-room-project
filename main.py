@@ -695,79 +695,31 @@ def admin_dashboard(request: Request):
 # --- API LẤY DANH SÁCH PHÒNG LỌC THEO TÀI KHOẢN ---
 
 @app.get("/api/rooms")
-def get_all_rooms(
-    limit: int = 500,
-    address: Optional[str] = None,
-    room_name: Optional[str] = None,
-    status: Optional[str] = None,
-    username: Optional[str] = None  # Truyền username/phone từ Client
+def get_rooms(
+    current_user: UserWeb = Depends(get_current_user), # Lấy thông tin user đăng nhập từ Token/Session
+    db: Session = Depends(get_db)
 ):
-    try:
-        must_conditions = []
+    # 1. Nếu là Admin, cho phép xem toàn bộ phòng trọ
+    if getattr(current_user, "role", None) == "ADMIN":
+        return db.query(Room).all()
 
-        # 🔒 KIỂM TRA PHÂN QUYỀN VỚI BẢNG USER
-        # Nếu username KHÔNG PHẢI là "adminpro", lọc tất cả phòng theo landlord_phone = username
-        if username and username != "adminpro":
-            must_conditions.append(
-                models.FieldCondition(
-                    key="landlord_phone",
-                    match=models.MatchValue(value=username)
-                )
-            )
+    # 2. Nếu là User thường: Lấy SĐT người dùng đăng nhập
+    user_phone = str(current_user.phone).strip() if current_user.phone else ""
 
-        if status:
-            must_conditions.append(
-                models.FieldCondition(key="status", match=models.MatchValue(value=status))
-            )
+    if not user_phone:
+        return []
 
-        query_filter = models.Filter(must=must_conditions) if must_conditions else None
+    # Tạo danh sách các định dạng SĐT (xử lý cả 0x và 84x)
+    phone_variants = [user_phone]
+    if user_phone.startswith("0"):
+        phone_variants.append("84" + user_phone[1:])
+    elif user_phone.startswith("84"):
+        phone_variants.append("0" + user_phone[2:])
 
-        records, _ = qdrant_client.scroll(
-            collection_name=COLLECTION_NAME,
-            scroll_filter=query_filter,
-            limit=limit,
-            with_payload=True,
-            with_vectors=False
-        )
-
-        results = []
-        for r in records:
-            p = r.payload or {}
-
-            if address and address.lower() not in str(p.get("address", "")).lower(): 
-                continue
-            if room_name and room_name.lower() not in str(p.get("room_name", "")).lower(): 
-                continue
-
-            results.append({
-                "id": r.id,
-                "address": p.get("address"),
-                "room_name": p.get("room_name"),
-                "price": p.get("price"),
-                "floor": p.get("floor"),
-                "is_private_bathroom": p.get("is_private_bathroom"),
-                "has_ac": p.get("has_ac"),
-                "has_heater": p.get("has_heater"),
-                "has_washer": p.get("has_washer"),
-                "allow_pets": p.get("allow_pets"),
-                "has_balcony": p.get("has_balcony"),
-                "has_window": p.get("has_window"),
-                "has_fingerprint_lock": p.get("has_fingerprint_lock"),
-                "parking_info": p.get("parking_info"),
-                "max_occupants": p.get("max_occupants"),
-                "other_amenities": p.get("other_amenities"),
-                "service_fees": p.get("service_fees"),
-                "media_urls": p.get("media_urls", []),
-                "move_in_date": p.get("move_in_date"),
-                "status": p.get("status"),
-                "landlord_phone": p.get("landlord_phone"),
-                "zalo_user_id": p.get("zalo_user_id"),
-                "created_at": p.get("created_at"),
-                "updated_at": p.get("updated_at")
-            })
-        return {"status": "success", "data": results}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    # Lọc chỉ các phòng có landlordphone nằm trong danh sách định dạng SĐT của user
+    rooms = db.query(Room).filter(Room.landlordphone.in_(phone_variants)).all()
+    
+    return rooms
 
 
 
