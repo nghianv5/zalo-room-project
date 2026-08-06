@@ -120,6 +120,7 @@ class AdminLoginSchema(BaseModel):
     password: str
 
 class AdminChangePasswordSchema(BaseModel):
+    username: Optional[str] = None  # Thêm field này vào
     old_password: str
     new_password: str
     
@@ -375,12 +376,12 @@ def check_phone_exists(phone: str) -> bool:
 @app.post("/api/admin/change-password")
 async def change_password(
     payload: AdminChangePasswordSchema, 
-    request: Request,
     db: Session = Depends(get_db)
 ):
-    # Lấy thông tin từ body request
-    old_password = payload.old_password.strip()
-    new_password = payload.new_password.strip()
+    # Lấy thông tin trực tiếp từ payload
+    old_password = payload.old_password.strip() if payload.old_password else ""
+    new_password = payload.new_password.strip() if payload.new_password else ""
+    username = payload.username.strip() if payload.username else ""
 
     if not old_password or not new_password:
         raise HTTPException(
@@ -388,23 +389,19 @@ async def change_password(
             detail="Vui lòng nhập đầy đủ mật khẩu cũ và mật khẩu mới!"
         )
 
-    # 1. Xác định username đang thực hiện đổi mật khẩu 
-    # (Ưu tiên lấy từ JSON body nếu client gửi, hoặc truyền từ header/session)
-    body_data = await request.json()
-    username = body_data.get("username", "").strip()
-
+    # Lấy username từ payload
     if not username:
         raise HTTPException(
             status_code=400, 
             detail="Không tìm thấy thông tin tài khoản cần đổi mật khẩu!"
         )
 
-    # 2. Truy vấn tài khoản trong bảng user_web của PostgreSQL theo trường `phone`
+    # Truy vấn tài khoản trong cơ sở dữ liệu
     user_account = db.query(UserWeb).filter(UserWeb.phone == username).first()
 
     if not user_account:
         raise HTTPException(
-            status_code=404, 
+            status_code=440, 
             detail="Tài khoản không tồn tại trên hệ thống!"
         )
 
