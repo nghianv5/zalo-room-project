@@ -102,7 +102,8 @@ PENDING_MEDIA_CACHE: Dict[str, dict] = {}
 CACHE_TTL_SECONDS = 600  # Bộ nhớ đệm tự hủy sau 10 phút
 
 class UnifiedLoginSchema(BaseModel):
-    username: str  # Có thể là "adminpro" hoặc Số điện thoại
+    phone: Optional[str] = None      
+    username: Optional[str] = None   
     password: str
 
 class RegisterModel(BaseModel):
@@ -359,89 +360,6 @@ def check_phone_exists(phone: str) -> bool:
             
     return False
 
-@app.post("/api/admin/login")
-def admin_login(data: AdminLoginSchema):
-    username = data.username.strip()
-    password = data.password.strip()
-
-    if not username or not password:
-        raise HTTPException(status_code=400, detail="Vui lòng nhập đầy đủ tài khoản và mật khẩu!")
-
-    # 1. TRƯỜNG HỢP ADMIN SUPER
-    if username == "adminsuper":
-        # Tìm tài khoản adminsuper trong DB
-        filter_admin = models.Filter(
-            must=[
-                models.FieldCondition(key="username", match=models.MatchValue(value="adminsuper"))
-            ]
-        )
-        records, _ = qdrant_client.scroll(collection_name=COLLECTION_NAME, scroll_filter=filter_admin, limit=1)
-        
-        # Nếu chưa có account adminsuper trong Qdrant thì tự tạo mặc định (VD: pass là 123456)
-        if not records:
-            if password == "123456":
-                # Khởi tạo siêu admin vào Qdrant
-                qdrant_client.upsert(
-                    collection_name=COLLECTION_NAME,
-                    points=[
-                        PointStruct(
-                            id=str(uuid.uuid4()),
-                            vector=[0.0] * VECTOR_SIZE,
-                            payload={
-                                "username": "adminsuper",
-                                "password": "123456",
-                                "role": "SUPER_ADMIN"
-                            }
-                        )
-                    ]
-                )
-                return {
-                    "status": "success",
-                    "role": "SUPER_ADMIN",
-                    "username": "adminsuper",
-                    "message": "Đăng nhập Super Admin thành công!"
-                }
-            else:
-                raise HTTPException(status_code=401, detail="Mật khẩu Super Admin không chính xác!")
-        
-        # Kiểm tra mật khẩu trong DB
-        admin_payload = records[0].payload
-        if admin_payload.get("password") == password:
-            return {
-                "status": "success",
-                "role": "SUPER_ADMIN",
-                "username": "adminsuper",
-                "message": "Đăng nhập Super Admin thành công!"
-            }
-        raise HTTPException(status_code=401, detail="Mật khẩu Super Admin không chính xác!")
-
-    # 2. TRƯỜNG HỢP USER THÔNG THƯỜNG (ĐĂNG NHẬP BẰNG SỐ ĐIỆN THOẠI)
-    filter_user = models.Filter(
-        must=[
-            models.FieldCondition(key="landlord_phone", match=models.MatchValue(value=username))
-        ]
-    )
-    records, _ = qdrant_client.scroll(collection_name=COLLECTION_NAME, scroll_filter=filter_user, limit=1)
-
-    if not records:
-        raise HTTPException(status_code=404, detail="Số điện thoại chưa được đăng ký tài khoản!")
-
-    # Lấy thông tin user từ record tìm được
-    user_payload = records[0].payload
-    saved_password = user_payload.get("password")
-
-    if not saved_password:
-        raise HTTPException(status_code=400, detail="SĐT này chưa khởi tạo mật khẩu!")
-
-    if saved_password != password:
-        raise HTTPException(status_code=401, detail="Mật khẩu không chính xác!")
-
-    return {
-        "status": "success",
-        "role": "USER",
-        "username": username, # Đây là SĐT của chủ nhà
-        "message": "Đăng nhập thành công!"
-    }
 
 @app.post("/api/admin/change-password")
 def change_admin_password(data: AdminChangePasswordSchema):
