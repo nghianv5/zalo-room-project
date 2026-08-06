@@ -47,9 +47,10 @@ Base = declarative_base()
 class ZaloOTP(Base):
     __tablename__ = "zalo_otps"
 
-    id = Column(String, primary_key=True) # Dùng user_id làm ID chính hoặc UUID
-    user_id = Column(String, index=True)
-    phone = Column(String, index=True)
+    # Dùng user_id làm khóa chính (đã đảm bảo 1 user_id duy nhất)
+    id = Column(String, primary_key=True)
+    user_id = Column(String, unique=True, index=True)
+    phone = Column(String, unique=True, index=True)  # <-- THÊM unique=True VÀO ĐÂY
     otp = Column(String)
     expired_at = Column(DateTime)
     updated_at = Column(DateTime, default=datetime.utcnow)
@@ -1451,23 +1452,35 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                 # Dùng Regex tìm số điện thoại trong tin nhắn (định dạng 10 chữ số bắt đầu bằng 0)
                 phone_match = re.search(r'(0[3|5|7|8|9][0-9]{8})', clean_message)
                 
+                # --- TRONG ROUTE WEBHOOK (/api/zalo/webhook) ---
                 if phone_match:
                     phone_number = phone_match.group(1)
                     
-                    # 3. Tạo mã OTP (6 chữ số) và Thời gian hiệu lực (5 phút)
                     otp_code = str(random.randint(100000, 999999))
                     now = datetime.utcnow()
                     expired_at = now + timedelta(minutes=5)
+
+                    # 1. Kiểm tra xem SĐT này đã tồn tại trong DB chưa
+                    existing_phone_record = db.query(ZaloOTP).filter(ZaloOTP.phone == phone_number).first()
                     
-                    # 4. Lưu thông tin vào Database (Nếu có rồi thì Cập nhật, chưa có thì Tạo mới)
-                    db_record = db.query(ZaloOTP).filter(ZaloOTP.user_id == user_id).first()
-                    if db_record:
-                        db_record.phone = phone_number
-                        db_record.otp = otp_code
-                        db_record.expired_at = expired_at
-                        db_record.updated_at = now
+                    # 2. Kiểm tra xem Zalo User ID này đã tồn tại trong DB chưa
+                    existing_user_record = db.query(ZaloOTP).filter(ZaloOTP.user_id == user_id).first()
+
+                    if existing_phone_record and existing_phone_record.user_id != user_id:
+                        # TRƯỜNG HỢP: SĐT đã được đăng ký bởi 1 Zalo ID khác trước đó.
+                        # Giải pháp: Xóa liên kết cũ để gán SĐT này cho Zalo ID mới (đảm bảo 1 SĐT - 1 ZID)
+                        db.delete(existing_phone_record)
+                        db.commit()
+
+                    if existing_user_record:
+                        # TRƯỜNG HỢP: Zalo ID này đã tồn tại (dù đổi SĐT mới hay dùng lại SĐT cũ)
+                        existing_user_record.phone = phone_number
+                        existing_user_record.otp = otp_code
+                        existing_user_record.expired_at = expired_at
+                        existing_user_record.updated_at = now
                     else:
-                        db_record = ZaloOTP(
+                        # TRƯỜNG HỢP: Cả Zalo ID và SĐT đều hoàn toàn mới
+                        new_record = ZaloOTP(
                             id=user_id,
                             user_id=user_id,
                             phone=phone_number,
@@ -1475,8 +1488,8 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                             expired_at=expired_at,
                             updated_at=now
                         )
-                        db.add(db_record)
-                    
+                        db.add(new_record)
+
                     db.commit()
                     
                     # 5. Phản hồi lại tin nhắn chứa mã OTP cho người dùng
