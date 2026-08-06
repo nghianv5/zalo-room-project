@@ -929,12 +929,17 @@
             const old_password = document.getElementById("oldPass").value;
             const new_password = document.getElementById("newPass").value;
             const msgBox = document.getElementById("changePassMsg");
-
+			// Lấy thông tin username/phone đã lưu khi đăng nhập
+			const username = localStorage.getItem("username") || "";
             try {
                 const res = await fetch("/api/admin/change-password", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ old_password, new_password })
+                    body: JSON.stringify({ 
+						username: username, 
+						old_password: old_password, 
+						new_password: new_password 
+					})
                 });
 
                 const data = await res.json();
