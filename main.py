@@ -207,7 +207,7 @@ async def register_user(data: RegisterModel, db: Session = Depends(get_db)):
         raise HTTPException(status_code=400, detail="Mã OTP không tồn tại hoặc chưa được yêu cầu!")
 
     # 2. Kiểm tra OTP có bị hết hạn (quá 5 phút) không
-    if now > otp_record.expires_at.replace(tzinfo=timezone.utc):
+    if now > otp_record.expired_at.replace(tzinfo=timezone.utc):
         db.delete(otp_record)
         db.commit()
         raise HTTPException(status_code=400, detail="Mã OTP đã hết hạn (quá 5 phút). Vui lòng lấy mã mới!")
@@ -271,7 +271,7 @@ async def request_register_otp(data: RequestOTPModel, db: Session = Depends(get_
 
     otp_code = str(random.randint(100000, 999999))
     now = datetime.now(timezone.utc)
-    expires_at = now + timedelta(minutes=5) # Hết hạn sau 5 phút
+    expired_at = now + timedelta(minutes=5) # Hết hạn sau 5 phút
 
     # Xóa các OTP cũ của SĐT này (nếu có) để tránh rác DB
     db.query(ZaloOTP).filter(ZaloOTP.phone == raw_phone).delete()
@@ -281,7 +281,7 @@ async def request_register_otp(data: RequestOTPModel, db: Session = Depends(get_
         phone=raw_phone,
         otp_code=otp_code,
         created_at=now,
-        expires_at=expires_at
+        expired_at=expired_at
     )
     db.add(new_otp)
     db.commit()
