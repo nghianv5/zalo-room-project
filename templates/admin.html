@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Quản Lý Phòng Trọ - Admin Dashboard</title>
+	<link rel="shortcut icon" href="data:image/x-icon;," type="image/x-icon">
     <!-- Tailwind CSS CDN -->
     <script src="https://cdn.tailwindcss.com"></script>
 </head>
@@ -430,16 +431,28 @@
         let allRoomsData = [];
 
         function checkAuth() {
-            const isAuth = localStorage.getItem("isAdminLoggedIn");
-            if (isAuth === "true") {
-                document.getElementById("loginScreen").classList.add("hidden");
-                document.getElementById("adminDashboard").classList.remove("hidden");
-                loadRooms();
-            } else {
-                document.getElementById("loginScreen").classList.remove("hidden");
-                document.getElementById("adminDashboard").classList.add("hidden");
-            }
-        }
+			const isAuth = localStorage.getItem("isAdminLoggedIn");
+			const loginModal = document.getElementById("loginModal");
+			const adminDashboard = document.getElementById("adminDashboard");
+
+			if (isAuth === "true") {
+				// Đã đăng nhập: Ẩn Modal Login & Hiện Dashboard
+				if (loginModal) loginModal.classList.add("hidden");
+				if (adminDashboard) adminDashboard.classList.remove("hidden");
+				
+				// Tải danh sách phòng theo user đã đăng nhập
+				const username = localStorage.getItem("adminUsername");
+				if (username && typeof loadRoomsForUser === "function") {
+					loadRoomsForUser(username);
+				} else if (typeof loadRooms === "function") {
+					loadRooms();
+				}
+			} else {
+				// Chưa đăng nhập: Hiện Modal Login & Ẩn Dashboard
+				if (loginModal) loginModal.classList.remove("hidden");
+				if (adminDashboard) adminDashboard.classList.add("hidden");
+			}
+		}
 		
 		const ZALO_OA_ID = "{{ ZALO_OA_ID }}";
 		// 2. Cập nhật hàm mở Modal Đăng ký
