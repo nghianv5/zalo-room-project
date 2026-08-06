@@ -24,7 +24,7 @@ import re
 from qdrant_client.http import models
 import pytz
 from datetime import datetime, timedelta, timezone, date
-
+import bcrypt
 # 1. Thêm declarative_base vào import
 from sqlalchemy import Column, Integer, String, DateTime, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
@@ -47,14 +47,13 @@ Base = declarative_base()
 class ZaloOTP(Base):
     __tablename__ = "zalo_otps"
 
-    # Dùng user_id làm khóa chính (đã đảm bảo 1 user_id duy nhất)
-    id = Column(String, primary_key=True)
-    user_id = Column(String, unique=True, index=True)
-    phone = Column(String, unique=True, index=True)  # <-- THÊM unique=True VÀO ĐÂY
-    otp = Column(String)
-    password = Column(String)
-    expired_at = Column(DateTime)
-    updated_at = Column(DateTime, default=datetime.utcnow)
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String, unique=True, index=True, nullable=True)
+    phone = Column(String, unique=True, index=True, nullable=False)
+    otp = Column(String, nullable=True)  # Cho phép NULL sau khi đăng ký thành công
+    password = Column(String, nullable=True)  # Lưu mật khẩu đã hash
+    expired_at = Column(DateTime, nullable=True)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
     
 # Ví dụ cấu hình SQLite (hoặc thay bằng URL PostgreSQL của bạn trên Render)
@@ -171,48 +170,71 @@ def send_otp_via_zalo_oa(user_zalo_id: str, otp: str, access_token: str):
 async def register_user(data: RegisterModel, db: Session = Depends(get_db)):
     now = datetime.now(timezone.utc)
 
-    # Tìm bản ghi OTP gần nhất của SĐT này
-    otp_record = db.query(ZaloOTP).filter(ZaloOTP.phone == data.phone).first()
+    # 1. Tìm bản ghi theo SĐT
+    account = db.query(ZaloOTP).filter(ZaloOTP.phone == data.phone).first()
 
-    # 1. Kiểm tra OTP có tồn tại không
-    if not otp_record:
-        raise HTTPException(status_code=400, detail="Mã OTP không tồn tại hoặc chưa được yêu cầu!")
+    if not account:
+        raise HTTPException(
+            status_code=400, 
+            detail="Số điện thoại chưa yêu cầu mã OTP!"
+        )
 
-    # 2. Kiểm tra OTP có bị hết hạn (quá 5 phút) không
-    if now > otp_record.expired_at.replace(tzinfo=timezone.utc):
-        db.delete(otp_record)
+    # 2. Kiểm tra xem tài khoản này đã có mật khẩu (đã đăng ký) chưa
+    if account.password and not account.otp:
+        raise HTTPException(
+            status_code=400, 
+            detail="Số điện thoại này đã được đăng ký tài khoản!"
+        )
+
+    # 3. Kiểm tra OTP có tồn tại không
+    if not account.otp:
+        raise HTTPException(
+            status_code=400, 
+            detail="Mã OTP không hợp lệ hoặc đã được sử dụng!"
+        )
+
+    # 4. Kiểm tra thời hạn OTP (quá 5 phút)
+    expired_at_utc = account.expired_at.replace(tzinfo=timezone.utc) if account.expired_at.tzinfo is None else account.expired_at
+    if now > expired_at_utc:
+        account.otp = None  # Xóa OTP hết hạn
         db.commit()
-        raise HTTPException(status_code=400, detail="Mã OTP đã hết hạn (quá 5 phút). Vui lòng lấy mã mới!")
+        raise HTTPException(
+            status_code=400, 
+            detail="Mã OTP đã hết hạn (quá 5 phút). Vui lòng lấy mã mới!"
+        )
 
-    # 3. Kiểm tra mã OTP có chính xác không
-    if otp_record.otp != data.otp:
+    # 5. Kiểm tra mã OTP gửi lên có khớp không
+    if account.otp != data.otp:
         raise HTTPException(status_code=400, detail="Mã OTP không chính xác!")
 
-    # OTP HỢP LỆ -> Xóa OTP đã dùng & Tiến hành tạo tài khoản
-    db.delete(otp_record)
+    # 6. Mã hóa mật khẩu (Hash password)
+    salt = bcrypt.gensalt()
+    hashed_password = bcrypt.hashpw(data.password.encode('utf-8'), salt).decode('utf-8')
+
+    # 7. Cập nhật tài khoản: Lưu mật khẩu & XÓA OTP
+    account.password = hashed_password
+    account.otp = None  # Xóa trường OTP
+    account.updated_at = datetime.utcnow()
+
     db.commit()
 
-    # ... [Thêm logic tạo User vào bảng User tại đây] ...
-
-    return {"message": "Đăng ký tài khoản thành công!"}
-
-@app.post("/api/user/login")
-async def login_user(req: LoginUserSchema):
-    phone = req.phone.strip()
-    hashed_pwd = hash_password(req.password.strip())
-
-    # Kiểm tra trong DB users
-    #pending
-    if not users:
-        raise HTTPException(status_code=401, detail="Số điện thoại hoặc mật khẩu không chính xác!")
-
-    user_data = users[0].payload
     return {
         "status": "success",
-        "message": "Đăng nhập thành công!",
-        "username": user_data["phone"],
-        "role": user_data.get("role", "USER")
+        "message": "Đăng ký tài khoản thành công!"
     }
+
+@app.post("/api/user/login")
+def user_login(data: LoginUserSchema, db: Session = Depends(get_db)):
+    account = db.query(ZaloOTP).filter(ZaloOTP.phone == data.phone).first()
+
+    if not account or not account.password:
+        raise HTTPException(status_code=400, detail="Tài khoản không tồn tại hoặc chưa hoàn tất đăng ký!")
+
+    # Kiểm tra mật khẩu mã hóa
+    if not bcrypt.checkpw(data.password.encode('utf-8'), account.password.encode('utf-8')):
+        raise HTTPException(status_code=401, detail="Mật khẩu không chính xác!")
+
+    return {"status": "success", "message": "Đăng nhập thành công!", "phone": account.phone}
 
 
 class RequestOTPModel(BaseModel):
