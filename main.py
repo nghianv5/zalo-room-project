@@ -30,7 +30,8 @@ from sqlalchemy import Column, Integer, String, DateTime, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from fastapi import FastAPI, Request, Depends
 from sqlalchemy.orm import Session
-
+import phonenumbers
+from phonenumbers import NumberParseException
 
 app = FastAPI()
 
@@ -172,9 +173,11 @@ def send_otp_via_zalo_oa(user_zalo_id: str, otp: str, access_token: str):
 @app.post("/api/user/register")
 async def register_user(data: RegisterModel, db: Session = Depends(get_db)):
     now = datetime.now(timezone.utc)
+    # Chuẩn hóa SĐT trước khi query
+    clean_phone = format_international_phone(data.phone)
 
-    # 1. Tìm bản ghi theo SĐT
-    account = db.query(UserWeb).filter(UserWeb.phone == data.phone).first()
+    # 1. Tìm bản ghi theo SĐT đã chuẩn hóa
+    account = db.query(UserWeb).filter(UserWeb.phone == clean_phone).first()
 
     if not account:
         raise HTTPException(
@@ -276,7 +279,8 @@ def unified_login(data: UnifiedLoginSchema, db: Session = Depends(get_db)):
             raise HTTPException(status_code=401, detail="Mật khẩu Admin không chính xác!")
 
     # 2. TRƯỜNG HỢP USER THƯỜNG (SĐT)
-    account = db.query(UserWeb).filter(UserWeb.phone == phone_input).first()
+    clean_phone = format_international_phone(phone_input)
+    account = db.query(UserWeb).filter(UserWeb.phone == clean_phone).first()
     
     if not account or not account.password:
         raise HTTPException(status_code=400, detail="Số điện thoại chưa được đăng ký hoặc chưa khởi tạo mật khẩu!")
@@ -291,7 +295,9 @@ def unified_login(data: UnifiedLoginSchema, db: Session = Depends(get_db)):
 
 @app.post("/api/user/login")
 def user_login(data: LoginUserSchema, db: Session = Depends(get_db)):
-    account = db.query(UserWeb).filter(UserWeb.phone == data.phone).first()
+    clean_phone = format_international_phone(data.phone)
+    
+    account = db.query(UserWeb).filter(UserWeb.phone == clean_phone).first()
     if not account or not account.password:
         raise HTTPException(status_code=400, detail="Tài khoản không tồn tại hoặc chưa hoàn tất đăng ký!")
 
@@ -303,29 +309,57 @@ def user_login(data: LoginUserSchema, db: Session = Depends(get_db)):
 class RequestOTPModel(BaseModel):
     phone: str
 
-def format_vietnam_phone(phone: str) -> str:
-    """Chuyển số điện thoại về dạng 84xxx cho Zalo API"""
-    phone = phone.strip()
-    if phone.startswith("0"):
-        return "84" + phone[1:]
-    return phone
+def format_international_phone(phone_str: str, default_region: str = "VN") -> str:
+    """
+    Chuẩn hóa mọi số điện thoại (Việt Nam + Quốc tế) về chuẩn E.164 không dấu + (Ví dụ: 84333593681, 14155552671).
+    - Nếu nhập '0333593681' -> Tự hiểu là VN -> '84333593681'
+    - Nếu nhập '+14155552671' (Mỹ) -> Trả về '14155552671'
+    - Nếu nhập '+819012345678' (Nhật) -> Trả về '819012345678'
+    """
+    if not phone_str:
+        return ""
+    
+    phone_str = str(phone_str).strip()
+    
+    try:
+        # Nếu người dùng gõ có dấu + ở đầu (ví dụ: +1...) hoặc không có dấu +
+        parsed_number = phonenumbers.parse(phone_str, default_region)
+        
+        if phonenumbers.is_valid_number(parsed_number):
+            # Lấy chuỗi E.164 dạng '+84333593681' hoặc '+14155552671'
+            e164_format = phonenumbers.format_number(parsed_number, phonenumbers.PhoneNumberFormat.E164)
+            # Bỏ dấu '+' đầu để lưu vào DB thống nhất
+            return e164_format.lstrip('+')
+    except NumberParseException:
+        pass
+
+    # Fallback: Nếu thư viện không parse được, chỉ giữ lại số
+    clean_digits = re.sub(r'\D', '', phone_str)
+    if clean_digits.startswith("0") and len(clean_digits) == 10:
+    if clean_digits.startswith("0") and len(clean_digits) == 10:
+        return "84" + clean_digits[1:]
+    return clean_digits
+
 
 @app.post("/api/user/request-register-otp")
 async def request_register_otp(data: RequestOTPModel, db: Session = Depends(get_db)):
+    # 1. Chuẩn hóa SĐT ngay từ đầu
     raw_phone = data.phone
-    if not raw_phone or len(raw_phone) < 9:
+    clean_phone = format_international_phone(raw_phone)
+    
+    if not clean_phone or len(clean_phone) < 9:
         raise HTTPException(status_code=400, detail="Số điện thoại không hợp lệ")
 
     otp = str(random.randint(100000, 999999))
     now = datetime.now(timezone.utc)
-    expired_at = now + timedelta(minutes=5) # Hết hạn sau 5 phút
+    expired_at = now + timedelta(minutes=5)
 
-    # Xóa các OTP cũ của SĐT này (nếu có) để tránh rác DB
-    db.query(UserWeb).filter(UserWeb.phone == raw_phone).delete()
+    # 2. Xóa các OTP cũ của SĐT đã được chuẩn hóa này
+    db.query(UserWeb).filter(UserWeb.phone == clean_phone).delete()
 
-    # Lưu bản ghi OTP mới
+    # 3. Lưu bản ghi mới với clean_phone
     new_otp = UserWeb(
-        phone=raw_phone,
+        phone=clean_phone,
         otp=otp,
         created_at=now,
         expired_at=expired_at
@@ -333,9 +367,9 @@ async def request_register_otp(data: RequestOTPModel, db: Session = Depends(get_
     db.add(new_otp)
     db.commit()
 
-    # GỌI HÀM GỬI OTP TẠI ĐÂY:
+    # 4. Gửi OTP
     result = send_otp_via_zalo_oa(
-        user_zalo_id=raw_phone,
+        user_zalo_id=clean_phone,
         otp=otp,
         access_token=ZALO_ACCESS_TOKEN
     )
@@ -396,8 +430,11 @@ async def change_password(
             detail="Không tìm thấy thông tin tài khoản cần đổi mật khẩu!"
         )
 
+    # Nếu không phải tài khoản adminpro thì chuẩn hóa định dạng SĐT
+    target_username = username if username == "adminpro" else format_international_phone(username)
+    
     # Truy vấn tài khoản trong cơ sở dữ liệu
-    user_account = db.query(UserWeb).filter(UserWeb.phone == username).first()
+    user_account = db.query(UserWeb).filter(UserWeb.phone == target_username).first()
 
     if not user_account:
         raise HTTPException(
@@ -670,7 +707,7 @@ def upsert_room_to_db(
             "move_in_date": str(data.get("move_in_date", "Vào ở ngay")),
             "move_in_timestamp": move_in_ts,
             "status": str(data.get("status", "TRỐNG")),
-            "landlord_phone": phone,
+            "landlord_phone": format_international_phone(phone),
             "zalo_user_id": zalo_user_id,
             "created_at": created_at,
             "updated_at": now_str
@@ -704,8 +741,11 @@ def get_current_user(
             detail="Vui lòng cung cấp số điện thoại hoặc thông tin xác thực!"
         )
     
+    # Chuẩn hóa SĐT từ Header (trừ tài khoản adminpro)
+    clean_phone = x_user_phone if x_user_phone == "adminpro" else format_international_phone(x_user_phone)
     # Tìm user trong CSDL
-    user = db.query(UserWeb).filter(UserWeb.phone == x_user_phone).first()
+    user = db.query(UserWeb).filter(UserWeb.phone == clean_phone).first()
+    
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -714,29 +754,37 @@ def get_current_user(
     return user
     
 @app.get("/api/rooms")
+@app.get("/api/rooms")
 def get_rooms(
-    current_user: UserWeb = Depends(get_current_user), # Lấy thông tin user đăng nhập từ Token/Session
+    current_user: UserWeb = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     # 1. Nếu là Admin, cho phép xem toàn bộ phòng trọ
     if getattr(current_user, "role", None) == "ADMIN":
         return db.query(Room).all()
 
-    # 2. Nếu là User thường: Lấy SĐT người dùng đăng nhập
-    user_phone = str(current_user.phone).strip() if current_user.phone else ""
-
-    if not user_phone:
+    # 2. Lấy SĐT user đăng nhập và chuẩn hóa theo chuẩn quốc tế (E.164 không dấu +)
+    raw_phone = str(current_user.phone).strip() if current_user.phone else ""
+    if not raw_phone:
         return []
 
-    # Tạo danh sách các định dạng SĐT (xử lý cả 0x và 84x)
-    phone_variants = [user_phone]
-    if user_phone.startswith("0"):
-        phone_variants.append("84" + user_phone[1:])
-    elif user_phone.startswith("84"):
-        phone_variants.append("0" + user_phone[2:])
+    user_phone = format_international_phone(raw_phone)
 
-    # Lọc chỉ các phòng có landlordphone nằm trong danh sách định dạng SĐT của user
-    rooms = db.query(Room).filter(Room.landlordphone.in_(phone_variants)).all()
+    # 3. Nếu DB đã chuẩn hóa toàn bộ landlordphone về dạng 84... / chuẩn quốc tế:
+    # Chỉ cần so sánh trực tiếp =
+    rooms = db.query(Room).filter(Room.landlordphone == user_phone).all()
+
+    # TRƯỜNG HỢP DỰ PHÒNG: Nếu dữ liệu landlordphone trong DB vẫn còn lẫn lộn dạng 0x và 84x,
+    # bạn có thể dùng phone_variants chuẩn hóa như sau:
+    if not rooms:
+        # Tạo biến thể 0x tương ứng để fallback tìm dữ liệu cũ trong DB
+        phone_variants = [user_phone]
+        if user_phone.startswith("84") and len(user_phone) == 11:
+            phone_variants.append("0" + user_phone[2:])
+        
+        rooms = db.query(Room).filter(
+            func.trim(Room.landlordphone).in_(phone_variants)
+        ).all()
     
     return rooms
 
