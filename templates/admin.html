@@ -569,9 +569,8 @@
 
 		// 3. Đăng nhập & Tải dữ liệu phòng theo Landlord Phone
 		async function handleLogin(e) {
-			if (e && typeof e.preventDefault === 'function') {
-				e.preventDefault();
-			}
+			if (e && typeof e.preventDefault === 'function') e.preventDefault();
+			
 			const username = document.getElementById('loginUsername').value.trim();
 			const password = document.getElementById('loginPassword').value.trim();
 
@@ -589,20 +588,22 @@
 				const data = await res.json();
 
 				if (res.ok) {
-					// Lưu thông tin đăng nhập
+					const loggedInUser = data.username || username;
+					
+					// ✅ Lưu thống nhất adminUsername
 					localStorage.setItem('isAdminLoggedIn', 'true');
-					localStorage.setItem('adminUsername', data.username || username);
+					localStorage.setItem('adminUsername', loggedInUser);
 
-					// Ẩn modal đăng nhập
 					document.getElementById('loginModal').classList.add('hidden');
+					document.getElementById('adminDashboard').classList.remove('hidden');
 
-					// Tải danh sách phòng lọc theo user
-					loadRoomsForUser(data.username || username);
+					// ✅ Tải phòng ngay sau khi đăng nhập
+					loadRooms();
 				} else {
 					alert(data.detail || "Tài khoản hoặc mật khẩu không chính xác!");
 				}
 			} catch (err) {
-				alert("Lỗi đăng nhập!");
+				alert("Lỗi kết nối khi đăng nhập!");
 			}
 		}
 
@@ -662,9 +663,11 @@
 				const fromDate = document.getElementById("filterFromDate")?.value || "";
 				const toDate = document.getElementById("filterToDate")?.value || "";
 				const status = document.getElementById("filterStatus")?.value || "";
-				const username = localStorage.getItem("adminUsername") || ""; // 👈 Lấy Username
+				
+				// ✅ Lấy đúng key adminUsername
+				const username = localStorage.getItem("adminUsername") || "";
 
-				let url = `/api/admin/rooms?username=${encodeURIComponent(username)}&`; // 👈 Gắn vào URL
+				let url = `/api/rooms?username=${encodeURIComponent(username)}&`;
 				if (minPrice) url += `min_price=${minPrice}&`;
 				if (maxPrice) url += `max_price=${maxPrice}&`;
 				if (fromDate) url += `from_date=${fromDate}&`;
@@ -673,8 +676,10 @@
 
 				const res = await fetch(url);
 				const result = await res.json();
-				allRoomsData = Array.isArray(result) ? result : (result.data || []);
-				applyFilters();
+				
+				// Cập nhật mảng dữ liệu và render lại bảng
+				allRoomsData = result.data || result || [];
+				renderRoomTable(allRoomsData);
 			} catch (err) {
 				console.error("Lỗi nạp dữ liệu:", err);
 			}
