@@ -230,7 +230,19 @@ async def register_user(data: RegisterModel, db: Session = Depends(get_db)):
 # --- API ĐĂNG NHẬP DÙNG BẢNG user_web ---
 @app.post("/api/login")
 def unified_login(data: UnifiedLoginSchema, db: Session = Depends(get_db)):
-    phone_input = data.phone.strip()
+    
+    # Lấy phone hoặc username tùy theo dữ liệu gửi lên
+    phone_val = getattr(data, 'phone', None) or getattr(data, 'username', None)
+
+    # Kiểm tra xem người dùng có nhập thông tin hay không
+    if not phone_val:
+        raise HTTPException(
+            status_code=400, 
+            detail="Vui lòng nhập số điện thoại hoặc tên đăng nhập!"
+        )
+
+    # Ép kiểu chuỗi và loại bỏ khoảng trắng an toàn
+    phone_input = str(phone_val).strip()
     password_input = data.password.strip()
 
     if not phone_input or not password_input:
