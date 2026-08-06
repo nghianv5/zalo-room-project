@@ -693,7 +693,27 @@ def admin_dashboard(request: Request):
 
 
 # --- API LẤY DANH SÁCH PHÒNG LỌC THEO TÀI KHOẢN ---
-
+# Hàm lấy thông tin user hiện tại từ Header (hoặc Cookie/Session)
+def get_current_user(
+    x_user_phone: str = Header(None, alias="X-User-Phone"), # Hoặc lấy từ Authorization Bearer Token
+    db: Session = Depends(get_db)
+) -> UserWeb:
+    if not x_user_phone:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Vui lòng cung cấp số điện thoại hoặc thông tin xác thực!"
+        )
+    
+    # Tìm user trong CSDL
+    user = db.query(UserWeb).filter(UserWeb.phone == x_user_phone).first()
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Không tìm thấy thông tin người dùng!"
+        )
+    return user
+    
+    
 @app.get("/api/rooms")
 def get_rooms(
     current_user: UserWeb = Depends(get_current_user), # Lấy thông tin user đăng nhập từ Token/Session
