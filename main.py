@@ -54,30 +54,6 @@ class ZaloOTP(Base):
     expired_at = Column(DateTime)
     updated_at = Column(DateTime, default=datetime.utcnow)
 
-Base.metadata.create_all(bind=engine)
-
-def get_db():
-    db = SessionLocal()
-    try:
-        yield db
-    finally:
-        db.close()
-
-
-
-
-# 2. Khai báo Base (Dòng này bị thiếu trong code của bạn)
-Base = declarative_base()
-
-# 3. Bây giờ bạn mới định nghĩa Class OTPLog(Base)
-class OTPLog(Base):
-    __tablename__ = "otp_logs"
-
-    id = Column(Integer, primary_key=True, index=True)
-    phone = Column(String, index=True)
-    otp_code = Column(String)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    expires_at = Column(DateTime)
     
 # Ví dụ cấu hình SQLite (hoặc thay bằng URL PostgreSQL của bạn trên Render)
 SQLALCHEMY_DATABASE_URL = os.environ.get("SQLALCHEMY_DATABASE_URL")
@@ -223,7 +199,7 @@ async def register_user(data: RegisterModel, db: Session = Depends(get_db)):
     now = datetime.now(timezone.utc)
 
     # Tìm bản ghi OTP gần nhất của SĐT này
-    otp_record = db.query(OTPLog).filter(OTPLog.phone == data.phone).first()
+    otp_record = db.query(ZaloOTP).filter(ZaloOTP.phone == data.phone).first()
 
     # 1. Kiểm tra OTP có tồn tại không
     if not otp_record:
@@ -297,10 +273,10 @@ async def request_register_otp(data: RequestOTPModel, db: Session = Depends(get_
     expires_at = now + timedelta(minutes=5) # Hết hạn sau 5 phút
 
     # Xóa các OTP cũ của SĐT này (nếu có) để tránh rác DB
-    db.query(OTPLog).filter(OTPLog.phone == raw_phone).delete()
+    db.query(ZaloOTP).filter(ZaloOTP.phone == raw_phone).delete()
 
     # Lưu bản ghi OTP mới
-    new_otp = OTPLog(
+    new_otp = ZaloOTP(
         phone=raw_phone,
         otp_code=otp_code,
         created_at=now,
