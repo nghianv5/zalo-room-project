@@ -13,3 +13,4 @@ python-multipart
 pytz
 sqlalchemy
 psycopg2-binary
+bcrypt
