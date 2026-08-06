@@ -1505,14 +1505,14 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                     
                     # 5. Phản hồi lại tin nhắn chứa mã OTP cho người dùng
                     reply_text = f"Mã OTP xác thực của bạn là: {otp_code}\nMã có hiệu lực trong 5 phút (đến {expired_at.strftime('%H:%M:%S')}). Vui lòng không chia sẻ mã này."
-                    send_zalo_message(user_id=user_id, message_text=reply_text)
+                    send_zalo_message(user_id=user_id, ai_reply = reply_text)
                     
                     return {"status": "success", "message": "OTP generated and sent"}
                 
                 else:
                     # Trường hợp nhắn 'otp' nhưng quên không kèm Số điện thoại
                     reply_text = "Cú pháp không đúng! Vui lòng nhắn theo cú pháp: OTP <Số điện thoại> (Ví dụ: OTP 0333593681)"
-                    send_zalo_message(user_id=user_id, message_text=reply_text)
+                    send_zalo_message(user_id=user_id, ai_reply = reply_text)
                     return {"status": "invalid_syntax"}
         
         
