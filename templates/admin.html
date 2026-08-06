@@ -661,56 +661,94 @@
 		}
 
         // HÀM RENDER DỮ LIỆU ĐÃ ĐƯỢC TỐI ƯU TRÁNH VỠ BẢNG
-        // ✅ ĐÚNG: Chỉ render nội dung dòng vào <tbody>
-		function renderRoomTable(rooms) {
-			const tbody = document.getElementById("roomTableBody"); // Hoặc ID của tbody
-			if (!tbody) return;
+        function renderRoomTable(rooms) {
+            const tbody = document.getElementById("roomTableBody");
+            if (!tbody) return;
+            tbody.innerHTML = "";
+            document.getElementById("selectAll").checked = false;
+            updateDeleteButton();
 
-			if (!rooms || rooms.length === 0) {
-				tbody.innerHTML = `<tr><td colspan="5" class="text-center">Không có dữ liệu</td></tr>`;
-				return;
-			}
+            if (!rooms || rooms.length === 0) {
+                tbody.innerHTML = `<tr><td colspan="10" class="p-4 text-center text-gray-500">Không tìm thấy phòng phù hợp.</td></tr>`;
+                return;
+            }
 
-			let html = "";
-			rooms.forEach((room) => {
-				html += `
-					<tr>
-						<td>${room.name || room.title || ''}</td>
-						<td>${room.address || ''}</td>
-						<td>${room.price || 0}</td>
-						<!-- Các cột khác -->
-					</tr>
-				`;
-			});
+            let rowsHtml = "";
+            rooms.forEach(r => {
+                const mediaImgs = (r.media_urls || []).map(url => 
+                    `<a href="${url}" target="_blank" class="inline-block"><img src="${url}" class="w-8 h-8 object-cover rounded border m-0.5 hover:opacity-80" /></a>`
+                ).join("");
 
-			tbody.innerHTML = html; // Chỉ cập nhật phần thân bảng
-		}
-		function onEditClick(id) {
-			const room = allRoomsData.find(item => item.id === id);
-			if (room) editRoom(room);
-		}
+                rowsHtml += `
+                    <tr class="hover:bg-gray-50 transition-colors">
+                        <td class="p-2 border text-center">
+                            <input type="checkbox" value="${r.id}" class="room-checkbox w-4 h-4 cursor-pointer" onchange="updateDeleteButton()">
+                        </td>
+                        <td class="p-2 border break-words">
+                            <div class="font-bold text-gray-800">${r.address || '-'}</div>
+                            <div class="text-blue-600 font-semibold">${r.room_name || '-'}</div>
+                            <div class="text-[10px] text-gray-400">ID: ${r.id}</div>
+                        </td>
+                        <td class="p-2 border font-bold text-green-700">${r.price || '-'}</td>
+                        <td class="p-2 border leading-relaxed break-words">
+                            <div>• Tầng: <b>${r.floor || '-'}</b> | WC riêng: <b>${r.is_private_bathroom || '-'}</b></div>
+                            <div>• ĐH: <b>${r.has_ac || '-'}</b> | NL: <b>${r.has_heater || '-'}</b> | Giặt: <b>${r.has_washer || '-'}</b></div>
+                            <div>• Ban công: <b>${r.has_balcony || '-'}</b> | Cửa sổ: <b>${r.has_window || '-'}</b></div>
+                            <div>• Chó mèo: <b>${r.allow_pets || '-'}</b> | Vân tay: <b>${r.has_fingerprint_lock || '-'}</b></div>
+                            <div>• Để xe: ${r.parking_info || '-'} | Tối đa: ${r.max_occupants || '-'} người</div>
+                            <div class="text-gray-500 italic">Khác: ${r.other_amenities || '-'}</div>
+                        </td>
+                        <td class="p-2 border text-gray-600 break-words">${r.service_fees || '-'}</td>
+                        <td class="p-2 border">${mediaImgs || '<span class="text-gray-400">Không có</span>'}</td>
+                        <td class="p-2 border text-blue-700 font-medium">${r.move_in_date || '-'}</td>
+                        <td class="p-2 border text-center">
+                            <span class="px-2 py-1 text-[11px] rounded font-bold inline-block ${
+                                r.status === 'TRỐNG' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
+                            }">
+                                ${r.status || 'TRỐNG'}
+                            </span>
+                        </td>
+                        <td class="p-2 border text-[11px] break-words">
+                            <div>📞 ${r.landlord_phone || '-'}</div>
+                            <div class="text-gray-500">👤 ${r.zalo_user_id || '-'}</div>
+                        </td>
+                        <td class="p-2 border text-center space-x-1 whitespace-nowrap">
+                            <button onclick="onEditClick('${r.id}')" class="px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 font-medium">Sửa</button>
+                            <button onclick="deleteRoom('${r.id}')" class="px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium">Xóa</button>
+                        </td>
+                    </tr>
+                `;
+            });
 
-		function applyFilters() {
-			const vAddress = document.getElementById("filterAddress").value.toLowerCase().trim();
-			const vRoomName = document.getElementById("filterRoomName").value.toLowerCase().trim();
-			const vBathroom = document.getElementById("filterBathroom").value;
-			const vAC = document.getElementById("filterAC").value;
-			const vPets = document.getElementById("filterPets").value;
-			const vPhone = document.getElementById("filterPhone").value.trim();
+            tbody.innerHTML = rowsHtml;
+        }
 
-			const filtered = allRoomsData.filter(r => {
-				const matchAddress = !vAddress || (r.address && r.address.toLowerCase().includes(vAddress));
-				const matchRoomName = !vRoomName || (r.room_name && r.room_name.toLowerCase().includes(vRoomName));
-				const matchBathroom = !vBathroom || r.is_private_bathroom === vBathroom;
-				const matchAC = !vAC || r.has_ac === vAC;
-				const matchPets = !vPets || r.allow_pets === vPets;
-				const matchPhone = !vPhone || (r.landlord_phone && r.landlord_phone.includes(vPhone));
+        function onEditClick(id) {
+            const room = allRoomsData.find(item => item.id === id);
+            if (room) editRoom(room);
+        }
 
-				return matchAddress && matchRoomName && matchBathroom && matchAC && matchPets && matchPhone;
-			});
+        function applyFilters() {
+            const vAddress = document.getElementById("filterAddress").value.toLowerCase().trim();
+            const vRoomName = document.getElementById("filterRoomName").value.toLowerCase().trim();
+            const vBathroom = document.getElementById("filterBathroom").value;
+            const vAC = document.getElementById("filterAC").value;
+            const vPets = document.getElementById("filterPets").value;
+            const vPhone = document.getElementById("filterPhone").value.trim();
 
-			renderRoomTable(filtered);
-		}
+            const filtered = allRoomsData.filter(r => {
+                const matchAddress = !vAddress || (r.address && r.address.toLowerCase().includes(vAddress));
+                const matchRoomName = !vRoomName || (r.room_name && r.room_name.toLowerCase().includes(vRoomName));
+                const matchBathroom = !vBathroom || r.is_private_bathroom === vBathroom;
+                const matchAC = !vAC || r.has_ac === vAC;
+                const matchPets = !vPets || r.allow_pets === vPets;
+                const matchPhone = !vPhone || (r.landlord_phone && r.landlord_phone.includes(vPhone));
+
+                return matchAddress && matchRoomName && matchBathroom && matchAC && matchPets && matchPhone;
+            });
+
+            renderRoomTable(filtered);
+        }
 
         function resetFilters() {
             document.getElementById("filterAddress").value = "";
