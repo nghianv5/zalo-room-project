@@ -102,8 +102,7 @@ PENDING_MEDIA_CACHE: Dict[str, dict] = {}
 CACHE_TTL_SECONDS = 600  # Bộ nhớ đệm tự hủy sau 10 phút
 
 class UnifiedLoginSchema(BaseModel):
-    phone: Optional[str] = None      
-    username: Optional[str] = None   
+    phone: Optional[str] = None       
     password: str
 
 class RegisterModel(BaseModel):
@@ -374,15 +373,68 @@ def check_phone_exists(phone: str) -> bool:
 
 
 @app.post("/api/admin/change-password")
-def change_admin_password(data: AdminChangePasswordSchema):
-    current_pass = os.environ.get("ADMIN_PASSWORD", ADMIN_PASSWORD)
-    if data.old_password != current_pass:
-        raise HTTPException(status_code=400, detail="Mật khẩu hiện tại không chính xác!")
+async def change_password(
+    payload: AdminChangePasswordSchema, 
+    request: Request,
+    db: Session = Depends(get_db)
+):
+    # Lấy thông tin từ body request
+    old_password = payload.old_password.strip()
+    new_password = payload.new_password.strip()
 
-    os.environ["ADMIN_PASSWORD"] = data.new_password
+    if not old_password or not new_password:
+        raise HTTPException(
+            status_code=400, 
+            detail="Vui lòng nhập đầy đủ mật khẩu cũ và mật khẩu mới!"
+        )
+
+    # 1. Xác định username đang thực hiện đổi mật khẩu 
+    # (Ưu tiên lấy từ JSON body nếu client gửi, hoặc truyền từ header/session)
+    body_data = await request.json()
+    username = body_data.get("username", "").strip()
+
+    if not username:
+        raise HTTPException(
+            status_code=400, 
+            detail="Không tìm thấy thông tin tài khoản cần đổi mật khẩu!"
+        )
+
+    # 2. Truy vấn tài khoản trong bảng user_web của PostgreSQL theo trường `phone`
+    user_account = db.query(UserWeb).filter(UserWeb.phone == username).first()
+
+    if not user_account:
+        raise HTTPException(
+            status_code=404, 
+            detail="Tài khoản không tồn tại trên hệ thống!"
+        )
+
+    if not user_account.password:
+        raise HTTPException(
+            status_code=400, 
+            detail="Tài khoản này chưa tạo mật khẩu!"
+        )
+
+    # 3. Kiểm tra mật khẩu cũ (So sánh bằng bcrypt tương tự như hàm login)
+    if not bcrypt.checkpw(old_password.encode('utf-8'), user_account.password.encode('utf-8')):
+        raise HTTPException(
+            status_code=400, 
+            detail="Mật khẩu cũ không chính xác!"
+        )
+
+    # 4. Băm (Hash) mật khẩu mới bằng bcrypt
+    salt = bcrypt.gensalt()
+    hashed_new_password = bcrypt.hashpw(new_password.encode('utf-8'), salt).decode('utf-8')
+
+    # 5. Cập nhật mật khẩu mới và thời gian update vào PostgreSQL
+    user_account.password = hashed_new_password
+    user_account.updated_at = datetime.utcnow()
+
+    # Commit thay đổi vào CSDL PostgreSQL
+    db.commit()
+
     return {
         "status": "success", 
-        "message": "Đã cập nhật mật khẩu mới thành công!"
+        "message": "Đổi mật khẩu thành công!"
     }
 
 
