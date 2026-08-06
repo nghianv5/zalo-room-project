@@ -564,10 +564,8 @@
 
 				if (res.ok) {
 					const loggedInUser = data.username || username;
-					
-					// ✅ Lưu thống nhất adminUsername
-					localStorage.setItem('isAdminLoggedIn', 'true');
-					localStorage.setItem('adminUsername', loggedInUser);
+					localStorage.setItem("username", username);
+
 
 					document.getElementById('loginModal').classList.add('hidden');
 					document.getElementById('adminDashboard').classList.remove('hidden');
