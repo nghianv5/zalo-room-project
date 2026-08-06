@@ -219,7 +219,7 @@
 		  <input type="password" id="loginPassword" class="w-full border rounded p-2 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Nhập mật khẩu">
 		</div>
 
-		<button onclick="handleLogin()" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded mb-3">
+		<button onclick="handleLogin(event)" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded mb-3">
 		  Đăng nhập
 		</button>
 
@@ -588,7 +588,10 @@
 		}
 
 		// 3. Đăng nhập & Tải dữ liệu phòng theo Landlord Phone
-		async function handleLogin() {
+		async function handleLogin(e) {
+			if (e && typeof e.preventDefault === 'function') {
+				e.preventDefault();
+			}
 			const username = document.getElementById('loginUsername').value.trim();
 			const password = document.getElementById('loginPassword').value.trim();
 
