@@ -681,7 +681,7 @@
 		}
 
         // HÀM RENDER DỮ LIỆU ĐÃ ĐƯỢC TỐI ƯU TRÁNH VỠ BẢNG
-        function renderTable(rooms) {
+        function renderRoomTable(rooms) {
             const tbody = document.getElementById("roomTableBody");
             if (!tbody) return;
             tbody.innerHTML = "";
@@ -767,7 +767,7 @@
                 return matchAddress && matchRoomName && matchBathroom && matchAC && matchPets && matchPhone;
             });
 
-            renderTable(filtered);
+            renderRoomTable(filtered);
         }
 
         function resetFilters() {
