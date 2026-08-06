@@ -333,9 +333,8 @@ def format_international_phone(phone_str: str, default_region: str = "VN") -> st
     except NumberParseException:
         pass
 
-    # Fallback: Nếu thư viện không parse được, chỉ giữ lại số
+    # Bổ sung Fallback lọc giữ lại số nếu thư viện không parse được
     clean_digits = re.sub(r'\D', '', phone_str)
-    if clean_digits.startswith("0") and len(clean_digits) == 10:
     if clean_digits.startswith("0") and len(clean_digits) == 10:
         return "84" + clean_digits[1:]
     return clean_digits
