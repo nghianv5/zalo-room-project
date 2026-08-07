@@ -558,14 +558,17 @@
 				const res = await fetch('/api/login', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ phone:username, password:password })
+					body: JSON.stringify({ phone: username, password: password })
 				});
 				const data = await res.json();
 
 				if (res.ok) {
 					const loggedInUser = data.username || username;
-					localStorage.setItem("username", username);
-
+					
+					// ✅ ĐÃ SỬA: Lưu đồng bộ các khóa cho checkAuth() kiểm tra khi F5
+					localStorage.setItem("isAdminLoggedIn", "true");
+					localStorage.setItem("adminUsername", loggedInUser);
+					localStorage.setItem("username", loggedInUser);
 
 					document.getElementById('loginModal').classList.add('hidden');
 					document.getElementById('adminDashboard').classList.remove('hidden');
