@@ -7,7 +7,7 @@ import io
 import random
 from typing import Dict, List, Optional
 import uvicorn
-from fastapi import FastAPI, Request, BackgroundTasks, UploadFile, File, HTTPException, Depends, Header
+from fastapi import FastAPI, Request, BackgroundTasks, UploadFile, File, HTTPException, Depends, Header, status
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from qdrant_client import QdrantClient
@@ -752,7 +752,7 @@ def get_current_user(
         )
     return user
     
-@app.get("/api/rooms")
+
 @app.get("/api/rooms")
 def get_rooms(
     current_user: UserWeb = Depends(get_current_user),
@@ -1252,8 +1252,8 @@ async def get_rooms_filter(
 ):
     must_conditions = []
 
-    # 🔒 Phân quyền: Nếu không phải adminsuper thì chỉ lấy data của SĐT đó[cite: 4]
-    if username and username != "adminsuper":
+    # 🔒 Phân quyền: Nếu không phải adminpro thì chỉ lấy data của SĐT đó[cite: 4]
+    if username and username != "adminpro":
         must_conditions.append(
             models.FieldCondition(
                 key="landlord_phone",
