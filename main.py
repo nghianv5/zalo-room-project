@@ -15,8 +15,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from qdrant_client.http import models as qdrant_models
 
+
+app = FastAPI()
 # Import toàn bộ các Service, Helper & Models từ service.py
-from service import *
+from services import *
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
