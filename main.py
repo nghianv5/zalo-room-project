@@ -16,28 +16,7 @@ from sqlalchemy.orm import Session
 from qdrant_client.http import models as qdrant_models
 
 # Import toàn bộ các Service, Helper & Models từ service.py
-from service import (
-    app,
-    get_db,
-    get_current_user,
-    UserWeb,
-    UnifiedLoginSchema,
-    RegisterModel,
-    LoginUserSchema,
-    AdminChangePasswordSchema,
-    RequestOTPModel,
-    format_national_phone,
-    send_otp_via_zalo_oa,
-    ai_validate_and_extract_room,
-    upsert_room_to_db,
-    qdrant_client,
-    COLLECTION_NAME,
-    VN_TZ,
-    process_excel_file,
-    send_zalo_message,
-    process_zalo_ai_logic,
-    ZALO_ACCESS_TOKEN,
-)
+from service import *
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
