@@ -447,45 +447,6 @@
 			document.getElementById('loginModal').classList.remove('hidden');
 		}
 
-		// Hàm gửi yêu cầu nhận OTP tới Backend & Tạo hiệu ứng Đếm ngược 60 giây
-		async function handleRequestOTP() {
-			const phoneInput = document.getElementById('regPhone');
-			const btnSend = document.getElementById('btnSendOTP');
-			const phone = phoneInput.value.trim();
-
-			if (!phone || phone.length < 9) {
-				alert("Vui lòng nhập đúng Số điện thoại!");
-				phoneInput.focus();
-				return;
-			}
-
-			// Khóa nút để tránh bấm liên tục
-			btnSend.disabled = true;
-			btnSend.classList.add('opacity-50', 'cursor-not-allowed');
-			btnSend.innerText = "Đang gửi...";
-
-			try {
-				const res = await fetch('/api/user/request-register-otp', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ phone: phone })
-				});
-				
-				const data = await res.json();
-
-				if (res.ok) {
-					alert("✅ Mã OTP đã được gửi tới Zalo của số " + phone + ". Vui lòng kiểm tra tin nhắn Zalo!");
-					startOTPCountdown(60); // Đếm ngược 60s trước khi cho gửi lại
-				} else {
-					alert("⚠️ " + (data.detail || "Không thể gửi OTP. Hãy kiểm tra lại SĐT hoặc quét mã QR!"));
-					resetOTPButton();
-				}
-			} catch (err) {
-				console.error("Lỗi:", err);
-				alert("❌ Lỗi kết nối tới máy chủ khi gửi OTP!");
-				resetOTPButton();
-			}
-		}
 		
 		// Hàm đếm ngược thời gian chờ gửi lại OTP
 		function startOTPCountdown(seconds) {

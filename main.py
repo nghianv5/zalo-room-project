@@ -33,16 +33,6 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-# --- UI ROUTES ---
-@app.get("/")
-async def read_root(request: Request):
-    zalo_oa_id = os.environ.get("ZALO_OA_ID")
-    return templates.TemplateResponse(
-        request=request,
-        name="form_send zalo_otp.html",
-        context={"ZALO_OA_ID": zalo_oa_id}
-    )
-
 @app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard(request: Request):
     return templates.TemplateResponse(request=request, name="admin.html")
@@ -82,6 +72,16 @@ async def register_user(data: RegisterModel, db: Session = Depends(get_db)):
     db.commit()
 
     return {"status": "success", "message": "Đăng ký tài khoản thành công!"}
+    
+# --- ROOM MANAGEMENT ROUTES ---
+@app.delete("/api/rooms/{point_id}")
+def delete_room_from_web(point_id: str):
+    try:
+        qdrant_client.delete(collection_name=COLLECTION_NAME, points_selector=[point_id], wait=True)
+        return {"status": "success", "message": "Đã xóa!"}
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.post("/api/login")
 def unified_login(data: UnifiedLoginSchema, db: Session = Depends(get_db)):
@@ -119,38 +119,6 @@ def unified_login(data: UnifiedLoginSchema, db: Session = Depends(get_db)):
 
     return {"status": "success", "role": "USER", "username": account.phone}
 
-@app.post("/api/user/login")
-def user_login(data: LoginUserSchema, db: Session = Depends(get_db)):
-    clean_phone = format_national_phone(data.phone)
-    account = db.query(UserWeb).filter(UserWeb.phone == clean_phone).first()
-    if not account or not account.password:
-        raise HTTPException(status_code=400, detail="Tài khoản không tồn tại hoặc chưa hoàn tất đăng ký!")
-
-    if not bcrypt.checkpw(data.password.encode('utf-8'), account.password.encode('utf-8')):
-        raise HTTPException(status_code=401, detail="Mật khẩu không chính xác!")
-
-    return {"status": "success", "message": "Đăng nhập thành công!", "phone": account.phone}
-
-@app.post("/api/user/request-register-otp")
-async def request_register_otp(data: RequestOTPModel, db: Session = Depends(get_db)):
-    raw_phone = data.phone
-    clean_phone = format_national_phone(raw_phone)
-    if not clean_phone or len(clean_phone) < 9:
-        raise HTTPException(status_code=400, detail="Số điện thoại không hợp lệ")
-
-    otp = str(random.randint(100000, 999999))
-    now = datetime.now(timezone.utc)
-    expired_at = now + timedelta(minutes=5)
-
-    db.query(UserWeb).filter(UserWeb.phone == clean_phone).delete()
-    new_otp = UserWeb(phone=clean_phone, otp=otp, expired_at=expired_at)
-    db.add(new_otp)
-    db.commit()
-
-    result = send_otp_via_zalo_oa(user_zalo_id=clean_phone, otp=otp, access_token=ZALO_ACCESS_TOKEN)
-    if result.get("error") != 0:
-        return {"success": False, "message": "Gửi OTP thất bại", "details": result}
-    return {"message": "Mã OTP đã được gửi thành công!"}
 
 @app.post("/api/admin/change-password")
 async def change_password(payload: AdminChangePasswordSchema, db: Session = Depends(get_db)):
@@ -176,15 +144,6 @@ async def change_password(payload: AdminChangePasswordSchema, db: Session = Depe
     db.commit()
 
     return {"status": "success", "message": "Đổi mật khẩu thành công!"}
-
-# --- ROOM MANAGEMENT ROUTES ---
-@app.delete("/api/rooms/{point_id}")
-def delete_room_from_web(point_id: str):
-    try:
-        qdrant_client.delete(collection_name=COLLECTION_NAME, points_selector=[point_id], wait=True)
-        return {"status": "success", "message": "Đã xóa!"}
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/rooms/upload-excel")
 async def upload_excel_rooms(file: UploadFile = File(...)):

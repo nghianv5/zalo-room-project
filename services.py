@@ -241,17 +241,6 @@ def add_pending_media(user_id: str, new_urls: list):
         "timestamp": time.time()
     }
 
-# --- EXTERNAL INTEGRATIONS (Zalo, Gemini, Cloudinary) ---
-def send_otp_via_zalo_oa(user_zalo_id: str, otp: str, access_token: str):
-    url = "https://openapi.zalo.me/v2.0/oa/message"
-    headers = {"Content-Type": "application/json", "access_token": access_token}
-    payload = {
-        "recipient": {"user_id": user_zalo_id},
-        "message": {"text": f"Mã xác thực OTP của bạn là: {otp}. Mã có hiệu lực trong 5 phút. Vui lòng không chia sẻ mã này cho ai."}
-    }
-    response = requests.post(url, headers=headers, data=json.dumps(payload))
-    return response.json()
-
 def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
     access_token = ZALO_ACCESS_TOKEN
     if not access_token:
