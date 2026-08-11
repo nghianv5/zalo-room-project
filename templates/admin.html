@@ -579,7 +579,7 @@
 				// ✅ Lấy đúng key adminUsername
 				const username = localStorage.getItem("adminUsername") || "";
 
-				let url = `/api/rooms?username=${encodeURIComponent(username)}&`;
+				let url = `/api/admin/rooms?username=${encodeURIComponent(username)}&`;
 				if (minPrice) url += `min_price=${minPrice}&`;
 				if (maxPrice) url += `max_price=${maxPrice}&`;
 				if (fromDate) url += `from_date=${fromDate}&`;
