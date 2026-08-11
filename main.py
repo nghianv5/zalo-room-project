@@ -33,9 +33,6 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
-@app.get("/admin", response_class=HTMLResponse)
-def admin_dashboard(request: Request):
-    return templates.TemplateResponse(request=request, name="admin.html")
 
 @app.get("/zalo_verifierCjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn.html", response_class=PlainTextResponse)
 async def verify_zalo_specific_file():
@@ -84,7 +81,7 @@ def delete_room_from_web(point_id: str):
 
 
 @app.post("/api/login")
-def unified_login(data: UnifiedLoginSchema, db: Session = Depends(get_db)):
+def api_login(data: UnifiedLoginSchema, db: Session = Depends(get_db)):
     phone_val = getattr(data, 'phone', None) or getattr(data, 'username', None)
     if not phone_val:
         raise HTTPException(status_code=400, detail="Vui lòng nhập số điện thoại hoặc tên đăng nhập!")

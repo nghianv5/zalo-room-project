@@ -446,31 +446,6 @@
 			document.getElementById('registerModal').classList.add('hidden');
 			document.getElementById('loginModal').classList.remove('hidden');
 		}
-
-		
-		// Hàm đếm ngược thời gian chờ gửi lại OTP
-		function startOTPCountdown(seconds) {
-			const btnSend = document.getElementById('btnSendOTP');
-			let timeLeft = seconds;
-
-			const timer = setInterval(() => {
-				if (timeLeft <= 0) {
-					clearInterval(timer);
-					resetOTPButton();
-				} else {
-					btnSend.innerText = `Thử lại (${timeLeft}s)`;
-					timeLeft--;
-				}
-			}, 1000);
-		}
-		
-		// Khôi phục nút Gửi OTP
-		function resetOTPButton() {
-			const btnSend = document.getElementById('btnSendOTP');
-			btnSend.disabled = false;
-			btnSend.classList.remove('opacity-50', 'cursor-not-allowed');
-			btnSend.innerText = "Gửi OTP";
-		}
 		
 		// 2. Xác nhận Đăng ký
 		async function handleRegister() {
