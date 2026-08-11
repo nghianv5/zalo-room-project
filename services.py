@@ -81,7 +81,7 @@ try:
     qdrant_client.create_payload_index(
         collection_name=COLLECTION_NAME,
         field_name="landlord_phone",
-        field_schema=models.PayloadSchemaType.KEYWORD,
+        field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
     )
 except Exception:
     pass
