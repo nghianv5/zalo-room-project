@@ -33,6 +33,9 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+@app.get("/admin", response_class=HTMLResponse)
+def admin_dashboard(request: Request):
+    return templates.TemplateResponse(request=request, name="admin.html")
 
 @app.get("/zalo_verifierCjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn.html", response_class=PlainTextResponse)
 async def verify_zalo_specific_file():
