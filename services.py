@@ -23,6 +23,7 @@ from google import genai
 from google.genai import types
 import cloudinary
 import cloudinary.uploader
+import string
 
 # --- CẤU HÌNH MÔI TRƯỜNG & KHỞI TẠO SERVICES ---
 ZALO_ACCESS_TOKEN = os.environ.get("ZALO_ACCESS_TOKEN")
@@ -83,6 +84,11 @@ try:
         field_name="landlord_phone",
         field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
     )
+    qdrant_client.create_payload_index(
+        collection_name=COLLECTION_NAME,
+        field_name="room_code",
+        field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
+    )
 except Exception:
     pass
 
@@ -127,6 +133,7 @@ class RequestOTPModel(BaseModel):
     phone: str
 
 class RoomCreateUpdateSchema(BaseModel):
+    room_code: Optional[str] = None
     address: str
     room_name: Optional[str] = "Phòng trọ"
     price: Optional[str] = "Chưa rõ"
@@ -148,6 +155,21 @@ class RoomCreateUpdateSchema(BaseModel):
     status: Optional[str] = "TRỐNG"
     landlord_phone: Optional[str] = "Chưa rõ"
 
+
+
+# --- MODEL ORDER_ROOM TRONG SQLALCHEMY ---
+class OrderRoom(Base):
+    __tablename__ = "order_room"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_zalo_id = Column(String, nullable=True)     # Zalo ID người thuê
+    tenant_phone = Column(String, nullable=True)       # SĐT người thuê
+    landlord_zalo_id = Column(String, nullable=True)   # Zalo ID chủ nhà
+    landlord_phone = Column(String, nullable=True)     # SĐT chủ nhà
+    room_code = Column(String, index=True, nullable=False) # Mã phòng 6 ký tự
+    created_at = Column(DateTime, default=datetime.utcnow) # Thời gian tạo đơn
+    
+    
 # --- DATABASE DEPENDENCY & CURRENT USER HELPER ---
 def get_db():
     db = SessionLocal()
@@ -378,6 +400,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYS
         payload = {
             "address": address,
             "room_name": room_name,
+            "room_code": str(data.get("room_code")),
             "price": str(data.get("price", "Chưa rõ")),
             "price_num": parse_price_to_number(data.get("price", "")),
             "floor": str(data.get("floor", "Chưa rõ")),
@@ -473,6 +496,7 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
             return None
         return {
             "address": str(raw_address).strip(),
+            "room_code": str(data.get("room_code")),
             "room_name": str(data.get("room_name") or data.get("Tên phòng") or "Phòng trọ").strip(),
             "price": str(data.get("price") or data.get("Giá thuê") or "Chưa rõ").strip(),
             "floor": str(data.get("floor") or "Chưa rõ").strip(),
@@ -608,3 +632,86 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
         ai_reply = "Dạ hệ thống đang bận một chút, anh/chị chờ em vài giây rồi nhắn lại giúp em nhé!"
 
     send_zalo_message(user_id, ai_reply, media_urls=urls_to_send)
+    
+    
+# --- HÀM TẠO MÃ PHÓNG RANDOM 6 KÝ TỰ ---
+def generate_unique_room_code() -> str:
+    """Sinh ngẫu nhiên mã phòng 6 ký tự chữ và số (Viết hoa)"""
+    chars = string.ascii_uppercase + string.digits
+    while True:
+        code = ''.join(random.choices(chars, k=6))
+        # Kiểm tra mã đã tồn tại trên Qdrant chưa
+        try:
+            records, _ = qdrant_client.scroll(
+                collection_name=COLLECTION_NAME,
+                scroll_filter=qdrant_models.Filter(
+                    must=[qdrant_models.FieldCondition(key="room_code", match=qdrant_models.MatchValue(value=code))]
+                ),
+                limit=1
+            )
+            if not records:
+                return code
+        except Exception:
+            return code
+
+def process_room_booking(tenant_zalo_id: str, room_code: str, db: Session) -> str:
+    """Xử lý xác nhận đặt lịch xem phòng"""
+    room_code = room_code.upper().strip()
+    
+    # 1. Tìm thông tin phòng theo room_code trên Qdrant
+    try:
+        records, _ = qdrant_client.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=qdrant_models.Filter(
+                must=[qdrant_models.FieldCondition(key="room_code", match=qdrant_models.MatchValue(value=room_code))]
+            ),
+            limit=1
+        )
+    except Exception as e:
+        print("❌ Lỗi truy vấn Qdrant:", e)
+        return "Dạ hệ thống đang gặp sự cố, vui lòng thử lại sau ít phút!"
+
+    if not records:
+        return f"❌ Không tìm thấy phòng trọ nào có mã phòng **{room_code}**. Vui lòng kiểm tra lại mã!"
+
+    room_data = records[0].payload
+    landlord_phone = room_data.get("landlord_phone", "")
+    landlord_zalo_id = room_data.get("zalo_user_id", "")
+    room_address = room_data.get("address", "Chưa rõ")
+    room_name = room_data.get("room_name", "Phòng trọ")
+
+    # 2. Tìm SĐT của người thuê (nếu người thuê đã từng đăng ký/xác thực OTP trên Zalo)
+    tenant_user = db.query(UserWeb).filter(UserWeb.user_id == tenant_zalo_id).first()
+    tenant_phone = tenant_user.phone if tenant_user else "Chưa xác thực SĐT"
+
+    # 3. Lưu thông tin đơn vào bảng order_room
+    new_order = OrderRoom(
+        tenant_zalo_id=tenant_zalo_id,
+        tenant_phone=tenant_phone,
+        landlord_zalo_id=landlord_zalo_id,
+        landlord_phone=landlord_phone,
+        room_code=room_code,
+        created_at=datetime.utcnow()
+    )
+    db.add(new_order)
+    db.commit()
+
+    # 4. Gửi thông báo chủ động tới Zalo của Chủ nhà (nếu có landlord_zalo_id)
+    if landlord_zalo_id and landlord_zalo_id != "SYSTEM":
+        msg_to_landlord = (
+            f"🔔 **CÓ LỊCH HẸN XEM PHÓNG MỚI!**\n\n"
+            f"📍 Mã phòng: {room_code} ({room_name} - {room_address})\n"
+            f"👤 Zalo ID người thuê: {tenant_zalo_id}\n"
+            f"📞 SĐT người thuê: {tenant_phone}\n"
+            f"⏰ Thời gian đặt: {datetime.now(VN_TZ).strftime('%H:%M %d/%m/%Y')}\n\n"
+            f"👉 Vui lòng liên hệ lại với khách hàng để chốt lịch hẹn chi tiết!"
+        )
+        send_zalo_message(user_id=landlord_zalo_id, ai_reply=msg_to_landlord)
+
+    return (
+        f"✅ **ĐẶT LỊCH XEM PHÓNG THÀNH CÔNG!**\n\n"
+        f"🏠 Phòng: {room_name} (Mã: {room_code})\n"
+        f"📍 Địa chỉ: {room_address}\n"
+        f"📞 SĐT chủ nhà: {landlord_phone}\n\n"
+        f"Yêu cầu của bạn đã được gửi trực tiếp tới Chủ nhà. Chủ nhà sẽ chủ động liên hệ lại sớm nhất ạ!"
+    )

@@ -306,22 +306,29 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                     reply_text = "Cú pháp không đúng! Vui lòng nhắn theo cú pháp: OTP <Số thoại điện> (Ví dụ: OTP 0333593681)"
                     send_zalo_message(user_id=user_id, ai_reply=reply_text)
                     return {"status": "invalid_syntax"}
+            # 2. CHỨC NĂNG MỚI: Xử lý Đặt lịch xem phòng theo mã phòng 6 ký tự
+            # Ví dụ tin nhắn: "Tôi muốn đặt lịch xem phòng A1B2C3" hoặc "Xem phong A1B2C3"
+            booking_match = re.search(r'(?:đặt lịch|xem phòng|mã phòng|đặt phòng)\s*([a-zA-Z0-9]{6})\b', clean_message, re.IGNORECASE)
+            if booking_match:
+                room_code = booking_match.group(1).upper()
+                reply_msg = process_room_booking(tenant_zalo_id=user_id, room_code=room_code, db=db)
+                send_zalo_message(user_id=user_id, ai_reply=reply_msg)
+                return {"status": "success", "message": "Processed room booking"}
+                if event_name in ["user_send_text", "user_send_image", "user_send_file", "user_send_video"]:
+                    message_obj = data.get("message", {})
+                    text = message_obj.get("text", "")
+                    attachments = message_obj.get("attachments", [])
+                    media_items = []
+                    for item in attachments:
+                        payload = item.get("payload", {})
+                        media_url = payload.get("url") or payload.get("thumbnailUrl")
+                        if media_url:
+                            media_items.append({
+                                "url": media_url,
+                                "is_video": (item.get("type") == "video") or ("user_send_video" in event_name)
+                            })
 
-        if event_name in ["user_send_text", "user_send_image", "user_send_file", "user_send_video"]:
-            message_obj = data.get("message", {})
-            text = message_obj.get("text", "")
-            attachments = message_obj.get("attachments", [])
-            media_items = []
-            for item in attachments:
-                payload = item.get("payload", {})
-                media_url = payload.get("url") or payload.get("thumbnailUrl")
-                if media_url:
-                    media_items.append({
-                        "url": media_url,
-                        "is_video": (item.get("type") == "video") or ("user_send_video" in event_name)
-                    })
-
-            background_tasks.add_task(process_zalo_ai_logic, text, media_items, sender_id)
+                    background_tasks.add_task(process_zalo_ai_logic, text, media_items, sender_id)
 
     except Exception as e:
         print("❌ [Webhook Exception]:", e)
