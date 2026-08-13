@@ -292,6 +292,26 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                     background_tasks.add_task(handle_excel)
                     return {"status": "success"}
 
+        # Trường hợp 1: Người dùng vừa bấm nút CHIA SẺ SỐ ĐIỆN THOẠI từ Zalo
+        if data.get("event_name") == "user_submit_info": # Sự kiện nhận SĐT từ Zalo API
+            user_phone = data.get("info", {}).get("phone")
+
+            if user_phone:
+                # 🎯 Bắt buộc: Tạo mới / cập nhật User vào bảng user_web
+                saved_user = save_or_update_user_web(
+                    db=db,
+                    zalo_user_id=sender_id,
+                    phone=user_phone
+                )
+                
+                # Gửi tin nhắn xác nhận cho User
+                send_zalo_message(
+                    zalo_user_id, 
+                    "✅ Đăng ký thông tin thành công! Giờ bạn có thể tiếp tục gửi thông tin phòng để đăng bài."
+                )
+                return {"status": "success"}
+
+
         if event_name == "user_send_text":
             user_id = data.get("sender", {}).get("id")
             raw_message = data.get("message", {}).get("text", "")
@@ -344,21 +364,23 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                 reply_msg = process_room_booking(tenant_zalo_id=user_id, room_code=room_code, db=db)
                 send_zalo_message(user_id=user_id, ai_reply=reply_msg)
                 return {"status": "success", "message": "Processed room booking"}
-                if event_name in ["user_send_text", "user_send_image", "user_send_file", "user_send_video"]:
-                    message_obj = data.get("message", {})
-                    text = message_obj.get("text", "")
-                    attachments = message_obj.get("attachments", [])
-                    media_items = []
-                    for item in attachments:
-                        payload = item.get("payload", {})
-                        media_url = payload.get("url") or payload.get("thumbnailUrl")
-                        if media_url:
-                            media_items.append({
-                                "url": media_url,
-                                "is_video": (item.get("type") == "video") or ("user_send_video" in event_name)
-                            })
+                
+            #
+            if event_name in ["user_send_text", "user_send_image", "user_send_file", "user_send_video"]:
+                message_obj = data.get("message", {})
+                text = message_obj.get("text", "")
+                attachments = message_obj.get("attachments", [])
+                media_items = []
+                for item in attachments:
+                    payload = item.get("payload", {})
+                    media_url = payload.get("url") or payload.get("thumbnailUrl")
+                    if media_url:
+                        media_items.append({
+                            "url": media_url,
+                            "is_video": (item.get("type") == "video") or ("user_send_video" in event_name)
+                        })
 
-                    background_tasks.add_task(process_zalo_ai_logic, text, media_items, sender_id)
+                background_tasks.add_task(process_zalo_ai_logic, text, media_items, sender_id)
 
     except Exception as e:
         print("❌ [Webhook Exception]:", e)

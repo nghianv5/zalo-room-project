@@ -784,7 +784,7 @@
 				service_fees: document.getElementById("service_fees").value,
 				move_in_date: document.getElementById("move_in_date").value,
 				status: document.getElementById("status").value,
-				landlord_phone: document.getElementById("landlord_phone").value,
+				landlord_phone: localStorage.getItem("username"), // lấy username web làm landlord_phone
 				media_urls: mediaArray
 			};
 
