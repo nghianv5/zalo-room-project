@@ -798,23 +798,22 @@
 					body: JSON.stringify(payload)
 				});
 
+				const result = await res.json();
+
 				if (res.ok) {
+					alert("✅ Lưu thông tin thành công!");
 					closeModal();
 					loadRooms();
 				} else {
-					alert("❌ Lưu thất bại, vui lòng kiểm tra lại dữ liệu!");
+					// Lấy chi tiết lỗi từ backend nếu có
+					const detailMsg = result.detail ? (typeof result.detail === 'object' ? JSON.stringify(result.detail) : result.detail) : "Lưu thất bại!";
+					alert("❌ Lỗi: " + detailMsg);
 				}
 			} catch (err) {
 				console.error("Lỗi khi lưu phòng:", err);
+				alert("❌ Lỗi kết nối máy chủ!");
 			}
 		}
-
-        async function deleteRoom(id) {
-            if (confirm("Bạn có chắc chắn muốn xóa phòng này?")) {
-                await fetch(`${API_URL}/${id}`, { method: "DELETE" });
-                loadRooms();
-            }
-        }
 
         function openModal() {
             document.getElementById("roomForm").reset();

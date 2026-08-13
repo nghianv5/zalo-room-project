@@ -83,6 +83,36 @@ def delete_room_from_web(point_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# --- ROOM MANAGEMENT ROUTES ---
+@app.post("/api/rooms")
+async def save_or_update_room(
+    data: RoomCreateUpdateSchema, 
+    point_id: Optional[str] = None
+):
+    try:
+        # Chuyển dữ liệu schema sang dict
+        room_dict = data.model_dump() if hasattr(data, "model_dump") else data.dict()
+        
+        # Nếu chưa có mã phòng 6 ký tự, tự động tạo mới
+        if not room_dict.get("room_code"):
+            room_dict["room_code"] = generate_unique_room_code()
+
+        # Gọi hàm upsert dữ liệu vào Qdrant DB
+        success = upsert_room_to_db(
+            data=room_dict, 
+            point_id=point_id, 
+            zalo_user_id="ADMIN_WEB",
+            media_urls=room_dict.get("media_urls", [])
+        )
+        
+        if success:
+            return {"status": "success", "message": "Lưu thông tin phòng thành công!"}
+        else:
+            raise HTTPException(status_code=400, detail="Không thể ghi dữ liệu phòng vào cơ sở dữ liệu!")
+            
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/login")
 def api_login(data: UnifiedLoginSchema, db: Session = Depends(get_db)):
     phone_val = getattr(data, 'phone', None) or getattr(data, 'username', None)
