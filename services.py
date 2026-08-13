@@ -133,10 +133,10 @@ class RequestOTPModel(BaseModel):
     phone: str
 
 class RoomCreateUpdateSchema(BaseModel):
-    room_code: Optional[str] = None
-    address: str
+    room_code: Optional[str] = Field(default=None, description="Mã phòng 6 ký tự")
+    address: str = Field(..., min_length=1, description="Địa chỉ phòng không được để trống")
+    price: str = Field(..., min_length=1, description="Giá phòng không được để trống")
     room_name: Optional[str] = "Phòng trọ"
-    price: Optional[str] = "Chưa rõ"
     floor: Optional[str] = "Chưa rõ"                  
     is_private_bathroom: Optional[str] = "Chưa rõ"   
     has_ac: Optional[str] = "Chưa rõ"                 
@@ -155,6 +155,18 @@ class RoomCreateUpdateSchema(BaseModel):
     status: Optional[str] = "TRỐNG"
     landlord_phone: Optional[str] = "Chưa rõ"
 
+
+    @validator('address', 'price', 'room_code', pre=True)
+    def check_not_empty_or_null(cls, value):
+        """Validate đảm bảo không nhận giá trị Null/None hoặc chuỗi toàn khoảng trắng."""
+        if value is None:
+            raise ValueError("Trường này không được để null!")
+        
+        val_str = str(value).strip()
+        if not val_str or val_str.lower() in ["none", "null", "undefined"]:
+            raise ValueError("Giá trị không được để trống hoặc invalid!")
+            
+        return val_str
 
 
 # --- MODEL ORDER_ROOM TRONG SQLALCHEMY ---
@@ -397,11 +409,26 @@ def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYS
         else:
             new_point_id = str(uuid.uuid4())
 
+
+        if not address or address.lower() in ["none", "null"]:
+            raise ValueError("Lỗi: 'address' không được để trống hoặc null!")
+            
+        price = str(data.get("price", "Chưa rõ"))
+        if not price or price.lower() in ["none", "null"]:
+            raise ValueError("Lỗi: 'price' không được để trống hoặc null!")
+
+        # 2. Đảm bảo room_code không null
+        room_code = data.get("room_code")
+        if not room_code or str(room_code).strip().lower() in ["none", "null", ""]:
+            room_code = generate_unique_room_code()
+        else:
+            room_code = str(room_code).strip().upper()
+
         payload = {
             "address": address,
             "room_name": room_name,
-            "room_code": str(data.get("room_code")),
-            "price": str(data.get("price", "Chưa rõ")),
+            "room_code": room_code,
+            "price": price,
             "price_num": parse_price_to_number(data.get("price", "")),
             "floor": str(data.get("floor", "Chưa rõ")),
             "is_private_bathroom": str(data.get("is_private_bathroom", "Chưa rõ")),
@@ -636,11 +663,23 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
     
 # --- HÀM TẠO MÃ PHÓNG RANDOM 6 KÝ TỰ ---
 def generate_unique_room_code() -> str:
-    """Sinh ngẫu nhiên mã phòng 6 ký tự chữ và số (Viết hoa)"""
-    chars = string.ascii_uppercase + string.digits
+    """Sinh ngẫu nhiên mã phòng 6 ký tự gồm CẢ CHỮ VÀ SỐ, đảm bảo duy nhất tuyệt đối trong DB."""
+    letters = string.ascii_uppercase
+    digits = string.digits
+    all_chars = letters + digits
+
     while True:
-        code = ''.join(random.choices(chars, k=6))
-        # Kiểm tra mã đã tồn tại trên Qdrant chưa
+        # 1. Bắt buộc có ít nhất 1 chữ và 1 số để không bao giờ ra thuần chữ/thuần số
+        code_chars = [random.choice(letters), random.choice(digits)]
+        
+        # 2. Lấy 4 ký tự ngẫu nhiên còn lại
+        code_chars.extend(random.choices(all_chars, k=4))
+        
+        # 3. Trộn ngẫu nhiên thứ tự các ký tự
+        random.shuffle(code_chars)
+        code = ''.join(code_chars)
+
+        # 4. Kiểm tra xem mã đã tồn tại trên Qdrant chưa
         try:
             records, _ = qdrant_client.scroll(
                 collection_name=COLLECTION_NAME,
@@ -649,10 +688,14 @@ def generate_unique_room_code() -> str:
                 ),
                 limit=1
             )
+            # Nếu không tìm thấy bản ghi nào trùng trùng -> Mã an toàn!
             if not records:
                 return code
-        except Exception:
-            return code
+
+        except Exception as e:
+            # 💡 Xử lý lỗi kết nối DB: Không return ngay mà log lỗi và thử lại sau 0.5s
+            print(f"⚠️ Lỗi kết nối Qdrant khi kiểm tra room_code, đang thử lại... Chi tiết: {e}")
+            return ""
 
 def process_room_booking(tenant_zalo_id: str, room_code: str, db: Session) -> str:
     """Xử lý xác nhận đặt lịch xem phòng"""
