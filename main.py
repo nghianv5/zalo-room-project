@@ -291,22 +291,25 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                     background_tasks.add_task(handle_excel)
                     return {"status": "success"}
 
-        # Trường hợp 1: Người dùng vừa bấm nút CHIA SẺ SỐ ĐIỆN THOẠI từ Zalo
-        if data.get("event_name") == "user_submit_info": # Sự kiện nhận SĐT từ Zalo API
-            user_phone = data.get("info", {}).get("phone")
+        # Trong webhook /webhook/zalo tại main.py
+        if event_name == "user_submit_info":
+            # Bóc tách phone từ các vị trí cấu trúc JSON có thể xảy ra của Zalo API
+            info_dict = data.get("info", {}) or data.get("message", {})
+            user_phone = info_dict.get("phone") or info_dict.get("address", {}).get("phone")
 
             if user_phone:
-                # 🎯 Bắt buộc: Tạo mới / cập nhật User vào bảng user_web
+                clean_phone = format_national_phone(str(user_phone))
+                # 🎯 Lưu hoặc Cập nhật User vào DB
                 saved_user = save_or_update_user_web(
                     db=db,
-                    zalo_user_id=sender_id,
-                    phone=user_phone
+                    zalo_user_id=str(sender_id),
+                    phone=clean_phone
                 )
                 
                 # Gửi tin nhắn xác nhận cho User
                 send_zalo_message(
-                    sender_id, 
-                    "✅ Đăng ký thông tin thành công! Giờ bạn có thể tiếp tục gửi thông tin phòng để đăng bài."
+                    str(sender_id), 
+                    "✅ Xác thực số điện thoại thành công! Bây giờ bạn có thể gửi lại cú pháp đặt lịch xem phòng."
                 )
                 return {"status": "success"}
 
@@ -355,23 +358,24 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                     reply_text = "Cú pháp không đúng! Vui lòng nhắn theo cú pháp: OTP <Số thoại điện> (Ví dụ: OTP 0333593681)"
                     send_zalo_message(user_id=user_id, ai_reply=reply_text)
                     return {"status": "invalid_syntax"}
-            # 2. CHỨC NĂNG MỚI: Xử lý Đặt lịch xem phòng theo mã phòng 6 ký tự
-            # Ví dụ tin nhắn: "Tôi muốn đặt lịch xem phòng A1B2C3" hoặc "Xem phong A1B2C3"
+            # 2. Xử lý Đặt lịch xem phòng theo mã phòng 6 ký tự
             booking_match = re.search(r'(?:đặt lịch|xem phòng|mã phòng|đặt phòng)\s*([a-zA-Z0-9]{6})\b', clean_message, re.IGNORECASE)
             if booking_match:
-                # Lấy SĐT khách từ DB user_web
-                tenant_phone = get_phone_by_user_id(db, sender_id)
+                # 🎯 Lấy SĐT khách từ DB bằng sender_id chuẩn hóa chuỗi
+                tenant_phone = get_phone_by_user_id(db, str(sender_id))
 
-                # 🚨 CHẶN NẾU CHƯA CÓ SĐT CHÍNH CHỦ
-                if not tenant_phone or tenant_phone in ["Chưa xác thực SĐT", "Chưa cập nhật"]:
-                    # Gửi nút yêu cầu chia sẻ SĐT Zalo cho khách
-                    send_zalo_request_phone(sender_id)
+                # 🚨 Nếu chưa xác thực SĐT -> Yêu cầu chia sẻ lại SĐT
+                if not tenant_phone or tenant_phone in ["Chưa xác thực SĐT", "Chưa cập nhật", ""]:
+                    send_zalo_request_phone(str(sender_id))
                     return {"status": "phone_required"}
+
                 room_code = booking_match.group(1).upper()
-                reply_msg = process_room_booking(tenant_zalo_id=user_id, room_code=room_code, db=db)
-                send_zalo_message(user_id=user_id, ai_reply=reply_msg)
-                return {"status": "success", "message": "Processed room booking"}
                 
+                # 🎯 Gọi xử lý tạo đơn trong order_room (Sử dụng sender_id đồng nhất)
+                reply_msg = process_room_booking(tenant_zalo_id=str(sender_id), room_code=room_code, db=db)
+                
+                send_zalo_message(user_id=str(sender_id), ai_reply=reply_msg)
+                return {"status": "success", "message": "Processed room booking"}
             #
             if event_name in ["user_send_text", "user_send_image", "user_send_file", "user_send_video"]:
                 message_obj = data.get("message", {})

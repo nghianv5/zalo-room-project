@@ -756,24 +756,31 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, db: Session) -> st
     room_address = room_data.get("address", "Chưa rõ")
     room_name = room_data.get("room_name", "Phòng trọ")
 
-    # 2. Tìm SĐT của người thuê (nếu người thuê đã từng đăng ký/xác thực OTP trên Zalo)
-    tenant_user = db.query(UserWeb).filter(UserWeb.user_id == tenant_zalo_id).first()
-    tenant_phone = tenant_user.phone if tenant_user else "Chưa xác thực SĐT"
+    # 2. Tìm SĐT của người thuê trong DB
+    tenant_phone = get_phone_by_user_id(db, str(tenant_zalo_id)) or "Chưa xác thực SĐT"
 
-    # 3. Lưu thông tin đơn vào bảng order_room
-    new_order = OrderRoom(
-        tenant_zalo_id=tenant_zalo_id,
-        tenant_phone=tenant_phone,
-        landlord_zalo_id=landlord_zalo_id,
-        landlord_phone=landlord_phone,
-        room_code=room_code,
-        created_at=datetime.utcnow()
-    )
-    db.add(new_order)
-    db.commit()
+    # 3. Lưu thông tin đơn vào bảng order_room với Try-Catch kiểm tra
+    try:
+        new_order = OrderRoom(
+            id=str(uuid.uuid4()),
+            tenant_zalo_id=str(tenant_zalo_id),
+            tenant_phone=tenant_phone,
+            landlord_zalo_id=str(landlord_zalo_id),
+            landlord_phone=landlord_phone,
+            room_code=room_code,
+            created_at=datetime.utcnow()
+        )
+        db.add(new_order)
+        db.commit()
+        db.refresh(new_order)
+        print(f"✅ Đã lưu đơn đặt phòng thành công: Order ID {new_order.id}")
+    except Exception as e:
+        db.rollback()
+        print(f"❌ Lỗi SQL khi chèn dữ liệu vào order_room: {e}")
+        return "Dạ hệ thống không thể khởi tạo đơn đặt phòng, vui lòng thử lại sau!"
 
-    # 4. Gửi thông báo chủ động tới Zalo của Chủ nhà (nếu có landlord_zalo_id)
-    if landlord_zalo_id and landlord_zalo_id != "SYSTEM":
+    # 4. Gửi thông báo tới Zalo của Chủ nhà (nếu có landlord_zalo_id)
+    if landlord_zalo_id and landlord_zalo_id not in ["SYSTEM", "ADMIN_WEB", "None"]:
         msg_to_landlord = (
             f"🔔 **CÓ LỊCH HẸN XEM PHÓNG MỚI!**\n\n"
             f"📍 Mã phòng: {room_code} ({room_name} - {room_address})\n"
@@ -782,7 +789,7 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, db: Session) -> st
             f"⏰ Thời gian đặt: {datetime.now(VN_TZ).strftime('%H:%M %d/%m/%Y')}\n\n"
             f"👉 Vui lòng liên hệ lại với khách hàng để chốt lịch hẹn chi tiết!"
         )
-        send_zalo_message(user_id=landlord_zalo_id, ai_reply=msg_to_landlord)
+        send_zalo_message(user_id=str(landlord_zalo_id), ai_reply=msg_to_landlord)
 
     return (
         f"✅ **ĐẶT LỊCH XEM PHÓNG THÀNH CÔNG!**\n\n"
@@ -901,6 +908,7 @@ def send_zalo_request_phone(tenant_zalo_id: str) -> bool:
 
         if res_data.get("error") == 0:
             print(f"✅ Đã gửi yêu cầu SĐT thành công tới Zalo ID: {tenant_zalo_id}")
+            
             return True
         else:
             print(f"❌ Lỗi từ Zalo API ({res_data.get('error')}): {res_data.get('message')}")
