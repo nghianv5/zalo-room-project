@@ -24,7 +24,19 @@ from google.genai import types
 import cloudinary
 import cloudinary.uploader
 import string
+from fastapi import FastAPI
+from fastapi.staticfiles import StaticFiles
 
+
+app = FastAPI()
+
+# 1. Đảm bảo thư mục static tồn tại
+if not os.path.exists("static"):
+    os.makedirs("static")
+
+# 2. MOUNT thư mục "static" ra URL route "/static"
+# Dòng này giúp truy cập được file qua https://domain.com/static/filename.png
+app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # --- CẤU HÌNH MÔI TRƯỜNG & KHỞI TẠO SERVICES ---
 ZALO_ACCESS_TOKEN = os.environ.get("ZALO_ACCESS_TOKEN")
@@ -894,7 +906,7 @@ def send_zalo_request_phone(tenant_zalo_id: str) -> bool:
                         {
                             "title": "Xác thực số điện thoại",
                             "subtitle": "Vui lòng chia sẻ Số điện thoại Zalo của bạn để hoàn tất đăng ký/đặt phòng.",
-                            "image_url": "https://zalo-room-project-jjsx.onrender.com/icon_zalo_room.png"
+                            "image_url": "https://zalo-room-project-jjsx.onrender.com/templates/icon_zalo_room.png"
                         }
                     ]
                 }
