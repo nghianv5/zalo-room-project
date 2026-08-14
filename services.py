@@ -845,18 +845,18 @@ def save_or_update_user_web(
 
     try:
         # 1. Tim kiem user theo zalo_user_id
-        user = db.query(UserWeb).filter(UserWeb.zalo_user_id == clean_zalo_id).first()
+        user = db.query(UserWeb).filter(UserWeb.user_id == clean_zalo_id).first()
 
         if user:
             # 2A. Nếu tìm thấy -> Cập nhật thông tin
             user.phone = clean_phone
-            user.updated_at = datetime.datetime.utcnow()
+            user.updated_at = datetime.utcnow()
             print(f"🔄 Đã cập nhật User Web (Zalo ID: {clean_zalo_id}) -> SĐT: {clean_phone}")
         else:
             # 2B. Nếu chưa có -> Tạo mới bản ghi user_web
             user = UserWeb(
                 id=clean_zalo_id,  # Dùng luôn Zalo ID làm PK hoặc dùng str(uuid.uuid4())
-                zalo_user_id=clean_zalo_id,
+                user_id=clean_zalo_id,
                 phone=clean_phone
             )
             db.add(user)
