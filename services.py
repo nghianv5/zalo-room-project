@@ -867,16 +867,23 @@ def save_or_update_user_web(
         raise e
         
         
-def send_zalo_request_phone(access_token, user_id):
-    url = "https://openapi.zalo.me/v2.0/oa/message"
+def send_zalo_request_phone(tenant_zalo_id: str) -> bool:
+    if not tenant_zalo_id or str(tenant_zalo_id).strip() in ["ADMIN_WEB", "SYSTEM", "None", ""]:
+        print("⚠️ Zalo User ID không hợp lệ, không thể gửi yêu cầu SĐT.")
+        return False
+
+    # ✅ SỬA TẠI ĐÂY: URL không chứa token
+    url = "https://openapi.zalo.me/v3.0/oa/message/cs"
+    
+    # ✅ SỬA TẠI ĐÂY: Đặt access_token vào Header
     headers = {
         "Content-Type": "application/json",
-        "access_token": access_token
+        "access_token": ZALO_ACCESS_TOKEN
     }
-    
+
     payload = {
         "recipient": {
-            "user_id": user_id
+            "user_id": str(tenant_zalo_id)
         },
         "message": {
             "attachment": {
@@ -885,22 +892,15 @@ def send_zalo_request_phone(access_token, user_id):
                     "template_type": "request_user_info",
                     "elements": [
                         {
-                            "title": "Cung cấp thông tin liên hệ",
-                            "subtitle": "Vui lòng bấm chia sẻ để hoàn tất đăng ký.",
-                            "image_url": "https://yourdomain.com/static/banner.png" # ⚠️ BẮT BUỘC: Link ảnh HTTPS hợp lệ
+                            "title": "Xác thực số điện thoại",
+                            "subtitle": "Vui lòng chia sẻ Số điện thoại Zalo của bạn để hoàn tất đăng ký/đặt phòng.",
+                            "image_url": "templates/icon_zalo_room.png"
                         }
                     ]
                 }
             }
         }
     }
-
-    response = requests.post(url, json=payload, headers=headers)
-    res_data = response.json()
-    
-    # Check log response từ Zalo
-    print("Zalo API Request Phone Response:", res_data)
-    return res_data
 
     try:
         # Dùng json=payload thay vì data=json.dumps(payload) cho gọn nhẹ
