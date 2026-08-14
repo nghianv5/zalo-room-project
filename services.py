@@ -384,7 +384,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYS
         
         if zalo_user_id in ["EXCEL_AI_IMPORT", "ADMIN_WEB", "SYSTEM"]:
             phone = str(data.get("landlord_phone", "Chưa rõ")).strip()  #Lấy phone web
-        else
+        else:
             phone = get_phone_by_user_id(user_id=zalo_user_id)      #Lấy phone zalo từ bảng user_web
         if not address:
             return False
