@@ -906,7 +906,7 @@ def send_zalo_request_phone(tenant_zalo_id: str) -> bool:
                         {
                             "title": "Xác thực số điện thoại",
                             "subtitle": "Vui lòng chia sẻ Số điện thoại Zalo của bạn để hoàn tất đăng ký/đặt phòng.",
-                            "image_url": "https://zalo-room-project-jjsx.onrender.com/templates/icon_zalo_room.png"
+                            "image_url": "https://zalo-room-project-jjsx.onrender.com/static/icon_zalo_room.png"
                         }
                     ]
                 }
