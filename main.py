@@ -290,7 +290,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
 
                     background_tasks.add_task(handle_excel)
                     return {"status": "success"}
-
+        print(f"user_submit_info ngoai")
         # Trong webhook /webhook/zalo tại main.py
         if event_name == "user_submit_info":
             print(f"user_submit_info")
