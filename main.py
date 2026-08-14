@@ -295,8 +295,9 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
         if event_name == "user_send_text":
             user_id = data.get("sender", {}).get("id")
             raw_message = data.get("message", {}).get("text", "")
+            print(f"raw_message: {raw_message}")
             clean_message = raw_message.strip().lower()
-
+            print(f"clean_message: {clean_message}")
             # 🎯 BẮT TRƯỜNG HỢP: Zalo gửi thông tin dưới dạng tin nhắn văn bản user_send_text
             if "gửi thông tin cho OA" in clean_message or "Số điện thoại:" in clean_message:
                 print(f"user_submit_info")
