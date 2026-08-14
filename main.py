@@ -360,6 +360,14 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
             # Ví dụ tin nhắn: "Tôi muốn đặt lịch xem phòng A1B2C3" hoặc "Xem phong A1B2C3"
             booking_match = re.search(r'(?:đặt lịch|xem phòng|mã phòng|đặt phòng)\s*([a-zA-Z0-9]{6})\b', clean_message, re.IGNORECASE)
             if booking_match:
+                # Lấy SĐT khách từ DB user_web
+                tenant_phone = get_phone_by_user_id(db, tenant_zalo_id)
+
+                # 🚨 CHẶN NẾU CHƯA CÓ SĐT CHÍNH CHỦ
+                if not tenant_phone or tenant_phone in ["Chưa xác thực SĐT", "Chưa cập nhật"]:
+                    # Gửi nút yêu cầu chia sẻ SĐT Zalo cho khách
+                    send_zalo_request_phone(tenant_zalo_id)
+                    return {"status": "phone_required"}
                 room_code = booking_match.group(1).upper()
                 reply_msg = process_room_booking(tenant_zalo_id=user_id, room_code=room_code, db=db)
                 send_zalo_message(user_id=user_id, ai_reply=reply_msg)

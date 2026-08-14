@@ -105,6 +105,19 @@ class UserWeb(Base):
     expired_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+
+class OrderRoom(Base):
+    __tablename__ = "order_room"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    tenant_zalo_id = Column(String, unique=True, index=True, nullable=True)
+    tenant_phone = Column(String, unique=True, index=True, nullable=True)
+    landlord_zalo_id = Column(String, unique=True, index=True, nullable=True)
+    landlord_phone = Column(String, unique=True, index=True, nullable=True)
+    room_code = Column(String, unique=True, index=True, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    
+
 Base.metadata.create_all(bind=engine)
 
 # --- PYDANTIC SCHEMAS ---
@@ -920,3 +933,60 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, db: Session) -> st
             db.rollback()  # Hoàn tác nếu có lỗi SQL
             print(f"❌ Lỗi SQL khi lưu/cập nhật user_web: {e}")
             raise e
+            
+            
+    def send_zalo_request_phone(tenant_zalo_id: str) -> bool:
+        """
+        Gửi khung yêu cầu cấp quyền truy cập Số điện thoại (Request User Info)
+        đến người dùng Zalo OA.
+        
+        Args:
+            tenant_zalo_id (str): Zalo User ID (ZUID) của người dùng cần xin SĐT.
+            
+        Returns:
+            bool: True nếu gửi thành công, False nếu thất bại.
+        """
+        if not tenant_zalo_id or str(tenant_zalo_id).strip() in ["ADMIN_WEB", "SYSTEM", "None", ""]:
+            print("⚠️ Zalo User ID không hợp lệ, không thể gửi yêu cầu SĐT.")
+            return False
+
+        url = f"https://openapi.zalo.me/v3.0/oa/message/cs?access_token={ZALO_ACCESS_TOKEN}"
+        headers = {"Content-Type": "application/json"}
+
+        # Payload chuẩn theo Zalo OA Template "request_user_info"
+        payload = {
+            "recipient": {
+                "user_id": str(tenant_zalo_id)
+            },
+            "message": {
+                "attachment": {
+                    "type": "template",
+                    "payload": {
+                        "template_type": "request_user_info",
+                        "elements": [
+                            {
+                                "title": "Xác thực số điện thoại",
+                                "subtitle": "Vui lòng chia sẻ Số điện thoại Zalo của bạn để hoàn tất đăng ký/đặt phòng.",
+                                "image_url": "https://cdn.icon-icons.com/icons2/2699/SHA/PNG/512/zalo_logo_icon_169324.png"
+                            }
+                        ]
+                    }
+                }
+            }
+        }
+
+        try:
+            response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=10)
+            res_data = response.json()
+
+            # Kiểm tra mã phản hồi từ Zalo API (error = 0 là thành công)
+            if res_data.get("error") == 0:
+                print(f"✅ Đã gửi yêu cầu SĐT thành công tới Zalo ID: {tenant_zalo_id}")
+                return True
+            else:
+                print(f"❌ Lỗi từ Zalo API ({res_data.get('error')}): {res_data.get('message')}")
+                return False
+
+        except Exception as e:
+            print(f"❌ Lỗi kết nối khi gửi yêu cầu SĐT tới Zalo: {e}")
+            return False
