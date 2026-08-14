@@ -381,7 +381,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
 
                 # 🚨 Nếu chưa xác thực SĐT -> Yêu cầu chia sẻ lại SĐT
                 if not tenant_phone or tenant_phone in ["Chưa xác thực SĐT", "Chưa cập nhật", ""]:
-                    send_zalo_request_phone(str(sender_id))
+                    send_zalo_request_phone_v2(str(sender_id))
                     return {"status": "phone_required"}
 
                 room_code = booking_match.group(1).upper()
