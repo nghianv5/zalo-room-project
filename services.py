@@ -652,7 +652,7 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
             if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
                 #nếu người dùng chưa đăng ký phòng trên zalo hay web thì sẽ tạo mới data cho user
                 user_id = get_phone_by_user_id(user_id)
-                if not user_id
+                if not user_id:
                     # 🚨 BẮT BUỘC: Nếu chưa có SĐT -> Chặn lại và yêu cầu chia sẻ SĐT
                     request_phone_message = {
                             "recipient": {"user_id": zalo_user_id},
