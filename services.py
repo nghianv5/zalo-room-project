@@ -860,24 +860,19 @@ def save_or_update_user_web(
         
         
 def send_zalo_request_phone(tenant_zalo_id: str) -> bool:
-    """
-    Gửi khung yêu cầu cấp quyền truy cập Số điện thoại (Request User Info)
-    đến người dùng Zalo OA.
-    
-    Args:
-        tenant_zalo_id (str): Zalo User ID (ZUID) của người dùng cần xin SĐT.
-        
-    Returns:
-        bool: True nếu gửi thành công, False nếu thất bại.
-    """
     if not tenant_zalo_id or str(tenant_zalo_id).strip() in ["ADMIN_WEB", "SYSTEM", "None", ""]:
         print("⚠️ Zalo User ID không hợp lệ, không thể gửi yêu cầu SĐT.")
         return False
 
-    url = f"https://openapi.zalo.me/v3.0/oa/message/cs?access_token={ZALO_ACCESS_TOKEN}"
-    headers = {"Content-Type": "application/json"}
+    # ✅ SỬA TẠI ĐÂY: URL không chứa token
+    url = "https://openapi.zalo.me/v3.0/oa/message/cs"
+    
+    # ✅ SỬA TẠI ĐÂY: Đặt access_token vào Header
+    headers = {
+        "Content-Type": "application/json",
+        "access_token": ZALO_ACCESS_TOKEN
+    }
 
-    # Payload chuẩn theo Zalo OA Template "request_user_info"
     payload = {
         "recipient": {
             "user_id": str(tenant_zalo_id)
@@ -900,10 +895,10 @@ def send_zalo_request_phone(tenant_zalo_id: str) -> bool:
     }
 
     try:
-        response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=10)
+        # Dùng json=payload thay vì data=json.dumps(payload) cho gọn nhẹ
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
         res_data = response.json()
 
-        # Kiểm tra mã phản hồi từ Zalo API (error = 0 là thành công)
         if res_data.get("error") == 0:
             print(f"✅ Đã gửi yêu cầu SĐT thành công tới Zalo ID: {tenant_zalo_id}")
             return True
