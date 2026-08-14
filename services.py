@@ -931,7 +931,8 @@ def send_zalo_request_phone(tenant_zalo_id: str) -> bool:
         print(f"❌ Lỗi kết nối khi gửi yêu cầu SĐT tới Zalo: {e}")
         return False
  
- def send_zalo_request_phone_v2(user_id: str):
+
+def send_zalo_request_phone_v2(user_id: str):
     """
     Gửi tin nhắn tương tác chứa Nút Xin Số Điện Thoại chuẩn Zalo OpenAPI v3.0
     """
