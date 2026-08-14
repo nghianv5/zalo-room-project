@@ -794,28 +794,14 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, db: Session) -> st
     
 
 def get_phone_by_user_id(db: Session, user_id: str) -> Optional[str]:
-    """
-    Lấy số điện thoại người dùng từ bảng user_web trong SQL Database.
-    
-    Args:
-        db (Session): Database session
-        user_id (str): ID của người dùng
-        
-    Returns:
-        Optional[str]: Số điện thoại hoặc None
-    """
     if not user_id:
         return None
-
     try:
-        # Truy vấn tìm user theo ID
-        user = db.query(UserWeb).filter(UserWeb.id == user_id).first()
-        
+        # Tìm theo user_id (Zalo ID / System ID) thay vì PK `id`
+        user = db.query(UserWeb).filter(UserWeb.user_id == str(user_id)).first()
         if user and user.phone:
             return user.phone.strip()
-            
         return None
-
     except Exception as e:
         print(f"❌ Lỗi SQL khi lấy phone của user {user_id}: {e}")
         return None

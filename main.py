@@ -83,7 +83,6 @@ def delete_room_from_web(point_id: str):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# --- ROOM MANAGEMENT ROUTES ---
 @app.post("/api/rooms")
 async def save_or_update_room(
     data: RoomCreateUpdateSchema, 
