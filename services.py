@@ -106,18 +106,18 @@ class UserWeb(Base):
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 
+# --- MODEL ORDER_ROOM TRONG SQLALCHEMY ---
 class OrderRoom(Base):
     __tablename__ = "order_room"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    tenant_zalo_id = Column(String, unique=True, index=True, nullable=True)
-    tenant_phone = Column(String, unique=True, index=True, nullable=True)
-    landlord_zalo_id = Column(String, unique=True, index=True, nullable=True)
-    landlord_phone = Column(String, unique=True, index=True, nullable=True)
-    room_code = Column(String, unique=True, index=True, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    tenant_zalo_id = Column(String, nullable=True)     # Zalo ID người thuê
+    tenant_phone = Column(String, nullable=True)       # SĐT người thuê
+    landlord_zalo_id = Column(String, nullable=True)   # Zalo ID chủ nhà
+    landlord_phone = Column(String, nullable=True)     # SĐT chủ nhà
+    room_code = Column(String, index=True, nullable=False) # Mã phòng 6 ký tự
+    created_at = Column(DateTime, default=datetime.utcnow) # Thời gian tạo đơn
     
-
 Base.metadata.create_all(bind=engine)
 
 # --- PYDANTIC SCHEMAS ---
@@ -183,17 +183,7 @@ class RoomCreateUpdateSchema(BaseModel):
         return val_str
 
 
-# --- MODEL ORDER_ROOM TRONG SQLALCHEMY ---
-class OrderRoom(Base):
-    __tablename__ = "order_room"
 
-    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    tenant_zalo_id = Column(String, nullable=True)     # Zalo ID người thuê
-    tenant_phone = Column(String, nullable=True)       # SĐT người thuê
-    landlord_zalo_id = Column(String, nullable=True)   # Zalo ID chủ nhà
-    landlord_phone = Column(String, nullable=True)     # SĐT chủ nhà
-    room_code = Column(String, index=True, nullable=False) # Mã phòng 6 ký tự
-    created_at = Column(DateTime, default=datetime.utcnow) # Thời gian tạo đơn
     
     
 # --- DATABASE DEPENDENCY & CURRENT USER HELPER ---
