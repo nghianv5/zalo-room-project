@@ -293,6 +293,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
 
         # Trong webhook /webhook/zalo tại main.py
         if event_name == "user_submit_info":
+             print(f"user_submit_info")
             # Bóc tách phone từ các cấu trúc JSON trả về của Zalo
             info_dict = data.get("info", {}) or data.get("message", {})
             user_phone = (
