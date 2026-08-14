@@ -671,9 +671,9 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
                                 }
                             }
                         }
-                        # Gọi Zalo Open API gửi yêu cầu xin SĐT
-                        send_zalo_request(request_phone_message)
-                        return {"status": "phone_required"}
+                    # Gọi Zalo Open API gửi yêu cầu xin SĐT
+                    send_zalo_request(request_phone_message)
+                    return {"status": "phone_required"}
 
                 
                 success = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None, zalo_user_id=user_id)
