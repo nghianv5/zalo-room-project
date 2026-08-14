@@ -793,190 +793,138 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, db: Session) -> st
     )
     
 
-    def get_phone_by_user_id(db: Session, user_id: str) -> Optional[str]:
-        """
-        Lấy số điện thoại người dùng từ bảng user_web trong SQL Database.
+def get_phone_by_user_id(db: Session, user_id: str) -> Optional[str]:
+    """
+    Lấy số điện thoại người dùng từ bảng user_web trong SQL Database.
+    
+    Args:
+        db (Session): Database session
+        user_id (str): ID của người dùng
         
-        Args:
-            db (Session): Database session
-            user_id (str): ID của người dùng
-            
-        Returns:
-            Optional[str]: Số điện thoại hoặc None
-        """
-        if not user_id:
-            return None
+    Returns:
+        Optional[str]: Số điện thoại hoặc None
+    """
+    if not user_id:
+        return None
 
-        try:
-            # Truy vấn tìm user theo ID
-            user = db.query(UserWeb).filter(UserWeb.id == user_id).first()
-            
-            if user and user.phone:
-                return user.phone.strip()
-                
-            return None
-
-        except Exception as e:
-            print(f"❌ Lỗi SQL khi lấy phone của user {user_id}: {e}")
-            return None
-            
-    def save_or_update_user_web(
-        db: Session, 
-        zalo_user_id: str, 
-        phone: str
-    ) -> UserWeb:
-        """
-        Tạo mới hoặc Cập nhật người dùng Zalo vào bảng user_web bằng SQLAlchemy.
+    try:
+        # Truy vấn tìm user theo ID
+        user = db.query(UserWeb).filter(UserWeb.id == user_id).first()
         
-        Args:
-            db (Session): SQLAlchemy Database Session
-            zalo_user_id (str): ID người dùng trên Zalo
-            phone (str): Số điện thoại thu thập từ Zalo
+        if user and user.phone:
+            return user.phone.strip()
             
-        Returns:
-            UserWeb: Đối tượng người dùng đã lưu
-        """
-        if not zalo_user_id or not phone:
-            raise ValueError("Lỗi: zalo_user_id và phone là bắt buộc!")
+        return None
 
-        clean_phone = str(phone).strip()
-        clean_zalo_id = str(zalo_user_id).strip()
+    except Exception as e:
+        print(f"❌ Lỗi SQL khi lấy phone của user {user_id}: {e}")
+        return None
 
-        try:
-            # 1. Tim kiem user theo zalo_user_id
-            user = db.query(UserWeb).filter(UserWeb.zalo_user_id == clean_zalo_id).first()
 
-            if user:
-                # 2A. Nếu tìm thấy -> Cập nhật thông tin
-                user.phone = clean_phone
-                user.updated_at = datetime.datetime.utcnow()
-                print(f"🔄 Đã cập nhật User Web (Zalo ID: {clean_zalo_id}) -> SĐT: {clean_phone}")
-            else:
-                # 2B. Nếu chưa có -> Tạo mới bản ghi user_web
-                user = UserWeb(
-                    id=clean_zalo_id,  # Dùng luôn Zalo ID làm PK hoặc dùng str(uuid.uuid4())
-                    zalo_user_id=clean_zalo_id,
-                    phone=clean_phone
-                )
-                db.add(user)
-                print(f"✨ Đã tạo mới User Web (Zalo ID: {clean_zalo_id}) -> SĐT: {clean_phone}")
-
-            # 3. Commit thay đổi vào SQL Database
-            db.commit()
-            db.refresh(user)
-            return user
-
-        except Exception as e:
-            db.rollback()  # Hoàn tác nếu có lỗi SQL
-            print(f"❌ Lỗi SQL khi lưu/cập nhật user_web: {e}")
-            raise e
-            
-            
-
-    def save_or_update_user_web(
-        db: Session, 
-        zalo_user_id: str, 
-        phone: str
-    ) -> UserWeb:
-        """
-        Tạo mới hoặc Cập nhật người dùng Zalo vào bảng user_web bằng SQLAlchemy.
+def save_or_update_user_web(
+    db: Session, 
+    zalo_user_id: str, 
+    phone: str
+) -> UserWeb:
+    """
+    Tạo mới hoặc Cập nhật người dùng Zalo vào bảng user_web bằng SQLAlchemy.
+    
+    Args:
+        db (Session): SQLAlchemy Database Session
+        zalo_user_id (str): ID người dùng trên Zalo
+        phone (str): Số điện thoại thu thập từ Zalo
         
-        Args:
-            db (Session): SQLAlchemy Database Session
-            zalo_user_id (str): ID người dùng trên Zalo
-            phone (str): Số điện thoại thu thập từ Zalo
-            
-        Returns:
-            UserWeb: Đối tượng người dùng đã lưu
-        """
-        if not zalo_user_id or not phone:
-            raise ValueError("Lỗi: zalo_user_id và phone là bắt buộc!")
+    Returns:
+        UserWeb: Đối tượng người dùng đã lưu
+    """
+    if not zalo_user_id or not phone:
+        raise ValueError("Lỗi: zalo_user_id và phone là bắt buộc!")
 
-        clean_phone = str(phone).strip()
-        clean_zalo_id = str(zalo_user_id).strip()
+    clean_phone = str(phone).strip()
+    clean_zalo_id = str(zalo_user_id).strip()
 
-        try:
-            # 1. Tim kiem user theo zalo_user_id
-            user = db.query(UserWeb).filter(UserWeb.zalo_user_id == clean_zalo_id).first()
+    try:
+        # 1. Tim kiem user theo zalo_user_id
+        user = db.query(UserWeb).filter(UserWeb.zalo_user_id == clean_zalo_id).first()
 
-            if user:
-                # 2A. Nếu tìm thấy -> Cập nhật thông tin
-                user.phone = clean_phone
-                user.updated_at = datetime.datetime.utcnow()
-                print(f"🔄 Đã cập nhật User Web (Zalo ID: {clean_zalo_id}) -> SĐT: {clean_phone}")
-            else:
-                # 2B. Nếu chưa có -> Tạo mới bản ghi user_web
-                user = UserWeb(
-                    id=clean_zalo_id,  # Dùng luôn Zalo ID làm PK hoặc dùng str(uuid.uuid4())
-                    zalo_user_id=clean_zalo_id,
-                    phone=clean_phone
-                )
-                db.add(user)
-                print(f"✨ Đã tạo mới User Web (Zalo ID: {clean_zalo_id}) -> SĐT: {clean_phone}")
+        if user:
+            # 2A. Nếu tìm thấy -> Cập nhật thông tin
+            user.phone = clean_phone
+            user.updated_at = datetime.datetime.utcnow()
+            print(f"🔄 Đã cập nhật User Web (Zalo ID: {clean_zalo_id}) -> SĐT: {clean_phone}")
+        else:
+            # 2B. Nếu chưa có -> Tạo mới bản ghi user_web
+            user = UserWeb(
+                id=clean_zalo_id,  # Dùng luôn Zalo ID làm PK hoặc dùng str(uuid.uuid4())
+                zalo_user_id=clean_zalo_id,
+                phone=clean_phone
+            )
+            db.add(user)
+            print(f"✨ Đã tạo mới User Web (Zalo ID: {clean_zalo_id}) -> SĐT: {clean_phone}")
 
-            # 3. Commit thay đổi vào SQL Database
-            db.commit()
-            db.refresh(user)
-            return user
+        # 3. Commit thay đổi vào SQL Database
+        db.commit()
+        db.refresh(user)
+        return user
 
-        except Exception as e:
-            db.rollback()  # Hoàn tác nếu có lỗi SQL
-            print(f"❌ Lỗi SQL khi lưu/cập nhật user_web: {e}")
-            raise e
-            
-            
-    def send_zalo_request_phone(tenant_zalo_id: str) -> bool:
-        """
-        Gửi khung yêu cầu cấp quyền truy cập Số điện thoại (Request User Info)
-        đến người dùng Zalo OA.
+    except Exception as e:
+        db.rollback()  # Hoàn tác nếu có lỗi SQL
+        print(f"❌ Lỗi SQL khi lưu/cập nhật user_web: {e}")
+        raise e
         
-        Args:
-            tenant_zalo_id (str): Zalo User ID (ZUID) của người dùng cần xin SĐT.
-            
-        Returns:
-            bool: True nếu gửi thành công, False nếu thất bại.
-        """
-        if not tenant_zalo_id or str(tenant_zalo_id).strip() in ["ADMIN_WEB", "SYSTEM", "None", ""]:
-            print("⚠️ Zalo User ID không hợp lệ, không thể gửi yêu cầu SĐT.")
-            return False
+        
+def send_zalo_request_phone(tenant_zalo_id: str) -> bool:
+    """
+    Gửi khung yêu cầu cấp quyền truy cập Số điện thoại (Request User Info)
+    đến người dùng Zalo OA.
+    
+    Args:
+        tenant_zalo_id (str): Zalo User ID (ZUID) của người dùng cần xin SĐT.
+        
+    Returns:
+        bool: True nếu gửi thành công, False nếu thất bại.
+    """
+    if not tenant_zalo_id or str(tenant_zalo_id).strip() in ["ADMIN_WEB", "SYSTEM", "None", ""]:
+        print("⚠️ Zalo User ID không hợp lệ, không thể gửi yêu cầu SĐT.")
+        return False
 
-        url = f"https://openapi.zalo.me/v3.0/oa/message/cs?access_token={ZALO_ACCESS_TOKEN}"
-        headers = {"Content-Type": "application/json"}
+    url = f"https://openapi.zalo.me/v3.0/oa/message/cs?access_token={ZALO_ACCESS_TOKEN}"
+    headers = {"Content-Type": "application/json"}
 
-        # Payload chuẩn theo Zalo OA Template "request_user_info"
-        payload = {
-            "recipient": {
-                "user_id": str(tenant_zalo_id)
-            },
-            "message": {
-                "attachment": {
-                    "type": "template",
-                    "payload": {
-                        "template_type": "request_user_info",
-                        "elements": [
-                            {
-                                "title": "Xác thực số điện thoại",
-                                "subtitle": "Vui lòng chia sẻ Số điện thoại Zalo của bạn để hoàn tất đăng ký/đặt phòng.",
-                                "image_url": "https://cdn.icon-icons.com/icons2/2699/SHA/PNG/512/zalo_logo_icon_169324.png"
-                            }
-                        ]
-                    }
+    # Payload chuẩn theo Zalo OA Template "request_user_info"
+    payload = {
+        "recipient": {
+            "user_id": str(tenant_zalo_id)
+        },
+        "message": {
+            "attachment": {
+                "type": "template",
+                "payload": {
+                    "template_type": "request_user_info",
+                    "elements": [
+                        {
+                            "title": "Xác thực số điện thoại",
+                            "subtitle": "Vui lòng chia sẻ Số điện thoại Zalo của bạn để hoàn tất đăng ký/đặt phòng.",
+                            "image_url": "https://cdn.icon-icons.com/icons2/2699/SHA/PNG/512/zalo_logo_icon_169324.png"
+                        }
+                    ]
                 }
             }
         }
+    }
 
-        try:
-            response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=10)
-            res_data = response.json()
+    try:
+        response = requests.post(url, headers=headers, data=json.dumps(payload), timeout=10)
+        res_data = response.json()
 
-            # Kiểm tra mã phản hồi từ Zalo API (error = 0 là thành công)
-            if res_data.get("error") == 0:
-                print(f"✅ Đã gửi yêu cầu SĐT thành công tới Zalo ID: {tenant_zalo_id}")
-                return True
-            else:
-                print(f"❌ Lỗi từ Zalo API ({res_data.get('error')}): {res_data.get('message')}")
-                return False
-
-        except Exception as e:
-            print(f"❌ Lỗi kết nối khi gửi yêu cầu SĐT tới Zalo: {e}")
+        # Kiểm tra mã phản hồi từ Zalo API (error = 0 là thành công)
+        if res_data.get("error") == 0:
+            print(f"✅ Đã gửi yêu cầu SĐT thành công tới Zalo ID: {tenant_zalo_id}")
+            return True
+        else:
+            print(f"❌ Lỗi từ Zalo API ({res_data.get('error')}): {res_data.get('message')}")
             return False
+
+    except Exception as e:
+        print(f"❌ Lỗi kết nối khi gửi yêu cầu SĐT tới Zalo: {e}")
+        return False

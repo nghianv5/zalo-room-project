@@ -306,7 +306,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                 
                 # Gửi tin nhắn xác nhận cho User
                 send_zalo_message(
-                    zalo_user_id, 
+                    sender_id, 
                     "✅ Đăng ký thông tin thành công! Giờ bạn có thể tiếp tục gửi thông tin phòng để đăng bài."
                 )
                 return {"status": "success"}
@@ -361,12 +361,12 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
             booking_match = re.search(r'(?:đặt lịch|xem phòng|mã phòng|đặt phòng)\s*([a-zA-Z0-9]{6})\b', clean_message, re.IGNORECASE)
             if booking_match:
                 # Lấy SĐT khách từ DB user_web
-                tenant_phone = get_phone_by_user_id(db, tenant_zalo_id)
+                tenant_phone = get_phone_by_user_id(db, sender_id)
 
                 # 🚨 CHẶN NẾU CHƯA CÓ SĐT CHÍNH CHỦ
                 if not tenant_phone or tenant_phone in ["Chưa xác thực SĐT", "Chưa cập nhật"]:
                     # Gửi nút yêu cầu chia sẻ SĐT Zalo cho khách
-                    send_zalo_request_phone(tenant_zalo_id)
+                    send_zalo_request_phone(sender_id)
                     return {"status": "phone_required"}
                 room_code = booking_match.group(1).upper()
                 reply_msg = process_room_booking(tenant_zalo_id=user_id, room_code=room_code, db=db)
