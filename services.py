@@ -604,7 +604,7 @@ def process_excel_file(file_url: str, sender_id: str) -> int:
         print("❌ [EXCEL PROCESS ERROR]:", e)
         return 0
 
-def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: str = "SYSTEM"):
+def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: str = "SYSTEM", db: Session = None):
     incoming_media_urls = []
     for item in (media_items or []):
         saved_url = save_media_file(item["url"], is_video=item.get("is_video", False))
@@ -654,7 +654,8 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
             address = str(extracted.get("address", "")).strip()
             if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
                 #nếu người dùng chưa đăng ký phòng trên zalo hay web thì sẽ tạo mới data cho user
-                user_id = get_phone_by_user_id(user_id)
+                if db:
+                    user_id = get_phone_by_user_id(db, user_id)
                 if not user_id:
                     # 🚨 BẮT BUỘC: Nếu chưa có SĐT -> Chặn lại và yêu cầu chia sẻ SĐT
                     request_phone_message = {

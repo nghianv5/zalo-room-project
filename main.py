@@ -293,25 +293,39 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
 
         # Trong webhook /webhook/zalo tại main.py
         if event_name == "user_submit_info":
-            # Bóc tách phone từ các vị trí cấu trúc JSON có thể xảy ra của Zalo API
+            # Bóc tách phone từ các cấu trúc JSON trả về của Zalo
             info_dict = data.get("info", {}) or data.get("message", {})
-            user_phone = info_dict.get("phone") or info_dict.get("address", {}).get("phone")
+            user_phone = (
+                info_dict.get("phone") 
+                or info_dict.get("address", {}).get("phone")
+                or data.get("data", {}).get("phone")
+            )
 
+            # Trường hợp Zalo gửi Phone dưới dạng số nguyên (Int) hoặc Chuỗi
             if user_phone:
                 clean_phone = format_national_phone(str(user_phone))
-                # 🎯 Lưu hoặc Cập nhật User vào DB
-                saved_user = save_or_update_user_web(
-                    db=db,
-                    zalo_user_id=str(sender_id),
-                    phone=clean_phone
-                )
                 
-                # Gửi tin nhắn xác nhận cho User
-                send_zalo_message(
-                    str(sender_id), 
-                    "✅ Xác thực số điện thoại thành công! Bây giờ bạn có thể gửi lại cú pháp đặt lịch xem phòng."
-                )
-                return {"status": "success"}
+                try:
+                    # 🎯 Lưu hoặc Cập nhật User vào DB user_web
+                    saved_user = save_or_update_user_web(
+                        db=db,
+                        zalo_user_id=str(sender_id),
+                        phone=clean_phone
+                    )
+                    print(f"✅ [SUCCESS] Đã lưu thành công User: {saved_user.phone} vào user_web")
+                    
+                    # Gửi tin nhắn xác nhận cho User
+                    send_zalo_message(
+                        str(sender_id), 
+                        "✅ Xác thực số điện thoại thành công! Bạn có thể tiếp tục thao tác trên Zalo."
+                    )
+                    return {"status": "success"}
+                except Exception as err:
+                    print(f"❌ [DATABASE ERROR] Không thể lưu user: {err}")
+                    return {"status": "error", "message": str(err)}
+            else:
+                print(f"⚠️ [WARNING] Không tìm thấy trường phone trong payload: {data}")
+                return {"status": "missing_phone"}
 
 
         if event_name == "user_send_text":
@@ -391,7 +405,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                             "is_video": (item.get("type") == "video") or ("user_send_video" in event_name)
                         })
 
-                background_tasks.add_task(process_zalo_ai_logic, text, media_items, sender_id)
+                background_tasks.add_task(process_zalo_ai_logic, text, media_items, sender_id, db)
 
     except Exception as e:
         print("❌ [Webhook Exception]:", e)
