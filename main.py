@@ -299,41 +299,42 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
             clean_message = raw_message.strip().lower()
             print(f"clean_message: {clean_message}")
             # 🎯 BẮT TRƯỜNG HỢP: Zalo gửi thông tin dưới dạng tin nhắn văn bản user_send_text
-            if "gửi thông tin cho oa" in clean_message or "số điện thoại:" in clean_message:
-                print(f"user_submit_info")
-                # Bóc tách phone từ các cấu trúc JSON trả về của Zalo
-                info_dict = data.get("info", {}) or data.get("message", {})
-                user_phone = (
-                    info_dict.get("phone") 
-                    or info_dict.get("address", {}).get("phone")
-                    or data.get("data", {}).get("phone")
-                )
+            # Check xem đây có phải là tin nhắn tự động gửi thông tin từ phía Zalo Client không
+            if "gửi thông tin cho oa" in clean_text_lower or "số điện thoại:" in clean_text_lower:
+                
+                # 🔍 Trích xuất Số điện thoại bằng Regex từ chuỗi text (Bắt các số 10 chữ số bắt đầu bằng 0 hoặc 84)
+                phone_match = re.search(r'(?:số điện thoại|sđt|phone):\s*(\+?84|0[3|5|7|8|9][0-9]{8})\b', raw_text, re.IGNORECASE)
+                
+                # Dự phòng: Nếu Regex trên trật, lấy luôn chuỗi 10 số bắt đầu bằng 0 trong tin nhắn
+                if not phone_match:
+                    phone_match = re.search(r'\b(0[3|5|7|8|9][0-9]{8})\b', raw_text)
 
-                # Trường hợp Zalo gửi Phone dưới dạng số nguyên (Int) hoặc Chuỗi
-                if user_phone:
-                    clean_phone = format_national_phone(str(user_phone))
+                if phone_match:
+                    extracted_phone = format_national_phone(phone_match.group(1))
                     
                     try:
-                        # 🎯 Lưu hoặc Cập nhật User vào DB user_web
+                        # Lưu vào Database
                         saved_user = save_or_update_user_web(
                             db=db,
-                            zalo_user_id=str(sender_id),
-                            phone=clean_phone
+                            zalo_user_id=str(user_id),
+                            phone=extracted_phone
                         )
-                        print(f"✅ [SUCCESS] Đã lưu thành công User: {saved_user.phone} vào user_web")
+                        print(f"✅ [SUCCESS] Đã bắt thành công SĐT từ text: {extracted_phone} (User ID: {user_id})")
                         
-                        # Gửi tin nhắn xác nhận cho User
+                        # Phản hồi lại cho khách
                         send_zalo_message(
-                            str(sender_id), 
-                            "✅ Xác thực số điện thoại thành công! Bạn có thể tiếp tục thao tác trên Zalo."
+                            str(user_id),
+                            f"✅ Cảm ơn bạn! Hệ thống đã ghi nhận thành công Số điện thoại: {extracted_phone}."
                         )
-                        return {"status": "success"}
-                    except Exception as err:
-                        print(f"❌ [DATABASE ERROR] Không thể lưu user: {err}")
-                        return {"status": "error", "message": str(err)}
-                else:
-                    print(f"⚠️ [WARNING] Không tìm thấy trường phone trong payload: {data}")
-                    return {"status": "missing_phone"}
+                        return {"status": "success", "phone": extracted_phone}
+                    
+                    except Exception as e:
+                        print(f"❌ [DB ERROR]: {e}")
+                        return {"status": "error", "message": str(e)}
+
+            # --- Xử lý tin nhắn chat thông thường khác của user ở đây ---
+            print(f"💬 Tin nhắn chat thường từ {user_id}: {raw_text}")
+            return {"status": "ok"}     
                     
             if "otp" in clean_message:
                 phone_match = re.search(r'(0[3|5|7|8|9][0-9]{8})', clean_message)
