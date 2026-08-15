@@ -743,7 +743,7 @@ def generate_unique_room_code() -> str:
             print(f"⚠️ Lỗi kết nối Qdrant khi kiểm tra room_code, đang thử lại... Chi tiết: {e}")
             return ""
 
-def process_room_booking(tenant_zalo_id: str, room_code: str, db: Session) -> str:
+def process_room_booking(tenant_zalo_id: str, room_code: str, raw_message: str, db: Session) -> str:
     """Xử lý xác nhận đặt lịch xem phòng"""
     room_code = room_code.upper().strip()
     
@@ -784,18 +784,10 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, db: Session) -> st
 
     # 3. Lưu thông tin đơn vào bảng order_room với Try-Catch kiểm tra
     try:
-        # 🔍 1. (Tùy chọn) Regex tìm ngày/giờ trong tin nhắn của user nếu có
-        viewing_time_parsed = None
-        time_match = re.search(r'(\d{1,2}h\d{0,2}|\d{1,2}:\d{2})?\s*(ngày\s*)?(\d{1,2}[\/-]\d{1,2}([\/-]\d{2,4})?)', raw_message, re.IGNORECASE)
 
-        if time_match:
-            # Bạn có thể parse chuỗi match thành datetime object
-            # Mặc định ví dụ hoặc gán thời gian hẹn cụ thể:
-            try:
-                # Giả sử nhận thời gian từ input / form
-                viewing_time_parsed = datetime.strptime(extracted_time_str, "%Y-%m-%d %H:%M:%S")
-            except Exception:
-                viewing_time_parsed = None
+        # Bóc tách thời gian
+        viewing_time_parsed = extract_viewing_time(raw_message)
+        
         new_order = OrderRoom(
             id=str(uuid.uuid4()),
             tenant_zalo_id=str(tenant_zalo_id),
@@ -968,3 +960,52 @@ def is_phone_already_ordered(db: Session, tenant_phone: str, room_code: str = No
         
     existing_order = query.first()
     return existing_order is not None
+    
+
+def extract_viewing_time(text: str):
+    """
+    Trích xuất Ngày và Giờ xem phòng từ tin nhắn Zalo của khách hàng.
+    Trả về đối tượng datetime hoặc None nếu không tìm thấy.
+    """
+    now = datetime.now()
+    text_lower = text.lower()
+    
+    extracted_date = None
+    extracted_hour = 9  # Mặc định 9h sáng nếu khách không nói giờ
+    extracted_minute = 0
+
+    # 1. Tim GIỜ (Ví dụ: 15h30, 15h, 9:30, 14:00)
+    time_match = re.search(r'(\d{1,2})[h:](\d{1,2})?|\blúc\s*(\d{1,2})\b', text_lower)
+    if time_match:
+        if time_match.group(1):
+            extracted_hour = int(time_match.group(1))
+            extracted_minute = int(time_match.group(2)) if time_match.group(2) else 0
+        elif time_match.group(3):
+            extracted_hour = int(time_match.group(3))
+
+    # 2. Tìm NGÀY
+    # Trường hợp A: Gõ ngày cụ thể (Ví dụ: 18/08, 18-08-2026, 18/8)
+    date_match = re.search(r'(\d{1,2})[\/-](\d{1,2})(?:[\/-](\d{2,4}))?', text_lower)
+    
+    if date_match:
+        day = int(date_match.group(1))
+        month = int(date_match.group(2))
+        year = int(date_match.group(3)) if date_match.group(3) else now.year
+        if year < 100: 
+            year += 2000
+        try:
+            extracted_date = datetime(year, month, day, extracted_hour, extracted_minute)
+        except ValueError:
+            extracted_date = None
+
+    # Trường hợp B: Dùng từ tương đối ("hôm nay", "ngày mai", "ngày kia")
+    elif "mai" in text_lower:
+        tomorrow = now + timedelta(days=1)
+        extracted_date = datetime(tomorrow.year, tomorrow.month, tomorrow.day, extracted_hour, extracted_minute)
+    elif "kia" in text_lower:
+        day_after = now + timedelta(days=2)
+        extracted_date = datetime(day_after.year, day_after.month, day_after.day, extracted_hour, extracted_minute)
+    elif "hôm nay" in text_lower or "nay" in text_lower:
+        extracted_date = datetime(now.year, now.month, now.day, extracted_hour, extracted_minute)
+
+    return extracted_date

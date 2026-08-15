@@ -385,7 +385,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                 room_code = booking_match.group(1).upper()
                 
                 # 🎯 Gọi xử lý tạo đơn trong order_room (Sử dụng sender_id đồng nhất)
-                reply_msg = process_room_booking(tenant_zalo_id=str(sender_id), room_code=room_code, db=db)
+                reply_msg = process_room_booking(tenant_zalo_id=str(sender_id), room_code=room_code, raw_message = raw_message, db=db )
                 
                 send_zalo_message(user_id=str(sender_id), ai_reply=reply_msg)
                 return {"status": "success", "message": "Processed room booking"}
