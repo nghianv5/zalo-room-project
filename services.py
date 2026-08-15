@@ -781,7 +781,8 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, db: Session) -> st
 
     if already_booked:
         print(f"⚠️ SĐT {tenant_phone} đã đăng ký đặt lịch phòng {room_code} trước đó!")
-        return {f"⚠️ Số điện thoại {tenant_phone} của bạn đã đăng ký đặt lịch xem phòng ({room_code}) trước đó rồi ạ.\n Bên mình sẽ liên hệ lại sớm nhất!"}
+        
+        return f"⚠️ Số điện thoại {tenant_phone} của bạn đã đăng ký đặt lịch xem phòng ({room_code}) trước đó rồi ạ.\n Bên mình sẽ liên hệ lại sớm nhất!"
 
     # 3. Lưu thông tin đơn vào bảng order_room với Try-Catch kiểm tra
     try:
