@@ -394,15 +394,13 @@ def generate_content_with_retry(prompt: str, mime_type: str = "application/json"
     return ""
 
 # --- QDRANT VECTOR & ROOM SERVICES ---
-def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYSTEM", media_urls: Optional[List[str]] = None) -> bool:
+def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[List[str]] = None) -> bool:
     try:
         address = str(data.get("address", "")).strip()
         room_name = str(data.get("room_name", "Phòng trọ")).strip()
-        
-        if zalo_user_id in ["EXCEL_AI_IMPORT", "ADMIN_WEB", "SYSTEM"]:
-            phone = str(data.get("landlord_phone", "Chưa rõ")).strip()  #Lấy phone web
-        else:
-            phone = get_phone_by_user_id(user_id=zalo_user_id)      #Lấy phone zalo từ bảng user_web
+        phone = str(data.get("landlord_phone", "")).strip()
+
+
         if not address:
             return False
 
@@ -469,7 +467,6 @@ def upsert_room_to_db(data: dict, point_id: str = None, zalo_user_id: str = "SYS
             "move_in_timestamp": parse_move_in_date(data.get("move_in_date")),
             "status": str(data.get("status", "TRỐNG")),
             "landlord_phone": format_national_phone(phone),
-            "zalo_user_id": zalo_user_id,
             "created_at": created_at,
             "updated_at": now_str
         }
@@ -516,7 +513,7 @@ def search_rooms_by_vector(query_text: str, top_k: int = 5) -> List[dict]:
         print("❌ [VECTOR SEARCH ERROR]:", e)
         return []
 
-def update_room_status_in_db(point_id: str, new_status: str, zalo_user_id: str = "SYSTEM") -> bool:
+def update_room_status_in_db(point_id: str, new_status: str) -> bool:
     if not point_id:
         return False
     try:
@@ -526,8 +523,7 @@ def update_room_status_in_db(point_id: str, new_status: str, zalo_user_id: str =
             payload={
                 "status": new_status,
                 "raw_data.status": new_status,
-                "updated_at": now_str,
-                "zalo_user_id": zalo_user_id
+                "updated_at": now_str
             },
             points=[point_id],
             wait=True
@@ -608,7 +604,7 @@ def process_excel_file(file_url: str, sender_id: str) -> int:
             media_raw = str(row.get("Media", ""))
             media_urls = [url.strip() for url in media_raw.split(",") if url.strip() and url != "[Chưa cập nhật]"]
             if extracted_data["address"] and extracted_data["address"] != "[Chưa cập nhật]":
-                if upsert_room_to_db(extracted_data, media_urls=media_urls, point_id=None, zalo_user_id=sender_id):
+                if upsert_room_to_db(extracted_data, media_urls=media_urls, point_id=None):
                     success_count += 1
 
         if os.path.exists(temp_file):
@@ -694,7 +690,7 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
                     return {"status": "phone_required"}
 
                 
-                success = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None, zalo_user_id=user_id)
+                success = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None)
                 if success:
                     get_get_and_clear_pending_media(user_id)
 
