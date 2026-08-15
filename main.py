@@ -376,7 +376,8 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
             if booking_match:
                 # 🎯 Lấy SĐT khách từ DB bằng sender_id chuẩn hóa chuỗi
                 tenant_phone = get_phone_by_user_id(db, str(sender_id))
-
+                print(f"sender_id]: {sender_id}")
+                print(f"tenant_phone]: {tenant_phone}")
                 # 🚨 Nếu chưa xác thực SĐT -> Yêu cầu chia sẻ lại SĐT
                 if not tenant_phone or tenant_phone in ["Chưa xác thực SĐT", "Chưa cập nhật", ""]:
                     send_zalo_request_phone(str(sender_id))
