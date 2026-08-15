@@ -781,13 +781,7 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, db: Session) -> st
 
     if already_booked:
         print(f"⚠️ SĐT {tenant_phone} đã đăng ký đặt lịch phòng {room_code} trước đó!")
-        
-        # Phản hồi báo cho người dùng biết
-        send_zalo_message(
-            str(tenant_zalo_id),
-            f"⚠️ Số điện thoại {tenant_phone} của bạn đã đăng ký đặt lịch xem phòng ({room_code}) trước đó rồi ạ. Bên mình sẽ liên hệ lại sớm nhất!"
-        )
-        return {"status": "already_booked", "message": "Phone number already exists in order_room"}
+        return {f"⚠️ Số điện thoại {tenant_phone} của bạn đã đăng ký đặt lịch xem phòng ({room_code}) trước đó rồi ạ. Bên mình sẽ liên hệ lại sớm nhất!"}
 
     # 3. Lưu thông tin đơn vào bảng order_room với Try-Catch kiểm tra
     try:
@@ -808,9 +802,10 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, db: Session) -> st
         db.rollback()
         print(f"❌ Lỗi SQL khi chèn dữ liệu vào order_room: {e}")
         return "Dạ hệ thống không thể khởi tạo đơn đặt phòng, vui lòng thử lại sau!"
-
+    
+    print(f"landlord_zalo_id: {landlord_zalo_id}")
     # 4. Gửi thông báo tới Zalo của Chủ nhà (nếu có landlord_zalo_id)
-    if landlord_zalo_id and landlord_zalo_id not in ["SYSTEM", "ADMIN_WEB", "None"]:
+    if  landlord_zalo_id and landlord_zalo_id not in ["SYSTEM", "ADMIN_WEB", "None"]:
         msg_to_landlord = (
             f"🔔 **CÓ LỊCH HẸN XEM PHÓNG MỚI!**\n\n"
             f"📍 Mã phòng: {room_code} ({room_name} - {room_address})\n"
