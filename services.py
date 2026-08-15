@@ -304,7 +304,7 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
         return False
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
     headers = {"Content-Type": "application/json", "access_token": access_token}
-
+    print(f"❌ ai_reply: {ai_reply}")
     payload = {
         "recipient": {"user_id": user_id},
         "message": {"text": ai_reply}
