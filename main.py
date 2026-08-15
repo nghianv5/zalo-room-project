@@ -295,7 +295,6 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
         if event_name == "user_send_text":
             user_id = data.get("sender", {}).get("id")
             message_obj = data.get("message", {})
-            print(f"raw_message: {raw_message}")
             raw_message = message_obj.get("text", "")
             clean_message = raw_message.strip().lower()
             print(f"clean_message: {clean_message}")
