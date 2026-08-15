@@ -294,24 +294,21 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
 
         if event_name == "user_send_text":
             user_id = data.get("sender", {}).get("id")
-            raw_message = data.get("message", {}).get("text", "")
+            message_obj = data.get("message", {})
             print(f"raw_message: {raw_message}")
+            raw_message = message_obj.get("text", "")
             clean_message = raw_message.strip().lower()
-            raw_text = message_obj.get("text", "")
-        
-            # Chuyển về chữ thường để so sánh không lo hoa/thường
-            clean_text_lower = raw_text.strip().lower()
             print(f"clean_message: {clean_message}")
             # 🎯 BẮT TRƯỜNG HỢP: Zalo gửi thông tin dưới dạng tin nhắn văn bản user_send_text
             # Check xem đây có phải là tin nhắn tự động gửi thông tin từ phía Zalo Client không
-            if "gửi thông tin cho oa" in clean_text_lower or "số điện thoại:" in clean_text_lower:
+            if "gửi thông tin cho oa" in clean_message or "số điện thoại:" in clean_message:
                 
                 # 🔍 Trích xuất Số điện thoại bằng Regex từ chuỗi text (Bắt các số 10 chữ số bắt đầu bằng 0 hoặc 84)
-                phone_match = re.search(r'(?:số điện thoại|sđt|phone):\s*(\+?84|0[3|5|7|8|9][0-9]{8})\b', raw_text, re.IGNORECASE)
+                phone_match = re.search(r'(?:số điện thoại|sđt|phone):\s*(\+?84|0[3|5|7|8|9][0-9]{8})\b', raw_message, re.IGNORECASE)
                 
                 # Dự phòng: Nếu Regex trên trật, lấy luôn chuỗi 10 số bắt đầu bằng 0 trong tin nhắn
                 if not phone_match:
-                    phone_match = re.search(r'\b(0[3|5|7|8|9][0-9]{8})\b', raw_text)
+                    phone_match = re.search(r'\b(0[3|5|7|8|9][0-9]{8})\b', raw_message)
 
                 if phone_match:
                     extracted_phone = format_national_phone(phone_match.group(1))
