@@ -304,7 +304,7 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
         return False
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
     headers = {"Content-Type": "application/json", "access_token": access_token}
-    print(f"❌ ai_reply: {ai_reply}")
+
     payload = {
         "recipient": {"user_id": user_id},
         "message": {"text": ai_reply}
@@ -808,7 +808,7 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, db: Session) -> st
     # 4. Gửi thông báo tới Zalo của Chủ nhà (nếu có landlord_zalo_id)
     if  landlord_zalo_id and landlord_zalo_id not in ["SYSTEM", "ADMIN_WEB", "None"]:
         msg_to_landlord = (
-            f"🔔 **CÓ LỊCH HẸN XEM PHÓNG MỚI!**\n\n"
+            f"🔔 **CÓ LỊCH HẸN XEM PHÒNG MỚI!**\n\n"
             f"📍 Mã phòng: {room_code} ({room_name} - {room_address})\n"
             f"👤 Zalo ID người thuê: {tenant_zalo_id}\n"
             f"📞 SĐT người thuê: {tenant_phone}\n"
@@ -818,7 +818,7 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, db: Session) -> st
         send_zalo_message(user_id=str(landlord_zalo_id), ai_reply=msg_to_landlord)
 
     return (
-        f"✅ **ĐẶT LỊCH XEM PHÓNG THÀNH CÔNG!**\n\n"
+        f"✅ **ĐẶT LỊCH XEM PHÒNG THÀNH CÔNG!**\n\n"
         f"🏠 Phòng: {room_name} (Mã: {room_code})\n"
         f"📍 Địa chỉ: {room_address}\n"
         f"📞 SĐT chủ nhà: {landlord_phone}\n\n"
