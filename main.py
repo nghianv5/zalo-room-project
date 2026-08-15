@@ -100,7 +100,6 @@ async def save_or_update_room(
         success = upsert_room_to_db(
             data=room_dict, 
             point_id=point_id, 
-            zalo_user_id="ADMIN_WEB",
             media_urls=room_dict.get("media_urls", [])
         )
         
@@ -194,7 +193,7 @@ async def upload_excel_rooms(file: UploadFile = File(...)):
             ai_rejected_count += 1
             continue
 
-        if upsert_room_to_db(data=validated_data, zalo_user_id="EXCEL_AI_IMPORT"):
+        if upsert_room_to_db(data=validated_data):
             success_count += 1
         else:
             fail_count += 1

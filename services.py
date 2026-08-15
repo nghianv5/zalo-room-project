@@ -130,6 +130,8 @@ class OrderRoom(Base):
     landlord_zalo_id = Column(String, nullable=True)
     landlord_phone = Column(String, nullable=True)
     room_code = Column(String, nullable=False)
+    # 🆕 Thêm trường thời gian đến xem phòng
+    viewing_time = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
 Base.metadata.create_all(bind=engine)
@@ -782,6 +784,18 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, db: Session) -> st
 
     # 3. Lưu thông tin đơn vào bảng order_room với Try-Catch kiểm tra
     try:
+        # 🔍 1. (Tùy chọn) Regex tìm ngày/giờ trong tin nhắn của user nếu có
+        viewing_time_parsed = None
+        time_match = re.search(r'(\d{1,2}h\d{0,2}|\d{1,2}:\d{2})?\s*(ngày\s*)?(\d{1,2}[\/-]\d{1,2}([\/-]\d{2,4})?)', raw_message, re.IGNORECASE)
+
+        if time_match:
+            # Bạn có thể parse chuỗi match thành datetime object
+            # Mặc định ví dụ hoặc gán thời gian hẹn cụ thể:
+            try:
+                # Giả sử nhận thời gian từ input / form
+                viewing_time_parsed = datetime.strptime(extracted_time_str, "%Y-%m-%d %H:%M:%S")
+            except Exception:
+                viewing_time_parsed = None
         new_order = OrderRoom(
             id=str(uuid.uuid4()),
             tenant_zalo_id=str(tenant_zalo_id),
@@ -789,6 +803,7 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, db: Session) -> st
             landlord_zalo_id=str(landlord_zalo_id),
             landlord_phone=landlord_phone,
             room_code=room_code,
+            viewing_time=viewing_time_parsed,  # 👈 Thêm vào đây
             created_at=datetime.utcnow()
         )
         db.add(new_order)
