@@ -265,7 +265,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
     try:
         data = await request.json()
         event_name = str(data.get("event_name", "")).strip()
-        sender_id = data.get("user_id_by_app") or data.get("sender", {}).get("id")
+        sender_id = data.get("sender", {}).get("id")
 
         if not sender_id:
             return {"status": "ignored"}
