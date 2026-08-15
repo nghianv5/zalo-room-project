@@ -784,7 +784,7 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, db: Session) -> st
         
         # Phản hồi báo cho người dùng biết
         send_zalo_message(
-            str(user_id),
+            str(tenant_zalo_id),
             f"⚠️ Số điện thoại {tenant_phone} của bạn đã đăng ký đặt lịch xem phòng ({room_code}) trước đó rồi ạ. Bên mình sẽ liên hệ lại sớm nhất!"
         )
         return {"status": "already_booked", "message": "Phone number already exists in order_room"}
