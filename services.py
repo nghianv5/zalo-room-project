@@ -765,6 +765,7 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, db: Session) -> st
     if not records:
         return f"❌ Không tìm thấy phòng trọ nào có mã phòng **{room_code}**. Vui lòng kiểm tra lại mã!"
 
+
     room_data = records[0].payload
     landlord_phone = room_data.get("landlord_phone", "")
     landlord_zalo_id = room_data.get("zalo_user_id", "")
@@ -773,6 +774,20 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, db: Session) -> st
 
     # 2. Tìm SĐT của người thuê trong DB
     tenant_phone = get_phone_by_user_id(db, str(tenant_zalo_id)) or "Chưa xác thực SĐT"
+    
+    already_booked = is_phone_already_ordered(db, tenant_phone=tenant_phone, room_code=room_code)
+    # Option B (nếu muốn chặn đặt BẤT KỲ phòng nào):
+    # already_booked = is_phone_already_ordered(db, tenant_phone=tenant_phone)
+
+    if already_booked:
+        print(f"⚠️ SĐT {tenant_phone} đã đăng ký đặt lịch phòng {room_code} trước đó!")
+        
+        # Phản hồi báo cho người dùng biết
+        send_zalo_message(
+            str(user_id),
+            f"⚠️ Số điện thoại {tenant_phone} của bạn đã đăng ký đặt lịch xem phòng ({room_code}) trước đó rồi ạ. Bên mình sẽ liên hệ lại sớm nhất!"
+        )
+        return {"status": "already_booked", "message": "Phone number already exists in order_room"}
 
     # 3. Lưu thông tin đơn vào bảng order_room với Try-Catch kiểm tra
     try:
@@ -932,3 +947,17 @@ def send_zalo_request_phone(tenant_zalo_id: str) -> bool:
     except Exception as e:
         print(f"❌ Lỗi kết nối khi gửi yêu cầu SĐT tới Zalo: {e}")
         return False
+        
+def is_phone_already_ordered(db: Session, tenant_phone: str, room_code: str = None) -> bool:
+    """
+    Kiểm tra xem Số điện thoại đã từng đăng ký đặt lịch xem phòng chưa.
+    - Nếu truyền room_code: Check xem đã đặt ĐÚNG phòng đó chưa.
+    - Nếu không truyền room_code: Check xem đã đặt BẤT KỲ phòng nào chưa.
+    """
+    query = db.query(OrderRoom).filter(OrderRoom.tenant_phone == tenant_phone)
+    
+    if room_code:
+        query = query.filter(OrderRoom.room_code == room_code)
+        
+    existing_order = query.first()
+    return existing_order is not None
