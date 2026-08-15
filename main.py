@@ -331,10 +331,6 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                     except Exception as e:
                         print(f"❌ [DB ERROR]: {e}")
                         return {"status": "error", "message": str(e)}
-
-            # --- Xử lý tin nhắn chat thông thường khác của user ở đây ---
-            print(f"💬 Tin nhắn chat thường từ {user_id}: {raw_text}")
-            return {"status": "ok"}     
                     
             if "otp" in clean_message:
                 phone_match = re.search(r'(0[3|5|7|8|9][0-9]{8})', clean_message)
