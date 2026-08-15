@@ -123,12 +123,14 @@ class OrderRoom(Base):
     __tablename__ = "order_room"
 
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
-    tenant_zalo_id = Column(String, nullable=True)     # Zalo ID người thuê
-    tenant_phone = Column(String, nullable=True)       # SĐT người thuê
-    landlord_zalo_id = Column(String, nullable=True)   # Zalo ID chủ nhà
-    landlord_phone = Column(String, nullable=True)     # SĐT chủ nhà
-    room_code = Column(String, index=True, nullable=False) # Mã phòng 6 ký tự
-    created_at = Column(DateTime, default=datetime.utcnow) # Thời gian tạo đơn
+    # ✅ SỬA THÀNH: Bỏ unique=True, chỉ giữ index=True để tra cứu nhanh
+    tenant_zalo_id = Column(String, index=True, unique=False)
+    
+    tenant_phone = Column(String, nullable=True)
+    landlord_zalo_id = Column(String, nullable=True)
+    landlord_phone = Column(String, nullable=True)
+    room_code = Column(String, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
     
 Base.metadata.create_all(bind=engine)
 
