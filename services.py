@@ -536,104 +536,71 @@ def update_room_status_in_db(point_id: str, new_status: str) -> bool:
         return False
 
 def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
-    def manual_fallback(data: dict) -> Optional[dict]:
-        raw_address = data.get("address") or data.get("Địa chỉ") or data.get("1. Địa chỉ")
-        if not raw_address or pd.isna(raw_address) or str(raw_address).strip().lower() in ["nan", "none", "null", "", "chưa rõ"]:
-            return None
-        return {
-            "address": str(raw_address).strip(),
-            "room_code": str(data.get("room_code")),
-            "room_name": str(data.get("room_name") or data.get("Tên phòng") or "Phòng trọ").strip(),
-            "price": str(data.get("price") or data.get("Giá thuê") or "Chưa rõ").strip(),
-            "floor": str(data.get("floor") or "Chưa rõ").strip(),
-            "is_private_bathroom": str(data.get("is_private_bathroom") or "Chưa rõ").strip(),
-            "has_ac": str(data.get("has_ac") or "Chưa rõ").strip(),
-            "has_heater": str(data.get("has_heater") or "Chưa rõ").strip(),
-            "has_washer": str(data.get("has_washer") or "Chưa rõ").strip(),
-            "allow_pets": str(data.get("allow_pets") or "Chưa rõ").strip(),
-            "has_balcony": str(data.get("has_balcony") or "Chưa rõ").strip(),
-            "has_window": str(data.get("has_window") or "Chưa rõ").strip(),
-            "has_fingerprint_lock": str(data.get("has_fingerprint_lock") or "Chưa rõ").strip(),
-            "parking_info": str(data.get("parking_info") or "Chưa rõ").strip(),
-            "max_occupants": str(data.get("max_occupants") or "Chưa rõ").strip(),
-            "other_amenities": str(data.get("other_amenities") or "Chưa rõ").strip(),
-            "service_fees": str(data.get("service_fees") or "Chưa rõ").strip(),
-            "move_in_date": str(data.get("move_in_date") or "Vào ở ngay").strip(),
-            "status": str(data.get("status") or "TRỐNG").strip(),
-            "landlord_phone": str(data.get("landlord_phone") or "Chưa rõ").strip(),
-            "media_urls": []
-        }
-
+    # Kiểm tra client AI
     if not gemini_client:
-        return manual_fallback(row_dict)
-    # ✅ AFTER:
-    # Convert dictionary values to a plain text string for vector embedding
-    query_text = " ".join(f"{k}: {v}" for k, v in row_dict.items() if pd.notna(v) and v)
-    relevant_rooms = search_rooms_by_vector(query_text, top_k=5)
+        print("⚠️ Gemini Client chưa được khởi tạo!")
+        return None
+
+    # Lọc bỏ giá trị NaN / rỗng và chuyển đổi dòng dữ liệu Excel thành văn bản sạch
+    clean_row_str = ", ".join(f"{k}: {v}" for k, v in row_dict.items() if pd.notna(v) and str(v).strip() != "")
+    
+    if not clean_row_str:
+        return None
+
+    # Tìm kiếm phòng tương tự bằng Vector Search
+    relevant_rooms = search_rooms_by_vector(clean_row_str, top_k=5)
+
+    # Clean dict để gửi vào prompt (chuyển NaN thành None để JSON hóa hợp lệ)
+    clean_dict = {k: (None if pd.isna(v) else v) for k, v in row_dict.items()}
 
     prompt = f"""
-        Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ thông minh trên Zalo.
-        Phân tích tin nhắn người dùng và trích xuất đúng 13 trường thông tin:
+        Bạn là Trợ lý AI Xử lý và Chuẩn hóa Dữ liệu Phòng trọ từ File Excel nhập vào.
+        Nhiệm vụ: Tự động phân tích, trích xuất và chuẩn hóa dòng dữ liệu thô từ Excel thành cấu trúc JSON chuẩn.
 
-        1. `address`: Địa chỉ 4 cấp đầy đủ (Số nhà/Đường, Phường/Xã, Quận/Huyện, Tỉnh/Thành phố).
-        2. `room_name`: Tên hoặc số phòng (VD: Phòng 301, Phòng tầng 2...).
-        3. `price`: Giá thuê.
-        4. `floor`: Tầng bao nhiêu.
-        5. `is_private_bathroom`: Vệ sinh riêng hay khép kín hay không.
-        6. `has_ac`:  Điều hoà có hay không?
-        7. `has_heater`: có bình nóng lạnh không?
-        8. `has_washer`: Có máy giặt không?
-        9. `allow_pets`: Có cho nuôi pet không?
-        10. `has_balcony`: Có ban công không?
-        11. `has_window`: Có cửa sổ không?
-        12. `has_fingerprint_lock`: Ra vào bằng khoá vân tay có hay không?
-        13. `parking_info`: có chỗ để xe không?
-        14. `max_occupants`: số ng ở tối đã
-        15. `other_amenities`: Có thêm tiện ích gì khác
-        16. `service_fees`: Phí dịch vụ (điện, nước, wifi)...
-        12. `status`: Trạng thái phòng ("TRỐNG" hoặc "ĐÃ CHO THUÊ").
-        13. `move_in_date`: Ngày có thể chuyển vào phòng để ở
-        14. `media_urls`: Đường link ảnh hoặc video ngăn cách nhau bở dấu ,
-        
-        DỮ LIỆU ĐẦU VÀO:
-        - Tin nhắn: "{row_dict}"
-        - Phòng khớp từ Vector Search: {json.dumps(relevant_rooms, ensure_ascii=False)}
+        DỮ LIỆU DÒNG EXCEL THÔ:
+        {json.dumps(clean_dict, ensure_ascii=False)}
 
-        YÊU CẦU TRẢ VỀ JSON:
-        - Nếu thiếu thông tin trường nào, đặt giá trị là "[Chưa cập nhật]".
-        - Trình bày `ai_reply` đẹp mắt, sạch sẽ để gửi lại trên Zalo cho người dùng. ĐỪNG ĐÂM ĐƯỜNG LINK HÌNH ÁNH VÀO CÂU TRẢ LỜI, hình ảnh sẽ được hệ thống hiển thị đính kèm tự động.
+        CÁC PHÒNG TƯƠNG TỰ TRONG CƠ SỞ DỮ LIỆU (Dùng để đối chiếu/tránh trùng lặp nếu cần):
+        {json.dumps(relevant_rooms, ensure_ascii=False)}
 
-        QUY TẮC PHÂN LOẠI ACTION:
-        - "ADD_ROOM": Dùng khi người dùng ĐĂNG PHÒNG MỚI hoặc CẬP NHẬT/SỬA BẤT KỲ THÔNG TIN NÀO CỦA PHÒNG (Địa chỉ, Giá, Tiện ích, Ảnh, Tầng...).
-        - "UPDATE_STATUS": CHỈ DÙNG khi người dùng báo phòng "ĐÃ CHO THUÊ", "ĐÃ CÓ NGƯỜI BẮT", "ĐÃ CHỐT" hoặc "ĐỔI SANG TRỐNG".
-        - "SEARCH_ROOM": Dùng khi khách tìm kiếm phòng.
+        YÊU CẦU XỬ LÝ:
+        1. Tự động nhận diện tất cả tên cột (dù bằng Tiếng Việt, Tiếng Anh hay viết tắt) để trích xuất 19 trường thông tin.
+        2. Nếu trường thông tin nào thiếu hoặc rỗng trong Excel, hãy để giá trị là "[Chưa cập nhật]".
+        3. Các trường dạng Có/Không (điều hòa, nóng lạnh, vệ sinh riêng, pet, ban công, cửa sổ, khóa vân tay): Đưa về giá trị "Có", "Không", hoặc "[Chưa cập nhật]".
+        4. Với `status`: Định dạng chuẩn là "TRỐNG" hoặc "ĐÃ CHO THUÊ".
+        5. Xác định `action`: 
+           - "ADD_ROOM": Nếu đây là dòng dữ liệu thêm phòng mới hoặc cập nhật thông tin phòng.
+           - "UPDATE_STATUS": Nếu dòng này chỉ nhằm mục đích đổi trạng thái phòng.
+           - "SEARCH_ROOM": Nếu thông tin mang tính chất truy vấn.
 
         TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
         {{
           "action": "ADD_ROOM | SEARCH_ROOM | UPDATE_STATUS",
           "extracted_data": {{
-            "address": "Địa chỉ phòng trọ...",
-            "room_name": "Tên phòng trọ...",
-            "price": "Giá thuê (ví dụ: 3.5 triệu)...",
-            "floor": "Tầng số...",
-            "is_private_bathroom": "Có/Không",
-            "has_ac": "Có/Không",
-            "has_heater": "Có/Không",
-            "has_washer": "Có/Không",
-            "allow_pets": "Có/Không",
-            "has_balcony": "Có/Không",
-            "has_window": "Có/Không",
-            "has_fingerprint_lock": "Có/Không",
+            "address": "Địa chỉ phòng trọ đầy đủ...",
+            "room_name": "Tên/Số phòng...",
+            "price": "Giá thuê...",
+            "floor": "Tầng...",
+            "is_private_bathroom": "Có/Không/[Chưa cập nhật]",
+            "has_ac": "Có/Không/[Chưa cập nhật]",
+            "has_heater": "Có/Không/[Chưa cập nhật]",
+            "has_washer": "Có/Không/[Chưa cập nhật]",
+            "allow_pets": "Có/Không/[Chưa cập nhật]",
+            "has_balcony": "Có/Không/[Chưa cập nhật]",
+            "has_window": "Có/Không/[Chưa cập nhật]",
+            "has_fingerprint_lock": "Có/Không/[Chưa cập nhật]",
             "parking_info": "Thông tin để xe...",
             "max_occupants": "Số người ở tối đa...",
             "other_amenities": "Tiện ích khác...",
-            "service_fees": "Phí dịch vụ (điện, nước, wifi)...",
+            "service_fees": "Phí dịch vụ...",
+            "status": "TRỐNG hoặc ĐÃ CHO THUÊ",
             "move_in_date": "Ngày có thể chuyển vào...",
-            "media_urls": "Link url ảnh hoặc video ngăn cách nhau bở dấu ,"
+            "media_urls": "Các link ảnh/video phân cách bởi dấu phẩy (nếu có)"
           }},
-          "ai_reply": "Mô tả chi tiết dạng văn bản đẹp mắt..."
+          "ai_reply": "Tóm tắt ngắn gọn thông tin phòng đã chuẩn hóa."
         }}
         """
+
     try:
         response = gemini_client.models.generate_content(
             model="models/gemini-2.5-flash",
@@ -647,8 +614,8 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
                 raw_text = re.sub(r"\n?```$", "", raw_text)
             return json.loads(raw_text)
     except Exception as e:
-        print("⚠️ Lỗi AI Validation:", e)
-    return manual_fallback(row_dict)
+        print(f"⚠️ Lỗi AI Validation dòng dữ liệu Excel: {e}")
+        return None
 
 def process_excel_file(file_url: str, sender_id: str) -> int:
     try:
