@@ -375,8 +375,6 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
             if booking_match:
                 # 🎯 Lấy SĐT khách từ DB bằng sender_id chuẩn hóa chuỗi
                 tenant_phone = get_phone_by_user_id(db, str(sender_id))
-                print(f"sender_id]: {sender_id}")
-                print(f"tenant_phone]: {tenant_phone}")
                 # 🚨 Nếu chưa xác thực SĐT -> Yêu cầu chia sẻ lại SĐT
                 if not tenant_phone or tenant_phone in ["Chưa xác thực SĐT", "Chưa cập nhật", ""]:
                     send_zalo_request_phone(str(sender_id))
@@ -390,13 +388,14 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                 send_zalo_message(user_id=str(sender_id), ai_reply=reply_msg)
                 return {"status": "success", "message": "Processed room booking"}
             #
-        print("process_zalo_ai_logic")
-        print(event_name in ["user_send_text", "user_send_image", "user_send_file", "user_send_video"])
+        
         if event_name in ["user_send_text", "user_send_image", "user_send_file", "user_send_video"]:
             message_obj = data.get("message", {})
             text = message_obj.get("text", "")
             attachments = message_obj.get("attachments", [])
             media_items = []
+            print("process_zalo_ai_logic")
+            print(f"attachments]: {attachments}")
             for item in attachments:
                 payload = item.get("payload", {})
                 media_url = payload.get("url") or payload.get("thumbnailUrl")
@@ -405,7 +404,8 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                         "url": media_url,
                         "is_video": (item.get("type") == "video") or ("user_send_video" in event_name)
                     })
-
+            print(f"text]: {text}")
+            print(f"media_items]: {media_items}")
             background_tasks.add_task(process_zalo_ai_logic, text, media_items, sender_id, db)
 
     except Exception as e:
