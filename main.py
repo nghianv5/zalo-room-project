@@ -390,21 +390,21 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                 send_zalo_message(user_id=str(sender_id), ai_reply=reply_msg)
                 return {"status": "success", "message": "Processed room booking"}
             #
-            if event_name in ["user_send_text", "user_send_image", "user_send_file", "user_send_video"]:
-                message_obj = data.get("message", {})
-                text = message_obj.get("text", "")
-                attachments = message_obj.get("attachments", [])
-                media_items = []
-                for item in attachments:
-                    payload = item.get("payload", {})
-                    media_url = payload.get("url") or payload.get("thumbnailUrl")
-                    if media_url:
-                        media_items.append({
-                            "url": media_url,
-                            "is_video": (item.get("type") == "video") or ("user_send_video" in event_name)
-                        })
+        if event_name in ["user_send_text", "user_send_image", "user_send_file", "user_send_video"]:
+            message_obj = data.get("message", {})
+            text = message_obj.get("text", "")
+            attachments = message_obj.get("attachments", [])
+            media_items = []
+            for item in attachments:
+                payload = item.get("payload", {})
+                media_url = payload.get("url") or payload.get("thumbnailUrl")
+                if media_url:
+                    media_items.append({
+                        "url": media_url,
+                        "is_video": (item.get("type") == "video") or ("user_send_video" in event_name)
+                    })
 
-                background_tasks.add_task(process_zalo_ai_logic, text, media_items, sender_id, db)
+            background_tasks.add_task(process_zalo_ai_logic, text, media_items, sender_id, db)
 
     except Exception as e:
         print("❌ [Webhook Exception]:", e)
