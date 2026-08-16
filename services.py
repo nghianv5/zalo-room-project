@@ -617,56 +617,60 @@ def process_excel_file(file_url: str, sender_id: str) -> int:
         return 0
 
 def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: str = "SYSTEM", db: Session = None):
+    print("process_zalo_ai_logic")
     incoming_media_urls = []
     for item in (media_items or []):
         saved_url = save_media_file(item["url"], is_video=item.get("is_video", False))
         if saved_url:
             incoming_media_urls.append(saved_url)
-    
+    print("1")
     if not message_text.strip() and incoming_media_urls:
         add_pending_media(user_id, incoming_media_urls)
         total_pending = len(PENDING_MEDIA_CACHE.get(user_id, {}).get("urls", []))
         reply = f"📸 Em đã nhận {len(incoming_media_urls)} ảnh/video! (Tổng đã nhận: {total_pending} file)\n\n👉 Anh/Chị gửi thêm thông tin phòng để em tạo bài nhé!"
         send_zalo_message(user_id, reply, media_urls=incoming_media_urls)
         return
-
+    print("2")
     cached_data = PENDING_MEDIA_CACHE.get(user_id, {})
     pending_urls = cached_data.get("urls", []) if (time.time() - cached_data.get("timestamp", 0) <= CACHE_TTL_SECONDS) else []
     all_current_media = list(dict.fromkeys(pending_urls + incoming_media_urls))
     urls_to_send = all_current_media
-
+    print("3")
     try:
         relevant_rooms = search_rooms_by_vector(message_text, top_k=5)
         system_prompt = f"""
-Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ thông minh trên Zalo.
-Phân tích tin nhắn: "{message_text}"
-Media: {json.dumps(all_current_media)}
-Phòng từ Vector Search: {json.dumps(relevant_rooms, ensure_ascii=False)}
+        Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ thông minh trên Zalo.
+        Phân tích tin nhắn: "{message_text}"
+        Media: {json.dumps(all_current_media)}
+        Phòng từ Vector Search: {json.dumps(relevant_rooms, ensure_ascii=False)}
 
-TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
-{{
-    "action": "ADD_ROOM" | "SEARCH_ROOM" | "UPDATE_STATUS",
-    "extracted_data": {{
-        "address": "...", "room_name": "...", "price": "...", "status": "TRỐNG", "landlord_phone":"..."
-    }},
-    "ai_reply": "Mô tả chi tiết dạng văn bản đẹp mắt..."
-}}
-"""
+        TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
+        {{
+            "action": "ADD_ROOM" | "SEARCH_ROOM" | "UPDATE_STATUS",
+            "extracted_data": {{
+                "address": "...", "room_name": "...", "price": "...", "status": "TRỐNG", "landlord_phone":"..."
+            }},
+            "ai_reply": "Mô tả chi tiết dạng văn bản đẹp mắt..."
+        }}
+        """
+        print("4")
         raw_text = generate_content_with_retry(system_prompt, mime_type="application/json")
         if not raw_text:
             raise Exception("Gemini không phản hồi dữ liệu.")
-
+        print("5")
         result_data = json.loads(raw_text)
         ai_reply = result_data.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
         action = result_data.get("action")
         extracted = result_data.get("extracted_data", {})
         existing_point_id = relevant_rooms[0].get("id") if (relevant_rooms and len(relevant_rooms) > 0) else None
-
+        print("6")
         if action == "ADD_ROOM":
+            print("7")
             address = str(extracted.get("address", "")).strip()
             if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
                 #nếu người dùng chưa đăng ký phòng trên zalo hay web thì sẽ tạo mới data cho user
                 if db:
+                    print("8")
                     user_id = get_phone_by_user_id(db, user_id)
                 if not user_id:
                     # 🚨 BẮT BUỘC: Nếu chưa có SĐT -> Chặn lại và yêu cầu chia sẻ SĐT
@@ -687,23 +691,25 @@ TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
                                 }
                             }
                         }
+                    print("9")
                     # Gọi Zalo Open API gửi yêu cầu xin SĐT
                     send_zalo_request(request_phone_message)
                     return {"status": "phone_required"}
 
-                
+                print("10")
                 success = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None)
                 if success:
                     get_get_and_clear_pending_media(user_id)
-
+                    print("11")
         elif action == "UPDATE_STATUS" and existing_point_id:
+            print("12")
             new_status = extracted.get("status") or "ĐÃ CHO THUÊ"
             update_room_status_in_db(point_id=existing_point_id, new_status=new_status, zalo_user_id=user_id)
 
     except Exception as err:
         print("❌ [AI Logic Exception]:", err)
         ai_reply = "Dạ hệ thống đang bận một chút, anh/chị chờ em vài giây rồi nhắn lại giúp em nhé!"
-
+    print("13")
     send_zalo_message(user_id, ai_reply, media_urls=urls_to_send)
     
     

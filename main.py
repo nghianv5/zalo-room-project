@@ -394,8 +394,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
             text = message_obj.get("text", "")
             attachments = message_obj.get("attachments", [])
             media_items = []
-            print("process_zalo_ai_logic")
-            print(f"attachments]: {attachments}")
+
             for item in attachments:
                 payload = item.get("payload", {})
                 media_url = payload.get("url") or payload.get("thumbnailUrl")
@@ -404,8 +403,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                         "url": media_url,
                         "is_video": (item.get("type") == "video") or ("user_send_video" in event_name)
                     })
-            print(f"text]: {text}")
-            print(f"media_items]: {media_items}")
+
             background_tasks.add_task(process_zalo_ai_logic, text, media_items, sender_id, db)
 
     except Exception as e:
