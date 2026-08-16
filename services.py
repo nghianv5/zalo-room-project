@@ -566,8 +566,11 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
 
     if not gemini_client:
         return manual_fallback(row_dict)
-    
-    relevant_rooms = search_rooms_by_vector(row_dict, top_k=5)
+    # ✅ AFTER:
+    # Convert dictionary values to a plain text string for vector embedding
+    query_text = " ".join(f"{k}: {v}" for k, v in row_dict.items() if pd.notna(v) and v)
+    relevant_rooms = search_rooms_by_vector(query_text, top_k=5)
+
     prompt = f"""
         Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ thông minh trên Zalo.
         Phân tích tin nhắn người dùng và trích xuất đúng 13 trường thông tin:
