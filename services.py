@@ -543,7 +543,7 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
 
     # Lọc bỏ giá trị NaN / rỗng và chuyển đổi dòng dữ liệu Excel thành văn bản sạch
     clean_row_str = ", ".join(f"{k}: {v}" for k, v in row_dict.items() if pd.notna(v) and str(v).strip() != "")
-    
+    print(clean_row_str)
     if not clean_row_str:
         return None
 
