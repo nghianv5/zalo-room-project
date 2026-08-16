@@ -543,7 +543,7 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
 
     # Lọc bỏ giá trị NaN / rỗng và chuyển đổi dòng dữ liệu Excel thành văn bản sạch
     clean_row_str = ", ".join(f"{k}: {v}" for k, v in row_dict.items() if pd.notna(v) and str(v).strip() != "")
-    print(clean_row_str)
+    
     if not clean_row_str:
         return None
 
@@ -609,6 +609,7 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
         )
         if response and response.text:
             raw_text = response.text.strip()
+            print(raw_text)
             if raw_text.startswith("```"):
                 raw_text = re.sub(r"^```(?:json)?\n?", "", raw_text)
                 raw_text = re.sub(r"\n?```$", "", raw_text)
