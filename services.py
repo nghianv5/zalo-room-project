@@ -567,8 +567,7 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
     if not gemini_client:
         return manual_fallback(row_dict)
     
-    #todo
-    prompt = f"Bạn là trợ lý AI kiểm định dữ liệu phòng trọ. Chuẩn hóa dữ liệu JSON: {json.dumps(row_dict, ensure_ascii=False)}"
+    relevant_rooms = search_rooms_by_vector(row_dict, top_k=5)
     prompt = f"""
         Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ thông minh trên Zalo.
         Phân tích tin nhắn người dùng và trích xuất đúng 13 trường thông tin:
