@@ -566,8 +566,72 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
 
     if not gemini_client:
         return manual_fallback(row_dict)
-
+    
+    #todo
     prompt = f"Bạn là trợ lý AI kiểm định dữ liệu phòng trọ. Chuẩn hóa dữ liệu JSON: {json.dumps(row_dict, ensure_ascii=False)}"
+    prompt = f"""
+        Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ thông minh trên Zalo.
+        Phân tích tin nhắn người dùng và trích xuất đúng 13 trường thông tin:
+
+        1. `address`: Địa chỉ 4 cấp đầy đủ (Số nhà/Đường, Phường/Xã, Quận/Huyện, Tỉnh/Thành phố).
+        2. `room_name`: Tên hoặc số phòng (VD: Phòng 301, Phòng tầng 2...).
+        3. `price`: Giá thuê.
+        4. `floor`: Tầng bao nhiêu.
+        5. `is_private_bathroom`: Vệ sinh riêng hay khép kín hay không.
+        6. `has_ac`:  Điều hoà có hay không?
+        7. `has_heater`: có bình nóng lạnh không?
+        8. `has_washer`: Có máy giặt không?
+        9. `allow_pets`: Có cho nuôi pet không?
+        10. `has_balcony`: Có ban công không?
+        11. `has_window`: Có cửa sổ không?
+        12. `has_fingerprint_lock`: Ra vào bằng khoá vân tay có hay không?
+        13. `parking_info`: có chỗ để xe không?
+        14. `max_occupants`: số ng ở tối đã
+        15. `other_amenities`: Có thêm tiện ích gì khác
+        16. `service_fees`: Phí dịch vụ (điện, nước, wifi)...
+        12. `status`: Trạng thái phòng ("TRỐNG" hoặc "ĐÃ CHO THUÊ").
+        13. `move_in_date`: Ngày có thể chuyển vào phòng để ở
+        14. `media_urls`: Đường link ảnh hoặc video ngăn cách nhau bở dấu ,
+        
+        DỮ LIỆU ĐẦU VÀO:
+        - Tin nhắn: "{row_dict}"
+        - Phòng khớp từ Vector Search: {json.dumps(relevant_rooms, ensure_ascii=False)}
+
+        YÊU CẦU TRẢ VỀ JSON:
+        - Nếu thiếu thông tin trường nào, đặt giá trị là "[Chưa cập nhật]".
+        - Trình bày `ai_reply` đẹp mắt, sạch sẽ để gửi lại trên Zalo cho người dùng. ĐỪNG ĐÂM ĐƯỜNG LINK HÌNH ÁNH VÀO CÂU TRẢ LỜI, hình ảnh sẽ được hệ thống hiển thị đính kèm tự động.
+
+        QUY TẮC PHÂN LOẠI ACTION:
+        - "ADD_ROOM": Dùng khi người dùng ĐĂNG PHÒNG MỚI hoặc CẬP NHẬT/SỬA BẤT KỲ THÔNG TIN NÀO CỦA PHÒNG (Địa chỉ, Giá, Tiện ích, Ảnh, Tầng...).
+        - "UPDATE_STATUS": CHỈ DÙNG khi người dùng báo phòng "ĐÃ CHO THUÊ", "ĐÃ CÓ NGƯỜI BẮT", "ĐÃ CHỐT" hoặc "ĐỔI SANG TRỐNG".
+        - "SEARCH_ROOM": Dùng khi khách tìm kiếm phòng.
+
+        TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
+        {{
+          "action": "ADD_ROOM | SEARCH_ROOM | UPDATE_STATUS",
+          "extracted_data": {{
+            "address": "Địa chỉ phòng trọ...",
+            "room_name": "Tên phòng trọ...",
+            "price": "Giá thuê (ví dụ: 3.5 triệu)...",
+            "floor": "Tầng số...",
+            "is_private_bathroom": "Có/Không",
+            "has_ac": "Có/Không",
+            "has_heater": "Có/Không",
+            "has_washer": "Có/Không",
+            "allow_pets": "Có/Không",
+            "has_balcony": "Có/Không",
+            "has_window": "Có/Không",
+            "has_fingerprint_lock": "Có/Không",
+            "parking_info": "Thông tin để xe...",
+            "max_occupants": "Số người ở tối đa...",
+            "other_amenities": "Tiện ích khác...",
+            "service_fees": "Phí dịch vụ (điện, nước, wifi)...",
+            "move_in_date": "Ngày có thể chuyển vào...",
+            "media_urls": "Link url ảnh hoặc video ngăn cách nhau bở dấu ,"
+          }},
+          "ai_reply": "Mô tả chi tiết dạng văn bản đẹp mắt..."
+        }}
+        """
     try:
         response = gemini_client.models.generate_content(
             model="models/gemini-2.5-flash",
@@ -640,19 +704,67 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         relevant_rooms = search_rooms_by_vector(message_text, top_k=5)
         system_prompt = f"""
         Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ thông minh trên Zalo.
-        Phân tích tin nhắn: "{message_text}"
-        Media: {json.dumps(all_current_media)}
-        Phòng từ Vector Search: {json.dumps(relevant_rooms, ensure_ascii=False)}
+        Phân tích tin nhắn người dùng và trích xuất đúng 13 trường thông tin:
+
+        1. `address`: Địa chỉ 4 cấp đầy đủ (Số nhà/Đường, Phường/Xã, Quận/Huyện, Tỉnh/Thành phố).
+        2. `room_name`: Tên hoặc số phòng (VD: Phòng 301, Phòng tầng 2...).
+        3. `price`: Giá thuê.
+        4. `floor`: Tầng bao nhiêu.
+        5. `is_private_bathroom`: Vệ sinh riêng hay khép kín hay không.
+        6. `has_ac`:  Điều hoà có hay không?
+        7. `has_heater`: có bình nóng lạnh không?
+        8. `has_washer`: Có máy giặt không?
+        9. `allow_pets`: Có cho nuôi pet không?
+        10. `has_balcony`: Có ban công không?
+        11. `has_window`: Có cửa sổ không?
+        12. `has_fingerprint_lock`: Ra vào bằng khoá vân tay có hay không?
+        13. `parking_info`: có chỗ để xe không?
+        14. `max_occupants`: số ng ở tối đã
+        15. `other_amenities`: Có thêm tiện ích gì khác
+        16. `service_fees`: Phí dịch vụ (điện, nước, wifi)...
+        12. `status`: Trạng thái phòng ("TRỐNG" hoặc "ĐÃ CHO THUÊ").
+        13. `move_in_date`: Ngày có thể chuyển vào phòng để ở
+`       
+        DỮ LIỆU ĐẦU VÀO:
+        - Tin nhắn: "{message_text}"
+        - Media kèm theo: {json.dumps(all_current_media)}
+        - Phòng khớp từ Vector Search: {json.dumps(relevant_rooms, ensure_ascii=False)}
+
+        YÊU CẦU TRẢ VỀ JSON:
+        - Nếu thiếu thông tin trường nào, đặt giá trị là "[Chưa cập nhật]".
+        - Trình bày `ai_reply` đẹp mắt, sạch sẽ để gửi lại trên Zalo cho người dùng. ĐỪNG ĐÂM ĐƯỜNG LINK HÌNH ÁNH VÀO CÂU TRẢ LỜI, hình ảnh sẽ được hệ thống hiển thị đính kèm tự động.
+
+        QUY TẮC PHÂN LOẠI ACTION:
+        - "ADD_ROOM": Dùng khi người dùng ĐĂNG PHÒNG MỚI hoặc CẬP NHẬT/SỬA BẤT KỲ THÔNG TIN NÀO CỦA PHÒNG (Địa chỉ, Giá, Tiện ích, Ảnh, Tầng...).
+        - "UPDATE_STATUS": CHỈ DÙNG khi người dùng báo phòng "ĐÃ CHO THUÊ", "ĐÃ CÓ NGƯỜI BẮT", "ĐÃ CHỐT" hoặc "ĐỔI SANG TRỐNG".
+        - "SEARCH_ROOM": Dùng khi khách tìm kiếm phòng.
 
         TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
         {{
-            "action": "ADD_ROOM" | "SEARCH_ROOM" | "UPDATE_STATUS",
-            "extracted_data": {{
-                "address": "...", "room_name": "...", "price": "...", "status": "TRỐNG", "landlord_phone":"..."
-            }},
-            "ai_reply": "Mô tả chi tiết dạng văn bản đẹp mắt..."
+          "action": "ADD_ROOM | SEARCH_ROOM | UPDATE_STATUS",
+          "extracted_data": {{
+            "address": "Địa chỉ phòng trọ...",
+            "room_name": "Tên phòng trọ...",
+            "price": "Giá thuê (ví dụ: 3.5 triệu)...",
+            "floor": "Tầng số...",
+            "is_private_bathroom": "Có/Không",
+            "has_ac": "Có/Không",
+            "has_heater": "Có/Không",
+            "has_washer": "Có/Không",
+            "allow_pets": "Có/Không",
+            "has_balcony": "Có/Không",
+            "has_window": "Có/Không",
+            "has_fingerprint_lock": "Có/Không",
+            "parking_info": "Thông tin để xe...",
+            "max_occupants": "Số người ở tối đa...",
+            "other_amenities": "Tiện ích khác...",
+            "service_fees": "Phí dịch vụ (điện, nước, wifi)...",
+            "move_in_date": "Ngày có thể chuyển vào..."
+          }},
+          "ai_reply": "Mô tả chi tiết dạng văn bản đẹp mắt..."
         }}
         """
+                
         print("4")
         raw_text = generate_content_with_retry(system_prompt, mime_type="application/json")
         if not raw_text:
