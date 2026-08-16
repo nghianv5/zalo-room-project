@@ -622,7 +622,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         saved_url = save_media_file(item["url"], is_video=item.get("is_video", False))
         if saved_url:
             incoming_media_urls.append(saved_url)
-    print("process_zalo_ai_logic")
+    
     if not message_text.strip() and incoming_media_urls:
         add_pending_media(user_id, incoming_media_urls)
         total_pending = len(PENDING_MEDIA_CACHE.get(user_id, {}).get("urls", []))

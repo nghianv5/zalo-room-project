@@ -390,6 +390,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                 send_zalo_message(user_id=str(sender_id), ai_reply=reply_msg)
                 return {"status": "success", "message": "Processed room booking"}
             #
+        print("process_zalo_ai_logic")
         if event_name in ["user_send_text", "user_send_image", "user_send_file", "user_send_video"]:
             message_obj = data.get("message", {})
             text = message_obj.get("text", "")
