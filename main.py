@@ -189,11 +189,12 @@ async def upload_excel_rooms(file: UploadFile = File(...)):
 
     for _, row in df.iterrows():
         validated_data = ai_validate_and_extract_room(row.to_dict())
-        if not validated_data or not validated_data.get("address"):
+        extracted = validated_data.get("extracted_data", {}) if validated_data else {}
+        if not extracted or not extracted.get("address"):
             ai_rejected_count += 1
             continue
 
-        if upsert_room_to_db(data=validated_data):
+        if upsert_room_to_db(data=extracted):
             success_count += 1
         else:
             fail_count += 1
