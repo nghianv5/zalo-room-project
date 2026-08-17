@@ -303,6 +303,8 @@ def add_pending_media(user_id: str, new_urls: list):
 def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
     access_token = ZALO_ACCESS_TOKEN
     print("❌ [Webhook ZALO_ACCESS_TOKEN]:", ZALO_ACCESS_TOKEN)
+    print("❌ [user_id ZALO_ACCESS_TOKEN]:", user_id)
+    print("❌ [ai_reply ZALO_ACCESS_TOKEN]:", ai_reply)
     if not access_token:
         return False
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
@@ -314,6 +316,7 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
     }
     try:
         response = requests.post(url, headers=headers, json=payload, timeout=10)
+        print("❌ [Webhook ZALO_ACCESS_TOKEN]: OK")
         return response.json().get("error") == 0
     except Exception as e:
         print("❌ [ZALO CRITICAL ERROR]:", e)
