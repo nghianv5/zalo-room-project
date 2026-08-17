@@ -628,13 +628,11 @@ def process_excel_file(file_url: str, sender_id: str) -> str:
         success_count, fail_count, ai_rejected_count = 0, 0, 0
         for _, row in df.iterrows():
             validated_data = ai_validate_and_extract_room(row.to_dict())
-            print(f"validated_data: {validated_data}")
-            print(validated_data.get("address"))
-            if not validated_data or not validated_data.get("address"):
+            if not validated_data or not validated_data.get("extracted_data", {}).get("address"):
                 ai_rejected_count += 1
                 continue
             
-            if upsert_room_to_db(data=validated_data):
+            if upsert_room_to_db(data=validated_data.get("extracted_data")):
                 success_count += 1
             else:
                 fail_count += 1
