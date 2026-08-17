@@ -628,11 +628,17 @@ def process_excel_file(file_url: str, sender_id: str) -> str:
         success_count, fail_count, ai_rejected_count = 0, 0, 0
         for _, row in df.iterrows():
             validated_data = ai_validate_and_extract_room(row.to_dict())
-            if not validated_data or not validated_data.get("extracted_data", {}).get("address"):
+            print("❌ [EXCEL PROCESS ERROR]:", validated_data.get("extracted_data", {}).get("address"))
+            extracted = validated_data.get("extracted_data", {}) if validated_data else {}
+            raw_address = str(extracted.get("address") or "").strip()
+
+            # Kiểm tra nếu địa chỉ rỗng hoặc rơi vào các từ khóa "thiếu dữ liệu"
+            if not raw_address or raw_address.lower() in ["[chưa cập nhật]", "none", "null", "chưa rõ", ""]:
                 ai_rejected_count += 1
                 continue
+
             
-            if upsert_room_to_db(data=validated_data.get("extracted_data")):
+            if upsert_room_to_db(data=extracted):
                 success_count += 1
             else:
                 fail_count += 1
