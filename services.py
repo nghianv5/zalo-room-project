@@ -607,6 +607,7 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
         )
         if response and response.text:
             raw_text = response.text.strip()
+            print(f"raw_text: {raw_text}")
             if raw_text.startswith("```"):
                 raw_text = re.sub(r"^```(?:json)?\n?", "", raw_text)
                 raw_text = re.sub(r"\n?```$", "", raw_text)
