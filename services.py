@@ -618,7 +618,7 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
         print(f"⚠️ Lỗi AI Validation dòng dữ liệu Excel: {e}")
         return None
 
-def process_excel_file(file_url: str, sender_id: str) -> int:
+def process_excel_file(file_url: str, sender_id: str) -> str:
     try:
         res = requests.get(file_url, timeout=30)
         if res.status_code != 200:
@@ -628,24 +628,21 @@ def process_excel_file(file_url: str, sender_id: str) -> int:
             f.write(res.content)
 
         df = pd.read_excel(temp_file).fillna("[Chưa cập nhật]")
-        success_count = 0
+        success_count, fail_count, ai_rejected_count = 0, 0, 0
         for _, row in df.iterrows():
-            extracted_data = {
-                "address": str(row.get("Địa chỉ", "")).strip(),
-                "room_name": str(row.get("Tên phòng", "Phòng trọ")).strip(),
-                "floor": str(row.get("Tầng", "[Chưa cập nhật]")),
-                "price": str(row.get("Giá", "[Chưa cập nhật]")),
-                "status": str(row.get("Trạng thái", "TRỐNG"))
-            }
-            media_raw = str(row.get("Media", ""))
-            media_urls = [url.strip() for url in media_raw.split(",") if url.strip() and url != "[Chưa cập nhật]"]
-            if extracted_data["address"] and extracted_data["address"] != "[Chưa cập nhật]":
-                if upsert_room_to_db(extracted_data, media_urls=media_urls, point_id=None):
-                    success_count += 1
+            validated_data = ai_validate_and_extract_room(row.to_dict())
+            if not validated_data or not validated_data.get("address"):
+                ai_rejected_count += 1
+                continue
 
+            if upsert_room_to_db(data=validated_data):
+                success_count += 1
+            else:
+                fail_count += 1
+        
         if os.path.exists(temp_file):
             os.remove(temp_file)
-        return success_count
+        return f"AI đã xử lý xong! Thành công: {success_count} phòng. (Bỏ qua {ai_rejected_count} dòng lỗi, {fail_count} lỗi DB)."
     except Exception as e:
         print("❌ [EXCEL PROCESS ERROR]:", e)
         return 0

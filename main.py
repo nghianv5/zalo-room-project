@@ -284,8 +284,8 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                     send_zalo_message(sender_id, "📥 Em đã nhận file Excel! Đang tiến hành cập nhật dữ liệu phòng...")
                     
                     def handle_excel():
-                        count = process_excel_file(file_url, sender_id)
-                        send_zalo_message(sender_id, f"✅ Đã nhập/cập nhật thành công {count} phòng từ file Excel vào hệ thống!")
+                        result_upfile = process_excel_file(file_url, sender_id)
+                        send_zalo_message(sender_id, result_upfile)
 
                     background_tasks.add_task(handle_excel)
                     return {"status": "success"}
@@ -394,7 +394,8 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
             text = message_obj.get("text", "")
             attachments = message_obj.get("attachments", [])
             media_items = []
-
+            
+            
             for item in attachments:
                 payload = item.get("payload", {})
                 media_url = payload.get("url") or payload.get("thumbnailUrl")
@@ -403,7 +404,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                         "url": media_url,
                         "is_video": (item.get("type") == "video") or ("user_send_video" in event_name)
                     })
-
+            print("process_zalo_ai_logic 1")
             background_tasks.add_task(process_zalo_ai_logic, text, media_items, sender_id, db)
 
     except Exception as e:
