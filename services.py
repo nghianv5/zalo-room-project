@@ -302,6 +302,7 @@ def add_pending_media(user_id: str, new_urls: list):
 
 def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
     access_token = ZALO_ACCESS_TOKEN
+    print("❌ [Webhook ZALO_ACCESS_TOKEN]:", ZALO_ACCESS_TOKEN)
     if not access_token:
         return False
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
@@ -726,7 +727,8 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
             "max_occupants": "Số người ở tối đa...",
             "other_amenities": "Tiện ích khác...",
             "service_fees": "Phí dịch vụ (điện, nước, wifi)...",
-            "move_in_date": "Ngày có thể chuyển vào..."
+            "move_in_date": "Ngày có thể chuyển vào...",
+            "media_urls": "Media kèm theo"
           }},
           "ai_reply": "Mô tả chi tiết dạng văn bản đẹp mắt..."
         }}
