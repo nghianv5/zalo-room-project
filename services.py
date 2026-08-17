@@ -542,7 +542,7 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
 
     # Lọc bỏ giá trị NaN / rỗng và chuyển đổi dòng dữ liệu Excel thành văn bản sạch
     clean_row_str = ", ".join(f"{k}: {v}" for k, v in row_dict.items() if pd.notna(v) and str(v).strip() != "")
-    
+    print(f"clean_row_str {clean_row_str}")
     if not clean_row_str:
         return None
 
@@ -633,7 +633,7 @@ def process_excel_file(file_url: str, sender_id: str) -> str:
             if not validated_data or not validated_data.get("address"):
                 ai_rejected_count += 1
                 continue
-
+            
             if upsert_room_to_db(data=validated_data):
                 success_count += 1
             else:

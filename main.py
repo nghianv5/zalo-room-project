@@ -289,7 +289,6 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
 
                     background_tasks.add_task(handle_excel)
                     return {"status": "success"}
-        print(f"event_name: {event_name}")
 
         if event_name == "user_send_text":
             user_id = data.get("sender", {}).get("id")
