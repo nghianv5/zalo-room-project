@@ -665,6 +665,8 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
     pending_urls = cached_data.get("urls", []) if (time.time() - cached_data.get("timestamp", 0) <= CACHE_TTL_SECONDS) else []
     all_current_media = list(dict.fromkeys(pending_urls + incoming_media_urls))
     urls_to_send = all_current_media
+    
+    phone = get_phone_by_user_id(db, user_id)
     print("3")
     try:
         relevant_rooms = search_rooms_by_vector(message_text, top_k=5)
@@ -727,7 +729,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
             "service_fees": "Phí dịch vụ (điện, nước, wifi)...",
             "move_in_date": "Ngày có thể chuyển vào...",
             "media_urls": {json.dumps(all_current_media)},
-            "landlord_phone": "{user_id}"
+            "landlord_phone": "{phone}"
           }},
           "ai_reply": "Mô tả chi tiết dạng văn bản đẹp mắt..."
         }}
@@ -749,10 +751,8 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
             address = str(extracted.get("address", "")).strip()
             if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
                 #nếu người dùng chưa đăng ký phòng trên zalo hay web thì sẽ tạo mới data cho user
-                if db:
-                    print("8")
-                    user_id = get_phone_by_user_id(db, user_id)
-                if not user_id:
+      
+                if not phone:
                     # 🚨 BẮT BUỘC: Nếu chưa có SĐT -> Chặn lại và yêu cầu chia sẻ SĐT
                     request_phone_message = {
                             "recipient": {"user_id": zalo_user_id},
