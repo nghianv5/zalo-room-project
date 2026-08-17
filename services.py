@@ -852,12 +852,12 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, raw_message: str, 
 
     room_data = records[0].payload
     landlord_phone = room_data.get("landlord_phone", "")
-    landlord_zalo_id = room_data.get("zalo_user_id", "")
+    landlord_zalo_id = get_user_id_by_phone(db, room_data.get("landlord_phone", "")) # lấy id chủ nhà
     room_address = room_data.get("address", "Chưa rõ")
     room_name = room_data.get("room_name", "Phòng trọ")
 
     # 2. Tìm SĐT của người thuê trong DB
-    tenant_phone = get_phone_by_user_id(db, str(tenant_zalo_id)) or "Chưa xác thực SĐT"
+    tenant_phone = get_phone_by_user_id(db, str(tenant_zalo_id)) or "Chưa xác thực SĐT"  # lấy phone ng thuê
     
     already_booked = is_phone_already_ordered(db, tenant_phone=tenant_phone, room_code=room_code)
     # Option B (nếu muốn chặn đặt BẤT KỲ phòng nào):
@@ -878,7 +878,7 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, raw_message: str, 
             id=str(uuid.uuid4()),
             tenant_zalo_id=str(tenant_zalo_id),
             tenant_phone=tenant_phone,
-            landlord_zalo_id=str(landlord_zalo_id),
+            landlord_zalo_id=landlord_zalo_id,
             landlord_phone=landlord_phone,
             room_code=room_code,
             viewing_time=viewing_time_parsed,  # 👈 Thêm vào đây
@@ -928,6 +928,18 @@ def get_phone_by_user_id(db: Session, user_id: str) -> Optional[str]:
         print(f"❌ Lỗi SQL khi lấy phone của user {user_id}: {e}")
         return None
 
+def get_user_id_by_phone(db: Session, phone: str) -> Optional[str]:
+    if not phone:
+        return None
+    try:
+        # Tìm theo phone (Zalo ID / System ID) thay vì PK `id`
+        user = db.query(UserWeb).filter(UserWeb.phone == str(phone)).first()
+        if user and user.user_id:
+            return user.user_id.strip()
+        return None
+    except Exception as e:
+        print(f"❌ Lỗi SQL khi lấy user_id của user {phone}: {e}")
+        return None
 
 def save_or_update_user_web(
     db: Session, 
