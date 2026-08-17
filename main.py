@@ -404,7 +404,6 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                         "url": media_url,
                         "is_video": (item.get("type") == "video") or ("user_send_video" in event_name)
                     })
-            print("process_zalo_ai_logic 1")
             background_tasks.add_task(process_zalo_ai_logic, text, media_items, sender_id, db)
 
     except Exception as e:

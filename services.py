@@ -743,7 +743,52 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         action = result_data.get("action")
         extracted = result_data.get("extracted_data", {})
         existing_point_id = relevant_rooms[0].get("id") if (relevant_rooms and len(relevant_rooms) > 0) else None
-        if action == "ADD_ROOM":
+        
+        if action == "SEARCH_ROOM":
+            # 1. Lấy toàn bộ phòng khả dụng từ Vector Search hoặc DB (Top 50 phòng)
+            search_results = search_rooms_by_vector(message_text, top_k=50) or []
+            
+            # 2. Lọc chỉ lấy phòng TRỐNG
+            available_rooms = [r for r in search_results if str(r.get("status", "")).upper() != "ĐÃ CHO THUÊ"]
+            
+            # 3. Sắp xếp theo giá tăng dần và chọn tối đa 20 phòng rẻ nhất
+            top_20_cheapest = sorted(available_rooms, key=parse_room_price)[:20]
+
+            if not top_20_cheapest:
+                ai_reply = "Dạ hiện tại bên em chưa có phòng trống nào phù hợp với yêu cầu của anh/chị ạ!"
+            else:
+                # 4. Yêu cầu Gemini định dạng hiển thị danh sách: CHỈ hiển thị thông tin CÓ, ẩn hoàn toàn thông tin thiếu
+                format_prompt = f"""
+                Bạn là Trợ lý AI Tư vấn Tìm kiếm Phòng trọ trên Zalo.
+                Nhiệm vụ: Định dạng danh sách {len(top_20_cheapest)} phòng rẻ nhất dưới đây thành 1 tin nhắn phản hồi hoàn chỉnh cho khách hàng.
+
+                DANH SÁCH {len(top_20_cheapest)} PHÒNG RẺ NHẤT TRONG HỆ THỐNG:
+                {json.dumps(top_20_cheapest, ensure_ascii=False)}
+
+                QUY TẮC HIỂN THỊ CỰC KỲ QUAN TRỌNG:
+                1. **ẨN HOÀN TOÀN THÔNG TIN THIẾU**:
+                   - Tuyệt đối KHÔNG hiển thị các dòng chứa "[Chưa cập nhật]", "Không", "Chưa rõ", "null", hoặc khoảng trắng.
+                   - Chỉ liệt kê các tiện ích/thông tin thực sự CÓ (Ví dụ: Nếu phòng có điều hòa thì ghi "• Có điều hòa", nếu không có hoặc chưa cập nhật thì BỎ HẲN dòng đó).
+                2. **ĐỊNH DẠNG NGẮN GỌN CHO ZALO**:
+                   - Mở đầu bằng 1 câu chào thân thiện.
+                   - Đánh số thứ tự từng phòng (1, 2, 3...).
+                   - Mỗi phòng liệt kê ngắn gọn: Tên/Số phòng, Địa chỉ, Giá thuê, và danh sách tiện ích có sẵn.
+                   - Dùng icon/emoji sinh động. KHÔNG chèn bất kỳ đường link ảnh nào.
+
+                TRẢ VỀ DUY NHẤT 1 CHUỖI JSON:
+                {{
+                  "ai_reply": "Nội dung danh sách phòng đã định dạng ngắn gọn..."
+                }}
+                """
+                formatted_raw = generate_content_with_retry(format_prompt, mime_type="application/json")
+                if formatted_raw:
+                    formatted_json = json.loads(formatted_raw)
+                    ai_reply = formatted_json.get("ai_reply", ai_reply)
+
+            # Vì là tìm kiếm nên không đính kèm media đăng phòng của người dùng
+            urls_to_send = []
+        
+        elif action == "ADD_ROOM":
             address = str(extracted.get("address", "")).strip()
             if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
                 #nếu người dùng chưa đăng ký phòng trên zalo hay web thì sẽ tạo mới data cho user
@@ -1099,3 +1144,104 @@ def extract_viewing_time(text: str):
         extracted_date = datetime(now.year, now.month, now.day, extracted_hour, extracted_minute)
 
     return extracted_date
+    
+def ai_search_rooms(user_message: str, database_rooms: list) -> Optional[dict]:
+    """
+    Hàm xử lý tìm kiếm phòng trọ trên Zalo.
+    - Lọc và sắp xếp lấy 20 phòng rẻ nhất trong DB.
+    - AI định dạng văn bản gửi cho khách: chỉ hiển thị thông tin CÓ, ẩn hoàn toàn thông tin thiếu.
+    """
+    if not gemini_client:
+        print("⚠️ Gemini Client chưa được khởi tạo!")
+        return None
+
+    if not database_rooms:
+        return {
+            "action": "SEARCH_ROOM",
+            "ai_reply": "Rất tiếc, hiện tại hệ thống chưa có dữ liệu phòng trọ phù hợp."
+        }
+
+    # 1. Hàm hỗ trợ trích xuất giá tiền dạng số để sắp xếp chính xác bằng Python
+    def parse_price(room):
+        try:
+            p_str = str(room.get("price", "999999999")).lower().replace(",", ".")
+            num = float(re.search(r"[\d.]+", p_str).group())
+            if "triệu" in p_str or "tr" in p_str:
+                num *= 1_000_000
+            elif "k" in p_str:
+                num *= 1_000
+            return num
+        except Exception:
+            return 999_999_999  # Nếu không đọc được giá thì đẩy xuống cuối danh sách
+
+    # 2. Lọc chỉ lấy các phòng còn "TRỐNG", sắp xếp từ giá thấp đến cao và lấy đúng 20 phòng rẻ nhất
+    available_rooms = [r for r in database_rooms if str(r.get("status", "")).upper() != "ĐÃ CHO THUÊ"]
+    top_20_cheapest_rooms = sorted(available_rooms, key=parse_price)[:20]
+
+    # Clean dữ liệu trước khi gửi vào prompt
+    clean_rooms = [
+        {k: (None if pd.isna(v) else v) for k, v in room.items()} 
+        for room in top_20_cheapest_rooms
+    ]
+
+    # 3. Prompt yêu cầu Gemini tạo câu trả lời ngắn gọn
+    prompt = f"""
+        Bạn là Trợ lý AI Tư vấn Tìm kiếm Phòng trọ trên Zalo.
+        Nhiệm vụ: Trình bày danh sách 20 phòng rẻ nhất dưới đây để gửi phản hồi cho khách hàng trên Zalo.
+
+        YÊU CẦU CỦA KHÁCH HÀNG:
+        "{user_message}"
+
+        DANH SÁCH 20 PHÒNG RẺ NHẤT TRONG DATABASE:
+        {json.dumps(clean_rooms, ensure_ascii=False)}
+
+        QUY TẮC BẮT BUỘC KHI TẠO `ai_reply`:
+        1. **CHỈ HIỂN THỊ THÔNG TIN CÓ**:
+           - Tuyệt đối KHÔNG hiển thị các trường ghi "[Chưa cập nhật]", "Không", "Chưa rõ", "null", hoặc rỗng.
+           - Chỉ trình bày các thông tin thực sự CÓ của phòng (Ví dụ: Nếu phòng có Điều hòa thì ghi "• Điều hòa", nếu không có hoặc chưa cập nhật thì BỎ HOÀN TOÀN dòng đó).
+        2. **ĐỊNH DẠNG NGẮN GỌN CHO ZALO**:
+           - Mở đầu bằng 1 câu chào ngắn gọn nhẹ nhàng.
+           - Đánh số thứ tự từng phòng (1, 2, 3...).
+           - Mỗi phòng trình bày ngắn gọn: Tên/Số phòng, Địa chỉ, Giá, và danh sách tiện ích có sẵn.
+           - ĐƯỢC CHÈN icon/emoji nhẹ nhàng cho dễ đọc.
+           - KHÔNG chèn bất kỳ đường link hình ảnh nào vào văn bản `ai_reply`.
+
+        TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
+        {{
+          "action": "SEARCH_ROOM",
+          "total_found": {len(top_20_cheapest_rooms)},
+          "ai_reply": "Văn bản danh sách tối đa 20 phòng rẻ nhất cực kỳ ngắn gọn, đẹp mắt trên Zalo, chỉ chứa thông tin CÓ, ẩn toàn bộ thông tin thiếu."
+        }}
+        """
+
+    try:
+        response = gemini_client.models.generate_content(
+            model="models/gemini-2.5-flash",
+            contents=prompt,
+            config=types.GenerateContentConfig(response_mime_type="application/json")
+        )
+        if response and response.text:
+            raw_text = response.text.strip()
+            if raw_text.startswith("```"):
+                raw_text = re.sub(r"^```(?:json)?\n?", "", raw_text)
+                raw_text = re.sub(r"\n?```$", "", raw_text)
+            return json.loads(raw_text)
+    except Exception as e:
+        print(f"⚠️ Lỗi AI Search Rooms: {e}")
+        return None
+        
+def parse_room_price(room: dict) -> float:
+    """Hàm phụ trợ ép kiểu giá phòng về dạng số float để sắp xếp chính xác."""
+    try:
+        p_str = str(room.get("price", "999999999")).lower().replace(",", ".")
+        match = re.search(r"[\d.]+", p_str)
+        if not match:
+            return 999_999_999.0
+        num = float(match.group())
+        if "triệu" in p_str or "tr" in p_str:
+            num *= 1_000_000
+        elif "k" in p_str:
+            num *= 1_000
+        return num
+    except Exception:
+        return 999_999_999.0
