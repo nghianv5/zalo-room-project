@@ -747,7 +747,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         if action == "SEARCH_ROOM":
             # 1. Lấy toàn bộ phòng khả dụng từ Vector Search hoặc DB (Top 50 phòng)
             search_results = search_rooms_by_vector(message_text, top_k=50) or []
-            print(f"search_results: {search_results")
+            print(f"search_results: {search_results}")
             # 2. Lọc chỉ lấy phòng TRỐNG
             available_rooms = [r for r in search_results if str(r.get("status", "")).upper() != "ĐÃ CHO THUÊ"]
             
