@@ -743,7 +743,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         action = result_data.get("action")
         extracted = result_data.get("extracted_data", {})
         existing_point_id = relevant_rooms[0].get("id") if (relevant_rooms and len(relevant_rooms) > 0) else None
-        print(f"raw_text: {raw_text}")
+        print(f"action: {action}")
         if action == "SEARCH_ROOM":
             # 1. Lấy toàn bộ phòng khả dụng từ Vector Search hoặc DB (Top 50 phòng)
             search_results = search_rooms_by_vector(message_text, top_k=50) or []
