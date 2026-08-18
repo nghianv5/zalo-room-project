@@ -743,11 +743,11 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         action = result_data.get("action")
         extracted = result_data.get("extracted_data", {})
         existing_point_id = relevant_rooms[0].get("id") if (relevant_rooms and len(relevant_rooms) > 0) else None
-        
+        print(f"raw_text: {raw_text")
         if action == "SEARCH_ROOM":
             # 1. Lấy toàn bộ phòng khả dụng từ Vector Search hoặc DB (Top 50 phòng)
             search_results = search_rooms_by_vector(message_text, top_k=50) or []
-            
+            print(f"search_results: {search_results")
             # 2. Lọc chỉ lấy phòng TRỐNG
             available_rooms = [r for r in search_results if str(r.get("status", "")).upper() != "ĐÃ CHO THUÊ"]
             
@@ -819,7 +819,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                 success = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None)
                 if success:
                     get_get_and_clear_pending_media(user_id)
-                    print("11")
+                   
         elif action == "UPDATE_STATUS" and existing_point_id:
             new_status = extracted.get("status") or "ĐÃ CHO THUÊ"
             update_room_status_in_db(point_id=existing_point_id, new_status=new_status, zalo_user_id=user_id)
