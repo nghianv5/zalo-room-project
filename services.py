@@ -484,6 +484,8 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
 
 def search_rooms_by_vector(query_text: str, top_k: int = 5) -> List[dict]:
     query_vector = get_text_embedding(query_text)
+    query_vector
+    print(f"query_vector:{query_vector}")
     if not query_vector:
         try:
             records, _ = qdrant_client.scroll(collection_name=COLLECTION_NAME, limit=top_k, with_payload=True)
@@ -745,15 +747,16 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         existing_point_id = relevant_rooms[0].get("id") if (relevant_rooms and len(relevant_rooms) > 0) else None
         print(f"action: {action}")
         if action == "SEARCH_ROOM":
+            print(f"message_text: {message_text}")
             # 1. Lấy toàn bộ phòng khả dụng từ Vector Search hoặc DB (Top 50 phòng)
             search_results = search_rooms_by_vector(message_text, top_k=50) or []
-            print(f"search_results: {search_results}")
+            
             # 2. Lọc chỉ lấy phòng TRỐNG
             available_rooms = [r for r in search_results if str(r.get("status", "")).upper() != "ĐÃ CHO THUÊ"]
             
             # 3. Sắp xếp theo giá tăng dần và chọn tối đa 20 phòng rẻ nhất
             top_20_cheapest = sorted(available_rooms, key=parse_room_price)[:20]
-
+            print(f"search_results: {top_20_cheapest}")
             if not top_20_cheapest:
                 ai_reply = "Dạ hiện tại bên em chưa có phòng trống nào phù hợp với yêu cầu của anh/chị ạ!"
             else:
