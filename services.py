@@ -848,7 +848,8 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                    - Đánh số thứ tự từng phòng (1, 2, 3...).
                    - Mỗi phòng liệt kê ngắn gọn: Tên/Số phòng, Địa chỉ, Giá thuê, và danh sách tiện ích có sẵn.
                    - Dùng icon/emoji sinh động. KHÔNG chèn bất kỳ đường link ảnh nào.
-
+                   - Phải có thông tin mã phòng để người dùng đặt phòng
+ 
                 TRẢ VỀ DUY NHẤT 1 CHUỖI JSON:
                 {{
                   "ai_reply": "Nội dung danh sách phòng đã định dạng ngắn gọn..."
