@@ -524,10 +524,9 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         return False
 
 def search_rooms_by_vector(query_text: str, top_k: int = 20) -> List[dict]:
-    query_vector = get_text_embedding(query_text)
-    print(f"query_vector: {bool(query_vector)}")  # In ra True/False thay vì in cả dãy số dài
-
-    # 1. Định nghĩa bộ lọc bắt buộc: Chỉ lấy phòng còn TRỐNG
+    clean_query = query_text.strip().lower() if query_text else ""
+    
+    # 1. Bộ lọc bắt buộc: Chỉ lấy phòng còn TRỐNG
     status_filter = qdrant_models.Filter(
         must=[
             qdrant_models.FieldCondition(
@@ -537,58 +536,71 @@ def search_rooms_by_vector(query_text: str, top_k: int = 20) -> List[dict]:
         ]
     )
 
-    # 2. Xử lý trường hợp KHÔNG TẠO ĐƯỢC VECTOR (Lỗi API / Chuỗi rỗng)
-    if not query_vector:
+    # Kiểm tra xem người dùng có phải đang tìm phòng rẻ/chung chung không
+    is_general_cheap_search = any(kw in clean_query for kw in [
+        "giá rẻ", "phòng rẻ", "rẻ nhất", "danh sách phòng", "phòng trống", "tìm phòng"
+    ]) and len(clean_query.split()) <= 5
+
+    # =========================================================================
+    # THÚ VỊ 1: TÌM RẺ NHẤT TOÀN DB (Không dùng Vector / Khi câu tìm quá chung)
+    # =========================================================================
+    if not clean_query or is_general_cheap_search:
         try:
-            # Lấy các phòng TRỐNG từ Qdrant
+            # Thử dùng Payload Sorting trực tiếp của Qdrant (Cực nhanh & chuẩn)
+            try:
+                search_result = qdrant_client.query_points(
+                    collection_name=COLLECTION_NAME,
+                    query_filter=status_filter,
+                    order_by=qdrant_models.OrderBy(
+                        key="price_number",
+                        direction=qdrant_models.Direction.ASC  # Tăng dần từ thấp đến cao
+                    ),
+                    limit=top_k,
+                    with_payload=True
+                )
+                results = [hit.payload | {"id": hit.id} for hit in search_result.points if hit.payload]
+                if results:
+                    return results
+            except Exception:
+                pass  # Fallback nếu DB chưa đánh Index cho field price_number
+
+            # Fallback: Scroll lấy lượng lớn phòng trống để Python tự sắp xếp
             records, _ = qdrant_client.scroll(
                 collection_name=COLLECTION_NAME,
-                scroll_filter=status_filter,  # Thêm filter phòng TRỐNG
-                limit=top_k * 4,              # Lấy dư ra một chút để sắp xếp
+                scroll_filter=status_filter,
+                limit=200,  # Quét rộng để lọc giá chuẩn
                 with_payload=True
             )
-            results = []
-            for rec in records:
-                if rec.payload:
-                    p = rec.payload
-                    p["id"] = rec.id
-                    results.append(p)
-
-            # Sắp xếp theo giá tăng dần trong Python
-            sorted_results = sorted(
-                results, 
-                key=lambda x: float(x.get("price_number", 999_999_999))
-            )
-            return sorted_results[:top_k]
+            results = [rec.payload | {"id": rec.id} for rec in records if rec.payload]
+            
+            # Sắp xếp chính xác từ THẤP ĐẾN CAO
+            return sorted(results, key=parse_price_safe)[:top_k]
 
         except Exception as e:
-            print("❌ [SCROLL FALLBACK ERROR]:", e)
+            print("❌ [CHEAPEST SEARCH ERROR]:", e)
             return []
 
-    # 3. Xử lý TÌM KIẾM THEO VECTOR (Có Query Vector)
+    # =========================================================================
+    # THỨ VỊ 2: TÌM THEO VECTOR NGỮ NGHĨA (Có yêu cầu địa chỉ/tiện ích)
+    # =========================================================================
+    query_vector = get_text_embedding(query_text)
+    if not query_vector:
+        return search_rooms_by_vector("", top_k=top_k)
+
     try:
-        # Lấy Top N phòng khớp nhất với nhu cầu người dùng ĐÃ ĐƯỢC LỌC "TRỐNG"
+        # Lấy Top phòng tương đồng nhất
         search_result = qdrant_client.query_points(
             collection_name=COLLECTION_NAME,
             query=query_vector,
             query_filter=status_filter,
-            limit=top_k * 3,  # Lấy dư Top phòng tương đồng nhất để lọc giá
+            limit=top_k * 3,
             with_payload=True
         )
 
-        results = []
-        for hit in search_result.points:
-            if hit.payload:
-                p = hit.payload
-                p["id"] = hit.id
-                results.append(p)
+        results = [hit.payload | {"id": hit.id} for hit in search_result.points if hit.payload]
 
-        # Ưu tiên đưa các phòng RẺ NHẤT trong số các phòng phù hợp nhất lên đầu
-        sorted_results = sorted(
-            results, 
-            key=lambda x: float(x.get("price_number", 999_999_999))
-        )
-        
+        # Sắp xếp các phòng tương đồng tìm được theo thứ tự GIÁ TỪ THẤP ĐẾN CAO
+        sorted_results = sorted(results, key=parse_price_safe)
         return sorted_results[:top_k]
 
     except Exception as e:
@@ -1305,21 +1317,6 @@ def ai_search_rooms(user_message: str, database_rooms: list) -> Optional[dict]:
         print(f"⚠️ Lỗi AI Search Rooms: {e}")
         return None
         
-def parse_room_price(room: dict) -> float:
-    """Hàm phụ trợ ép kiểu giá phòng về dạng số float để sắp xếp chính xác."""
-    try:
-        p_str = str(room.get("price", "999999999")).lower().replace(",", ".")
-        match = re.search(r"[\d.]+", p_str)
-        if not match:
-            return 999_999_999.0
-        num = float(match.group())
-        if "triệu" in p_str or "tr" in p_str:
-            num *= 1_000_000
-        elif "k" in p_str:
-            num *= 1_000
-        return num
-    except Exception:
-        return 999_999_999.0
         
         
 def split_text_by_limit(text: str, max_length: int = 1800) -> List[str]:
@@ -1346,3 +1343,31 @@ def split_text_by_limit(text: str, max_length: int = 1800) -> List[str]:
     if text:
         chunks.append(text)
     return chunks
+    
+def parse_price_safe(room: dict) -> float:
+    """Hàm trích xuất và ép kiểu giá về dạng float an toàn tuyệt đối"""
+    val = room.get("price_number")
+    
+    # 1. Nếu đã là số int/float
+    if isinstance(val, (int, float)):
+        return float(val)
+    
+    # 2. Nếu là chuỗi số "3500000"
+    if isinstance(val, str) and val.isdigit():
+        return float(val)
+        
+    # 3. Fallback: Parse từ chuỗi "price" mô tả (VD: "3.5 triệu", "3,500,000")
+    p_str = str(room.get("price", "999999999")).lower().replace(",", ".")
+    try:
+        match = re.search(r"[\d.]+", p_str)
+        if match:
+            num = float(match.group())
+            if "triệu" in p_str or "tr" in p_str:
+                num *= 1_000_000
+            elif "k" in p_str:
+                num *= 1_000
+            return num
+    except Exception:
+        pass
+        
+    return 999_999_999.0
