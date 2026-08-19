@@ -523,7 +523,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         print("❌ [QDRANT UPSERT EXCEPTION]:", e)
         return False
 
-def search_rooms_by_vector(query_text: str, top_k: int = 5) -> List[dict]:
+def search_rooms_by_vector(query_text: str, top_k: int = 20) -> List[dict]:
     query_vector = get_text_embedding(query_text)
     print(f"query_vector: {bool(query_vector)}")  # In ra True/False thay vì in cả dãy số dài
 
@@ -627,7 +627,7 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
         return None
 
     # Tìm kiếm phòng tương tự bằng Vector Search
-    relevant_rooms = search_rooms_by_vector(clean_row_str, top_k=5)
+    relevant_rooms = search_rooms_by_vector(clean_row_str, top_k=20)
 
     # Clean dict để gửi vào prompt (chuyển NaN thành None để JSON hóa hợp lệ)
     clean_dict = {k: (None if pd.isna(v) else v) for k, v in row_dict.items()}
@@ -827,9 +827,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         print(f"action: {action}")
         if action == "SEARCH_ROOM":
             # 1. Lấy toàn bộ phòng khả dụng từ Vector Search hoặc DB (Top 50 phòng)
-            search_results = search_rooms_by_vector(message_text, top_k=50) or []
-            
-            print(f"search_results: {search_results}")
+            search_results = search_rooms_by_vector(message_text, top_k=20) or []
             if not search_results:
                 ai_reply = "Dạ hiện tại bên em chưa có phòng trống nào phù hợp với yêu cầu của anh/chị ạ!"
             else:
