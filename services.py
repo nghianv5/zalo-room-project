@@ -300,7 +300,7 @@ def add_pending_media(user_id: str, new_urls: list):
         "timestamp": time.time()
     }
 
-def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
+def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None) -> bool:
     access_token = ZALO_ACCESS_TOKEN
     if not access_token:
         print("❌ [ZALO ERROR]: Thiếu ZALO_ACCESS_TOKEN")
@@ -309,12 +309,12 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
     headers = {"Content-Type": "application/json", "access_token": access_token}
 
-    # Chia nhỏ ai_reply nếu vượt quá 2500 ký tự
-    text_chunks = split_text(ai_reply, max_length=2500)
+    # 1. Chia nhỏ ai_reply thành các đoạn dưới 1800 ký tự
+    text_chunks = split_text_by_limit(ai_reply, max_length=1800)
 
     try:
         for idx, chunk in enumerate(text_chunks):
-            # Nếu là đoạn cuối cùng và có media_urls thì gửi kèm ảnh
+            # Với tin nhắn cuối cùng: nếu có media_urls thì chèn kèm hình ảnh
             if idx == len(text_chunks) - 1 and media_urls and len(media_urls) > 0:
                 payload = {
                     "recipient": {"user_id": user_id},
@@ -324,7 +324,12 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
                             "type": "template",
                             "payload": {
                                 "template_type": "media",
-                                "elements": [{"media_type": "image", "url": media_urls[0]}]
+                                "elements": [
+                                    {
+                                        "media_type": "image",
+                                        "url": media_urls[0]
+                                    }
+                                ]
                             }
                         }
                     }
@@ -343,8 +348,9 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
                 print(f"❌ [ZALO FAIL]: Code {res_data.get('error')} - {res_data.get('message')}")
                 return False
             
-            # Nghỉ 0.5s giữa các lần gửi để tránh rate-limit Zalo
-            time.sleep(0.5)
+            # Tạm dừng 0.3s để tránh bị rate limit khi gửi liên tiếp nhiều tin
+            if len(text_chunks) > 1:
+                time.sleep(0.3)
 
         return True
 
@@ -820,7 +826,6 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         existing_point_id = relevant_rooms[0].get("id") if (relevant_rooms and len(relevant_rooms) > 0) else None
         print(f"action: {action}")
         if action == "SEARCH_ROOM":
-            print(f"message_text: {message_text}")
             # 1. Lấy toàn bộ phòng khả dụng từ Vector Search hoặc DB (Top 50 phòng)
             search_results = search_rooms_by_vector(message_text, top_k=50) or []
             
@@ -898,8 +903,6 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
     except Exception as err:
         print("❌ [AI Logic Exception]:", err)
         ai_reply = "Dạ hệ thống đang bận một chút, anh/chị chờ em vài giây rồi nhắn lại giúp em nhé!"
-    print(f"user_id: {user_id}")
-    print(f"ai_reply: {ai_reply}")
     send_zalo_message(user_id, ai_reply, media_urls=urls_to_send)
     
     
@@ -1320,16 +1323,27 @@ def parse_room_price(room: dict) -> float:
         return 999_999_999.0
         
         
-def split_text(text: str, max_length: int = 2500) -> list:
-    """Chia văn bản thành các đoạn nhỏ dưới max_length ký tự"""
+def split_text_by_limit(text: str, max_length: int = 1800) -> List[str]:
+    """Cắt nhỏ văn bản dưới max_length ký tự, ưu tiên cắt tại vị trí xuống dòng"""
+    if len(text) <= max_length:
+        return [text]
+        
     chunks = []
     while len(text) > max_length:
-        # Tìm vị trí xuống dòng gần nhất để cắt không bị đứt câu
+        # Tìm vị trí xuống dòng gần nhất trong phạm vi max_length
         split_idx = text.rfind("\n", 0, max_length)
+        
+        # Nếu không có dấu xuống dòng, tìm khoảng trắng gần nhất
+        if split_idx == -1:
+            split_idx = text.rfind(" ", 0, max_length)
+            
+        # Nếu vẫn không có, cắt cứng tại max_length
         if split_idx == -1:
             split_idx = max_length
-        chunks.append(text[:split_idx])
-        text = text[split_idx:].lstrip()
+
+        chunks.append(text[:split_idx].strip())
+        text = text[split_idx:].strip()
+
     if text:
         chunks.append(text)
     return chunks
