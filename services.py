@@ -314,6 +314,9 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
     try:
         print(2222)
         response = requests.post(url, headers=headers, json=payload, timeout=10)
+        response = requests.post(url, headers=headers, json=payload, timeout=10)
+        res_data = response.json()
+        print("📩 [ZALO RESPONSE]:", res_data) # In log này ra để kiểm tra
         print(3333)
         return response.json().get("error") == 0
     except Exception as e:
