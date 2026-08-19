@@ -484,34 +484,72 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
 
 def search_rooms_by_vector(query_text: str, top_k: int = 5) -> List[dict]:
     query_vector = get_text_embedding(query_text)
-    query_vector
-    print(f"query_vector:{query_vector}")
+    print(f"query_vector: {bool(query_vector)}")  # In ra True/False thay vì in cả dãy số dài
+
+    # 1. Định nghĩa bộ lọc bắt buộc: Chỉ lấy phòng còn TRỐNG
+    status_filter = qdrant_models.Filter(
+        must=[
+            qdrant_models.FieldCondition(
+                key="status",
+                match=qdrant_models.MatchValue(value="TRỐNG")
+            )
+        ]
+    )
+
+    # 2. Xử lý trường hợp KHÔNG TẠO ĐƯỢC VECTOR (Lỗi API / Chuỗi rỗng)
     if not query_vector:
         try:
-            records, _ = qdrant_client.scroll(collection_name=COLLECTION_NAME, limit=top_k, with_payload=True)
+            # Lấy các phòng TRỐNG từ Qdrant
+            records, _ = qdrant_client.scroll(
+                collection_name=COLLECTION_NAME,
+                scroll_filter=status_filter,  # Thêm filter phòng TRỐNG
+                limit=top_k * 4,              # Lấy dư ra một chút để sắp xếp
+                with_payload=True
+            )
             results = []
             for rec in records:
                 if rec.payload:
                     p = rec.payload
                     p["id"] = rec.id
                     results.append(p)
-            return results
-        except Exception:
+
+            # Sắp xếp theo giá tăng dần trong Python
+            sorted_results = sorted(
+                results, 
+                key=lambda x: float(x.get("price_number", 999_999_999))
+            )
+            return sorted_results[:top_k]
+
+        except Exception as e:
+            print("❌ [SCROLL FALLBACK ERROR]:", e)
             return []
+
+    # 3. Xử lý TÌM KIẾM THEO VECTOR (Có Query Vector)
     try:
+        # Lấy Top N phòng khớp nhất với nhu cầu người dùng ĐÃ ĐƯỢC LỌC "TRỐNG"
         search_result = qdrant_client.query_points(
             collection_name=COLLECTION_NAME,
             query=query_vector,
-            limit=top_k,
+            query_filter=status_filter,
+            limit=top_k * 3,  # Lấy dư Top phòng tương đồng nhất để lọc giá
             with_payload=True
         )
+
         results = []
         for hit in search_result.points:
             if hit.payload:
                 p = hit.payload
                 p["id"] = hit.id
                 results.append(p)
-        return results
+
+        # Ưu tiên đưa các phòng RẺ NHẤT trong số các phòng phù hợp nhất lên đầu
+        sorted_results = sorted(
+            results, 
+            key=lambda x: float(x.get("price_number", 999_999_999))
+        )
+        
+        return sorted_results[:top_k]
+
     except Exception as e:
         print("❌ [VECTOR SEARCH ERROR]:", e)
         return []
@@ -751,22 +789,17 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
             # 1. Lấy toàn bộ phòng khả dụng từ Vector Search hoặc DB (Top 50 phòng)
             search_results = search_rooms_by_vector(message_text, top_k=50) or []
             
-            # 2. Lọc chỉ lấy phòng TRỐNG
-            available_rooms = [r for r in search_results if str(r.get("status", "")).upper() != "ĐÃ CHO THUÊ"]
-            
-            # 3. Sắp xếp theo giá tăng dần và chọn tối đa 20 phòng rẻ nhất
-            top_20_cheapest = sorted(available_rooms, key=parse_room_price)[:20]
-            print(f"search_results: {top_20_cheapest}")
-            if not top_20_cheapest:
+            print(f"search_results: {search_results}")
+            if not search_results:
                 ai_reply = "Dạ hiện tại bên em chưa có phòng trống nào phù hợp với yêu cầu của anh/chị ạ!"
             else:
                 # 4. Yêu cầu Gemini định dạng hiển thị danh sách: CHỈ hiển thị thông tin CÓ, ẩn hoàn toàn thông tin thiếu
                 format_prompt = f"""
                 Bạn là Trợ lý AI Tư vấn Tìm kiếm Phòng trọ trên Zalo.
-                Nhiệm vụ: Định dạng danh sách {len(top_20_cheapest)} phòng rẻ nhất dưới đây thành 1 tin nhắn phản hồi hoàn chỉnh cho khách hàng.
+                Nhiệm vụ: Định dạng danh sách {len(search_results)} phòng rẻ nhất dưới đây thành 1 tin nhắn phản hồi hoàn chỉnh cho khách hàng.
 
-                DANH SÁCH {len(top_20_cheapest)} PHÒNG RẺ NHẤT TRONG HỆ THỐNG:
-                {json.dumps(top_20_cheapest, ensure_ascii=False)}
+                DANH SÁCH {len(search_results)} PHÒNG RẺ NHẤT TRONG HỆ THỐNG:
+                {json.dumps(search_results, ensure_ascii=False)}
 
                 QUY TẮC HIỂN THỊ CỰC KỲ QUAN TRỌNG:
                 1. **ẨN HOÀN TOÀN THÔNG TIN THIẾU**:
@@ -830,6 +863,8 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
     except Exception as err:
         print("❌ [AI Logic Exception]:", err)
         ai_reply = "Dạ hệ thống đang bận một chút, anh/chị chờ em vài giây rồi nhắn lại giúp em nhé!"
+    print(f"user_id: {user_id}")
+    print(f"search_results: {ai_reply}")
     send_zalo_message(user_id, ai_reply, media_urls=urls_to_send)
     
     
