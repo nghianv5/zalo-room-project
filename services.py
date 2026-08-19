@@ -306,13 +306,15 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
         return False
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
     headers = {"Content-Type": "application/json", "access_token": access_token}
-
+    print(1111)
     payload = {
         "recipient": {"user_id": user_id},
         "message": {"text": ai_reply}
     }
     try:
+        print(2222)
         response = requests.post(url, headers=headers, json=payload, timeout=10)
+        print(3333)
         return response.json().get("error") == 0
     except Exception as e:
         return False
@@ -864,7 +866,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         print("❌ [AI Logic Exception]:", err)
         ai_reply = "Dạ hệ thống đang bận một chút, anh/chị chờ em vài giây rồi nhắn lại giúp em nhé!"
     print(f"user_id: {user_id}")
-    print(f"search_results: {ai_reply}")
+    print(f"ai_reply: {ai_reply}")
     send_zalo_message(user_id, ai_reply, media_urls=urls_to_send)
     
     
