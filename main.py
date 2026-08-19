@@ -187,17 +187,30 @@ async def upload_excel_rooms(file: UploadFile = File(...)):
     df.fillna("Chưa rõ", inplace=True)
     success_count, fail_count, ai_rejected_count = 0, 0, 0
 
-    for _, row in df.iterrows():
-        validated_data = ai_validate_and_extract_room(row.to_dict())
-        extracted = validated_data.get("extracted_data", {}) if validated_data else {}
-        if not extracted or not extracted.get("address"):
-            ai_rejected_count += 1
-            continue
+    # Gom nhóm 15 dòng để gửi Batch Request tới AI
+    BATCH_SIZE = 15
+    rows = df.to_dict(orient="records")
 
-        if upsert_room_to_db(data=extracted):
-            success_count += 1
-        else:
-            fail_count += 1
+    for i in range(0, len(rows), BATCH_SIZE):
+        batch_rows = rows[i:i + BATCH_SIZE]
+        batch_results = ai_validate_and_extract_room_batch(batch_rows)
+
+        for validated_data in batch_results:
+            if not validated_data:
+                ai_rejected_count += 1
+                continue
+
+            extracted = validated_data.get("extracted_data", {}) if isinstance(validated_data, dict) else {}
+            raw_address = str(extracted.get("address") or "").strip()
+
+            if not raw_address or raw_address.lower() in ["[chưa cập nhật]", "none", "null", "chưa rõ", ""]:
+                ai_rejected_count += 1
+                continue
+
+            if upsert_room_to_db(data=extracted):
+                success_count += 1
+            else:
+                fail_count += 1
 
     return {
         "status": "success",

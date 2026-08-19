@@ -626,70 +626,59 @@ def update_room_status_in_db(point_id: str, new_status: str) -> bool:
         print("❌ [UPDATE STATUS ERROR]:", e)
         return False
 
-def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
-    # Kiểm tra client AI
-    if not gemini_client:
-        print("⚠️ Gemini Client chưa được khởi tạo!")
-        return None
+def ai_validate_and_extract_room_batch(rows_list: List[dict]) -> List[Optional[dict]]:
+    """Xử lý nhóm 10-20 dòng dữ liệu Excel cùng lúc trong 1 API Call để tối ưu tốc độ và chi phí."""
+    if not gemini_client or not rows_list:
+        return [None] * len(rows_list)
 
-    # Lọc bỏ giá trị NaN / rỗng và chuyển đổi dòng dữ liệu Excel thành văn bản sạch
-    clean_row_str = ", ".join(f"{k}: {v}" for k, v in row_dict.items() if pd.notna(v) and str(v).strip() != "")
-    if not clean_row_str:
-        return None
-
-    # Tìm kiếm phòng tương tự bằng Vector Search
-    relevant_rooms = search_rooms_by_vector(clean_row_str, top_k=20)
-
-    # Clean dict để gửi vào prompt (chuyển NaN thành None để JSON hóa hợp lệ)
-    clean_dict = {k: (None if pd.isna(v) else v) for k, v in row_dict.items()}
+    # Clean dicts (chuyển NaN thành None)
+    clean_rows = [
+        {k: (None if pd.isna(v) else v) for k, v in row.items()}
+        for row in rows_list
+    ]
 
     prompt = f"""
-        Bạn là Trợ lý AI Xử lý và Chuẩn hóa Dữ liệu Phòng trọ từ File Excel nhập vào.
-        Nhiệm vụ: Tự động phân tích, trích xuất và chuẩn hóa dòng dữ liệu thô từ Excel thành cấu trúc JSON chuẩn.
+        Bạn là Trợ lý AI Xử lý và Chuẩn hóa Dữ liệu Phòng trọ từ File Excel.
+        Nhiệm vụ: Phân tích và chuẩn hóa DANH SÁCH {len(clean_rows)} dòng dữ liệu thô dưới đây.
 
-        DỮ LIỆU DÒNG EXCEL THÔ:
-        {json.dumps(clean_dict, ensure_ascii=False)}
+        DỮ LIỆU CÁC DÒNG EXCEL THÔ (Định dạng JSON):
+        {json.dumps(clean_rows, ensure_ascii=False)}
 
-        CÁC PHÒNG TƯƠNG TỰ TRONG CƠ SỞ DỮ LIỆU (Dùng để đối chiếu/tránh trùng lặp nếu cần):
-        {json.dumps(relevant_rooms, ensure_ascii=False)}
+        YÊU CẦU XỬ LÝ CHO TỪNG DÒNG:
+        1. Trích xuất các trường thông tin phòng. Nếu thiếu hoặc rỗng, để giá trị "[Chưa cập nhật]".
+        2. Đưa các trường Có/Không (điều hòa, nóng lạnh, vệ sinh riêng, pet, ban công, v.v.) về "Có", "Không", hoặc "[Chưa cập nhật]".
+        3. Định dạng `status`: "TRỐNG" hoặc "ĐÃ CHO THUÊ".
+        4. Xác định `action`: "ADD_ROOM", "UPDATE_STATUS", hoặc "SEARCH_ROOM".
 
-        YÊU CẦU XỬ LÝ:
-        1. Tự động nhận diện tất cả tên cột (dù bằng Tiếng Việt, Tiếng Anh hay viết tắt) để trích xuất 19 trường thông tin.
-        2. Nếu trường thông tin nào thiếu hoặc rỗng trong Excel, hãy để giá trị là "[Chưa cập nhật]".
-        3. Các trường dạng Có/Không (điều hòa, nóng lạnh, vệ sinh riêng, pet, ban công, cửa sổ, khóa vân tay): Đưa về giá trị "Có", "Không", hoặc "[Chưa cập nhật]".
-        4. Với `status`: Định dạng chuẩn là "TRỐNG" hoặc "ĐÃ CHO THUÊ".
-        5. Xác định `action`: 
-           - "ADD_ROOM": Nếu đây là dòng dữ liệu thêm phòng mới hoặc cập nhật thông tin phòng.
-           - "UPDATE_STATUS": Nếu dòng này chỉ nhằm mục đích đổi trạng thái phòng.
-           - "SEARCH_ROOM": Nếu thông tin mang tính chất truy vấn.
-
-        TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
-        {{
-          "action": "ADD_ROOM | SEARCH_ROOM | UPDATE_STATUS",
-          "extracted_data": {{
-            "address": "Địa chỉ phòng trọ đầy đủ...",
-            "room_name": "Tên/Số phòng...",
-            "price": "Giá thuê...",
-            "floor": "Tầng...",
-            "is_private_bathroom": "Có/Không/[Chưa cập nhật]",
-            "has_ac": "Có/Không/[Chưa cập nhật]",
-            "has_heater": "Có/Không/[Chưa cập nhật]",
-            "has_washer": "Có/Không/[Chưa cập nhật]",
-            "allow_pets": "Có/Không/[Chưa cập nhật]",
-            "has_balcony": "Có/Không/[Chưa cập nhật]",
-            "has_window": "Có/Không/[Chưa cập nhật]",
-            "has_fingerprint_lock": "Có/Không/[Chưa cập nhật]",
-            "parking_info": "Thông tin để xe...",
-            "max_occupants": "Số người ở tối đa...",
-            "other_amenities": "Tiện ích khác...",
-            "service_fees": "Phí dịch vụ...",
-            "status": "TRỐNG hoặc ĐÃ CHO THUÊ",
-            "move_in_date": "Ngày có thể chuyển vào...",
-            "media_urls": "Các link ảnh/video phân cách bởi dấu phẩy (nếu có)"
-          }},
-          "ai_reply": "Tóm tắt ngắn gọn thông tin phòng đã chuẩn hóa."
-        }}
-        """
+        TRẢ VỀ DUY NHẤT 1 MẢNG JSON CHỨA KẾT QUẢ CHO TỪNG DÒNG THEO ĐÚNG THỨ TỰ CỦA ĐẦU VÀO:
+        [
+          {{
+            "index": 0,
+            "action": "ADD_ROOM | SEARCH_ROOM | UPDATE_STATUS",
+            "extracted_data": {{
+              "address": "Địa chỉ...",
+              "room_name": "Tên phòng...",
+              "price": "Giá thuê...",
+              "floor": "Tầng...",
+              "is_private_bathroom": "Có/Không/[Chưa cập nhật]",
+              "has_ac": "Có/Không/[Chưa cập nhật]",
+              "has_heater": "Có/Không/[Chưa cập nhật]",
+              "has_washer": "Có/Không/[Chưa cập nhật]",
+              "allow_pets": "Có/Không/[Chưa cập nhật]",
+              "has_balcony": "Có/Không/[Chưa cập nhật]",
+              "has_window": "Có/Không/[Chưa cập nhật]",
+              "has_fingerprint_lock": "Có/Không/[Chưa cập nhật]",
+              "parking_info": "Chỗ để xe...",
+              "max_occupants": "Số người ở...",
+              "other_amenities": "Tiện ích...",
+              "service_fees": "Phí dịch vụ...",
+              "status": "TRỐNG hoặc ĐÃ CHO THUÊ",
+              "move_in_date": "Ngày chuyển vào...",
+              "media_urls": "Link ảnh/video phân cách bởi dấu phẩy"
+            }}
+          }}
+        ]
+    """
 
     try:
         response = gemini_client.models.generate_content(
@@ -699,48 +688,60 @@ def ai_validate_and_extract_room(row_dict: dict) -> Optional[dict]:
         )
         if response and response.text:
             raw_text = response.text.strip()
-            print(f"raw_text: {raw_text}")
             if raw_text.startswith("```"):
                 raw_text = re.sub(r"^```(?:json)?\n?", "", raw_text)
                 raw_text = re.sub(r"\n?```$", "", raw_text)
-            return json.loads(raw_text)
+            parsed_list = json.loads(raw_text)
+            if isinstance(parsed_list, list):
+                return parsed_list
     except Exception as e:
-        print(f"⚠️ Lỗi AI Validation dòng dữ liệu Excel: {e}")
-        return None
+        print(f"⚠️ Lỗi AI Batch Validation: {e}")
+
+    return [None] * len(rows_list)
 
 def process_excel_file(file_url: str, sender_id: str) -> str:
     try:
         res = requests.get(file_url, timeout=30)
         if res.status_code != 200:
-            return 0
+            return "0"
         temp_file = "temp_rooms.xlsx"
         with open(temp_file, "wb") as f:
             f.write(res.content)
 
         df = pd.read_excel(temp_file).fillna("[Chưa cập nhật]")
         success_count, fail_count, ai_rejected_count = 0, 0, 0
-        for _, row in df.iterrows():
-            validated_data = ai_validate_and_extract_room(row.to_dict())
-            extracted = validated_data.get("extracted_data", {}) if validated_data else {}
-            raw_address = str(extracted.get("address") or "").strip()
-
-            # Kiểm tra nếu địa chỉ rỗng hoặc rơi vào các từ khóa "thiếu dữ liệu"
-            if not raw_address or raw_address.lower() in ["[chưa cập nhật]", "none", "null", "chưa rõ", ""]:
-                ai_rejected_count += 1
-                continue
-
-            
-            if upsert_room_to_db(data=extracted):
-                success_count += 1
-            else:
-                fail_count += 1
         
+        # Chia dữ liệu thành các Batch (mỗi batch 15 dòng)
+        BATCH_SIZE = 15
+        rows = df.to_dict(orient="records")
+        
+        for i in range(0, len(rows), BATCH_SIZE):
+            batch_rows = rows[i:i + BATCH_SIZE]
+            batch_results = ai_validate_and_extract_room_batch(batch_rows)
+            
+            for validated_data in batch_results:
+                if not validated_data:
+                    ai_rejected_count += 1
+                    continue
+                
+                extracted = validated_data.get("extracted_data", {}) if isinstance(validated_data, dict) else {}
+                raw_address = str(extracted.get("address") or "").strip()
+
+                if not raw_address or raw_address.lower() in ["[chưa cập nhật]", "none", "null", "chưa rõ", ""]:
+                    ai_rejected_count += 1
+                    continue
+
+                if upsert_room_to_db(data=extracted):
+                    success_count += 1
+                else:
+                    fail_count += 1
+
         if os.path.exists(temp_file):
             os.remove(temp_file)
         return f"AI đã xử lý xong! Thành công: {success_count} phòng. (Bỏ qua {ai_rejected_count} dòng lỗi, {fail_count} lỗi DB)."
     except Exception as e:
         print("❌ [EXCEL PROCESS ERROR]:", e)
-        return 0
+        return "Lỗi trong quá trình xử lý file Excel."
 
 def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: str = "SYSTEM", db: Session = None):
     incoming_media_urls = []
