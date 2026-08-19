@@ -235,7 +235,7 @@ async def get_rooms_filter(
         price_range = {}
         if min_price is not None: price_range["gte"] = min_price
         if max_price is not None: price_range["lte"] = max_price
-        must_conditions.append(qdrant_models.FieldCondition(key="price_num", range=qdrant_models.Range(**price_range)))
+        must_conditions.append(qdrant_models.FieldCondition(key="price", range=qdrant_models.Range(**price_range)))
 
     if from_date or to_date:
         time_range = {}

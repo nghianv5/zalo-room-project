@@ -89,7 +89,7 @@ try:
     )
     qdrant_client.create_payload_index(
         collection_name=COLLECTION_NAME,
-        field_name="price_num",
+        field_name="price",
         field_schema=qdrant_models.PayloadSchemaType.FLOAT,
     )
     qdrant_client.create_payload_index(
@@ -489,8 +489,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
             "address": address,
             "room_name": room_name,
             "room_code": room_code,
-            "price": price,
-            "price_num": parse_price_to_number(data.get("price", "")),
+            "price": parse_price_to_number(data.get("price", "")),
             "floor": str(data.get("floor", "Chưa rõ")),
             "is_private_bathroom": str(data.get("is_private_bathroom", "Chưa rõ")),
             "has_ac": str(data.get("has_ac", "Chưa rõ")),
@@ -552,7 +551,7 @@ def search_rooms_by_vector(query_text: str, top_k: int = 20) -> List[dict]:
                     collection_name=COLLECTION_NAME,
                     query_filter=status_filter,
                     order_by=qdrant_models.OrderBy(
-                        key="price_number",
+                        key="price",
                         direction=qdrant_models.Direction.ASC  # Tăng dần từ thấp đến cao
                     ),
                     limit=top_k,
@@ -562,7 +561,7 @@ def search_rooms_by_vector(query_text: str, top_k: int = 20) -> List[dict]:
                 if results:
                     return results
             except Exception:
-                pass  # Fallback nếu DB chưa đánh Index cho field price_number
+                pass  # Fallback nếu DB chưa đánh Index cho field price
 
             # Fallback: Scroll lấy lượng lớn phòng trống để Python tự sắp xếp
             records, _ = qdrant_client.scroll(
@@ -1346,7 +1345,7 @@ def split_text_by_limit(text: str, max_length: int = 1800) -> List[str]:
     
 def parse_price_safe(room: dict) -> float:
     """Hàm trích xuất và ép kiểu giá về dạng float an toàn tuyệt đối"""
-    val = room.get("price_number")
+    val = room.get("price")
     
     # 1. Nếu đã là số int/float
     if isinstance(val, (int, float)):
