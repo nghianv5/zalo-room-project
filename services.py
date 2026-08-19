@@ -303,23 +303,53 @@ def add_pending_media(user_id: str, new_urls: list):
 def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None):
     access_token = ZALO_ACCESS_TOKEN
     if not access_token:
+        print("❌ [ZALO ERROR]: Thiếu ZALO_ACCESS_TOKEN")
         return False
+        
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
     headers = {"Content-Type": "application/json", "access_token": access_token}
-    print(1111)
-    payload = {
-        "recipient": {"user_id": user_id},
-        "message": {"text": ai_reply}
-    }
+
+    # Chia nhỏ ai_reply nếu vượt quá 2500 ký tự
+    text_chunks = split_text(ai_reply, max_length=2500)
+
     try:
-        print(2222)
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
-        res_data = response.json()
-        print("📩 [ZALO RESPONSE]:", res_data) # In log này ra để kiểm tra
-        print(3333)
-        return response.json().get("error") == 0
+        for idx, chunk in enumerate(text_chunks):
+            # Nếu là đoạn cuối cùng và có media_urls thì gửi kèm ảnh
+            if idx == len(text_chunks) - 1 and media_urls and len(media_urls) > 0:
+                payload = {
+                    "recipient": {"user_id": user_id},
+                    "message": {
+                        "text": chunk,
+                        "attachment": {
+                            "type": "template",
+                            "payload": {
+                                "template_type": "media",
+                                "elements": [{"media_type": "image", "url": media_urls[0]}]
+                            }
+                        }
+                    }
+                }
+            else:
+                payload = {
+                    "recipient": {"user_id": user_id},
+                    "message": {"text": chunk}
+                }
+
+            response = requests.post(url, headers=headers, json=payload, timeout=10)
+            res_data = response.json()
+            print(f"📩 [ZALO RES Part {idx+1}/{len(text_chunks)}]: {res_data}")
+
+            if res_data.get("error") != 0:
+                print(f"❌ [ZALO FAIL]: Code {res_data.get('error')} - {res_data.get('message')}")
+                return False
+            
+            # Nghỉ 0.5s giữa các lần gửi để tránh rate-limit Zalo
+            time.sleep(0.5)
+
+        return True
+
     except Exception as e:
+        print("❌ [ZALO REQUEST EXCEPTION]:", e)
         return False
 
 def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
@@ -1288,3 +1318,18 @@ def parse_room_price(room: dict) -> float:
         return num
     except Exception:
         return 999_999_999.0
+        
+        
+def split_text(text: str, max_length: int = 2500) -> list:
+    """Chia văn bản thành các đoạn nhỏ dưới max_length ký tự"""
+    chunks = []
+    while len(text) > max_length:
+        # Tìm vị trí xuống dòng gần nhất để cắt không bị đứt câu
+        split_idx = text.rfind("\n", 0, max_length)
+        if split_idx == -1:
+            split_idx = max_length
+        chunks.append(text[:split_idx])
+        text = text[split_idx:].lstrip()
+    if text:
+        chunks.append(text)
+    return chunks
