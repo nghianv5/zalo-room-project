@@ -861,6 +861,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                    - Mỗi phòng liệt kê ngắn gọn: Tên/Số phòng, Địa chỉ, Giá thuê, và danh sách tiện ích có sẵn.
                    - Dùng icon/emoji sinh động. KHÔNG chèn bất kỳ đường link ảnh nào.
                    - Phải có thông tin mã phòng để người dùng đặt phòng
+                   - Nếu đường link media media_urls tồn tại thì phải hiển thị
  
                 TRẢ VỀ DUY NHẤT 1 CHUỖI JSON:
                 {{
