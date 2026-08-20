@@ -264,20 +264,46 @@ def parse_move_in_date(date_str: str) -> float:
     return now_vn.timestamp()
 
 def parse_price_to_number(price_str: str) -> float:
-    if not price_str or price_str in ["Chưa rõ", "Thỏa thuận", "None", "nan"]:
+    if not price_str or str(price_str).strip().lower() in ["chưa rõ", "thỏa thuận", "none", "nan", ""]:
         return 0.0
-    text = str(price_str).lower().replace(",", ".").strip()
+    
+    # 1. Nếu input truyền vào đã là số (int hoặc float)
+    if isinstance(price_str, (int, float)):
+        val = float(price_str)
+        if val < 100:  # Ví dụ nhập 2.5 nghĩa là 2.5 triệu
+            return val * 1_000_000
+        return val
+
+    text = str(price_str).lower().strip()
+
+    # 2. Nếu chuỗi chỉ chứa toàn chữ số thuần túy (VD: "2000000")
+    if text.isdigit():
+        val = float(text)
+        if val < 100:  # Nếu gõ "2" hoặc "3" hiểu là 2 triệu, 3 triệu
+            return val * 1_000_000
+        return val
+
+    # 3. Xử lý các chuỗi dạng "2.5 triệu", "2,5tr", "2tr5"
     if "triệu" in text or "tr" in text:
+        # Chuẩn hóa "2tr5" hoặc "2 triệu 5" thành "2.5"
         text = re.sub(r'(\d+)\s*(?:triệu|tr)\s*(\d+)', r'\1.\2', text)
-        match = re.search(r'(\d+(?:\.\d+)?)', text)
+        match = re.search(r'(\d+(?:\.\d+)?)', text.replace(',', '.'))
         if match:
             return float(match.group(1)) * 1_000_000
+
+    if "k" in text:
+        match = re.search(r'(\d+(?:\.\d+)?)', text.replace(',', '.'))
+        if match:
+            return float(match.group(1)) * 1_000
+
+    # 4. Trường hợp chuỗi có dấu phân cách hàng nghìn (VD: "2,000,000" hoặc "2.000.000")
     digits_only = re.sub(r'[^\d]', '', text)
     if digits_only:
         val = float(digits_only)
-        if val < 100: 
+        if val < 100:
             return val * 1_000_000
         return val
+
     return 0.0
 
 def get_get_and_clear_pending_media(user_id: str) -> list:
