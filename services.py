@@ -930,6 +930,24 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                 + Phải có thông tin mã phòng để người dùng đặt phòng
                 + Nếu đường link media media_urls tồn tại thì phải hiển thị
 
+        
+
+            QUY TẮC KIỂM TRA ĐỊA CHỈ BẮT BUỘC (CHO ACTION "ADD_ROOM"):
+            Nhiệm vụ: Phân tích địa chỉ do người dùng gửi và TỰ ĐỘNG BÓC TÁCH thành các cấp hành chính.
+            1. Một địa chỉ CHUẨN phải có ít nhất: Tên Đường/Số nhà + Phường/Xã (hoặc Quận/Huyện).
+            2. Nếu địa chỉ quá chung chung (VD: chỉ gửi "Hà Nội", "Cầu Giấy", "Gần đại học Bách Khoa", hoặc "Chưa rõ"):
+               -> Đặt `is_valid_address` = false.
+               -> Soạn `missing_address_msg` yêu cầu người dùng nhập lại đầy đủ (Số nhà/Đường, Phường/Xã, Quận/Huyện).
+            3. Nếu địa chỉ đã ĐỦ RÕ RÀNG:
+               -> Đặt `is_valid_address` = true.
+
+            TRÍCH XUẤT ĐỊA CHỈ (`extracted_data`):
+            - `address`: Địa chỉ đầy đủ gộp lại.
+            - `street`: Tên đường / Số nhà / Tòa nhà.
+            - `ward`: Tên Phường / Xã.
+            - `district`: Tên Quận / Huyện.
+            - `city`: Tên Tỉnh / Thành phố (Tự suy luận nếu người dùng ghi Quận/Đường quen thuộc, ví dụ "Cầu Giấy" -> "Hà Nội").
+        
         TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
         {{
           "action": "ADD_ROOM | SEARCH_ROOM | UPDATE_STATUS",
@@ -1019,36 +1037,49 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                 urls_to_send = []
 
         elif action == "ADD_ROOM":
-            address = str(extracted.get("address", "")).strip()
-            if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
-                #nếu người dùng chưa đăng ký phòng trên zalo hay web thì sẽ tạo mới data cho user
-      
-                if not phone:
-                    # 🚨 BẮT BUỘC: Nếu chưa có SĐT -> Chặn lại và yêu cầu chia sẻ SĐT
-                    request_phone_message = {
-                            "recipient": {"user_id": zalo_user_id},
-                            "message": {
-                                "text": "⚠️ Để đăng bài cho thuê phòng, bạn vui lòng bấm nút bên dưới để chia sẻ Số điện thoại liên hệ nhé!",
-                                "attachment": {
-                                    "type": "template",
-                                    "payload": {
-                                        "template_type": "request_user_info",
-                                        "elements": [{
-                                            "title": "Xác thực Số điện thoại",
-                                            "subtitle": "Yêu cầu cung cấp SĐT chính chủ trên Zalo để tạo tài khoản đăng phòng.",
-                                            "image_url": "https://your-domain.com/static/icon.png"
-                                        }]
+            is_valid_address = result_data.get("is_valid_address", False)
+    
+            # 🚨 TRƯỜNG HỢP 1: ĐỊA CHỈ CHƯA RÕ RÀNG -> YÊU CẦU BỔ SUNG
+            if not is_valid_address:
+                ai_reply = result_data.get(
+                    "missing_address_msg", 
+                    "Dạ để tạo bài đăng phòng, bạn vui lòng cho em xin địa chỉ rõ ràng hơn nhé!\n"
+                    "👉 Ví dụ: Số 15 ngõ 100 Nguyễn Phong Sắc, Phường Dịch Vọng, Quận Cầu Giấy"
+                )
+                urls_to_send = []
+            
+            else:
+                # ✅ TRƯỜNG HỢP 2: ĐỊA CHỈ ĐÃ ĐỦ RÕ RÀNG -> TIẾN HÀNH LƯU DATABASE
+                address = str(extracted.get("address", "")).strip()
+                if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
+                    #nếu người dùng chưa đăng ký phòng trên zalo hay web thì sẽ tạo mới data cho user
+          
+                    if not phone:
+                        # 🚨 BẮT BUỘC: Nếu chưa có SĐT -> Chặn lại và yêu cầu chia sẻ SĐT
+                        request_phone_message = {
+                                "recipient": {"user_id": zalo_user_id},
+                                "message": {
+                                    "text": "⚠️ Để đăng bài cho thuê phòng, bạn vui lòng bấm nút bên dưới để chia sẻ Số điện thoại liên hệ nhé!",
+                                    "attachment": {
+                                        "type": "template",
+                                        "payload": {
+                                            "template_type": "request_user_info",
+                                            "elements": [{
+                                                "title": "Xác thực Số điện thoại",
+                                                "subtitle": "Yêu cầu cung cấp SĐT chính chủ trên Zalo để tạo tài khoản đăng phòng.",
+                                                "image_url": "https://your-domain.com/static/icon.png"
+                                            }]
+                                        }
                                     }
                                 }
                             }
-                        }
-                    # Gọi Zalo Open API gửi yêu cầu xin SĐT
-                    send_zalo_request(request_phone_message)
-                    return {"status": "phone_required"}
+                        # Gọi Zalo Open API gửi yêu cầu xin SĐT
+                        send_zalo_request(request_phone_message)
+                        return {"status": "phone_required"}
 
-                success = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None)
-                if success:
-                    get_get_and_clear_pending_media(user_id)
+                    success = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None)
+                    if success:
+                        get_get_and_clear_pending_media(user_id)
                    
         elif action == "UPDATE_STATUS" and existing_point_id:
             new_status = extracted.get("status") or "ĐÃ CHO THUÊ"
