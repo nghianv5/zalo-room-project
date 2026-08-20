@@ -710,11 +710,11 @@ def ai_validate_and_extract_room_batch(rows_list: List[dict]) -> List[Optional[d
 
         YÊU CẦU XỬ LÝ QUAN TRỌNG VỀ GIÁ PHÒNG (`price`):
         - Hãy trích xuất giá phòng dưới dạng CHUỖI NGUYÊN BẢN hoặc CHUYỂN VỀ DẠNG SỐ TRÒN CHUẨN (Ví dụ: "3500000", "3.5 triệu", "3,500,000"). 
-        - Nếu không có giá hoặc bị trống, để mặc định là "[Chưa cập nhật]".
+        - Nếu không có giá hoặc bị trống, để mặc định là "".
 
         YÊU CẦU XỬ LÝ CÁC TRƯỜNG KHÁC:
         1. Trích xuất địa chỉ phân tách: `address` (đầy đủ), `street`, `ward`, `district`, `city`.
-        2. Đưa các tiện ích (điều hòa, nóng lạnh, vệ sinh...) về "Có", "Không", hoặc "[Chưa cập nhật]".
+        2. Đưa các tiện ích (điều hòa, nóng lạnh, vệ sinh...) về "Có", "Không".
         3. Định dạng `status`: "TRỐNG" hoặc "ĐÃ CHO THUÊ".
 
         TRẢ VỀ DUY NHẤT 1 MẢNG JSON CÓ ĐÚNG {len(clean_rows)} PHẦN TỬ THEO THỨ TỰ:
@@ -723,28 +723,28 @@ def ai_validate_and_extract_room_batch(rows_list: List[dict]) -> List[Optional[d
             "index": 0,
             "action": "ADD_ROOM",
             "extracted_data": {{
-              "address": "[Chưa cập nhật]",
-              "street": "[Chưa cập nhật]",
-              "ward": "[Chưa cập nhật]",
-              "district": "[Chưa cập nhật]",
-              "city": "[Chưa cập nhật]",
-              "room_name": "[Chưa cập nhật]",
-              "price": "[Chưa cập nhật]",
-              "floor": "[Chưa cập nhật]",
-              "is_private_bathroom": "[Chưa cập nhật]",
-              "has_ac": "[Chưa cập nhật]",
-              "has_heater": "[Chưa cập nhật]",
-              "has_washer": "[Chưa cập nhật]",
-              "allow_pets": "[Chưa cập nhật]",
-              "has_balcony": "[Chưa cập nhật]",
-              "has_window": "[Chưa cập nhật]",
-              "has_fingerprint_lock": "[Chưa cập nhật]",
-              "parking_info": "[Chưa cập nhật]",
-              "max_occupants": "[Chưa cập nhật]",
-              "other_amenities": "[Chưa cập nhật]",
-              "service_fees": "[Chưa cập nhật]",
+              "address": "",
+              "street": "",
+              "ward": "",
+              "district": "",
+              "city": "",
+              "room_name": "",
+              "price": "",
+              "floor": "",
+              "is_private_bathroom": "",
+              "has_ac": "",
+              "has_heater": "",
+              "has_washer": "",
+              "allow_pets": "",
+              "has_balcony": "",
+              "has_window": "",
+              "has_fingerprint_lock": "",
+              "parking_info": "",
+              "max_occupants": "",
+              "other_amenities": "",
+              "service_fees": "",
               "status": "TRỐNG",
-              "move_in_date": "[Chưa cập nhật]",
+              "move_in_date": "",
               "media_urls": ""
             }}
           }}
