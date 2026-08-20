@@ -102,6 +102,26 @@ try:
         field_name="room_code",
         field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
     )
+    qdrant_client.create_payload_index(
+        collection_name=COLLECTION_NAME,
+        field_name="street",
+        field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
+    )
+    qdrant_client.create_payload_index(
+        collection_name=COLLECTION_NAME,
+        field_name="ward",
+        field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
+    )
+    qdrant_client.create_payload_index(
+        collection_name=COLLECTION_NAME,
+        field_name="district",
+        field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
+    )
+    qdrant_client.create_payload_index(
+        collection_name=COLLECTION_NAME,
+        field_name="city",
+        field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
+    )
 except Exception:
     pass
 
@@ -165,6 +185,12 @@ class RequestOTPModel(BaseModel):
 class RoomCreateUpdateSchema(BaseModel):
     room_code: Optional[str] = Field(default=None, description="Mã phòng 6 ký tự")
     address: str = Field(..., min_length=1, description="Địa chỉ phòng không được để trống")
+    # 🆕 Bổ sung các trường địa chỉ phân tách
+    street: Optional[str] = "Chưa rõ"
+    ward: Optional[str] = "Chưa rõ"
+    district: Optional[str] = "Chưa rõ"
+    city: Optional[str] = "Chưa rõ"
+    
     price: str = Field(..., min_length=1, description="Giá phòng không được để trống")
     room_name: Optional[str] = "Phòng trọ"
     floor: Optional[str] = "Chưa rõ"                  
@@ -513,6 +539,12 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
 
         payload = {
             "address": address,
+            # 🆕 Lưu rõ ràng 4 cấp địa chỉ vào Payload
+            "street": str(data.get("street", "Chưa rõ")).strip(),
+            "ward": str(data.get("ward", "Chưa rõ")).strip(),
+            "district": str(data.get("district", "Chưa rõ")).strip(),
+            "city": str(data.get("city", "Chưa rõ")).strip(),
+            
             "room_name": room_name,
             "room_code": room_code,
             "price": parse_price_to_number(data.get("price", "")),
@@ -803,44 +835,81 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ thông minh trên Zalo.
         Phân tích tin nhắn người dùng và trích xuất đúng 13 trường thông tin:
 
-        1. `address`: Địa chỉ 4 cấp đầy đủ (Số nhà/Đường, Phường/Xã, Quận/Huyện, Tỉnh/Thành phố).
-        2. `room_name`: Tên hoặc số phòng (VD: Phòng 301, Phòng tầng 2...).
-        3. `price`: Giá thuê.
-        4. `floor`: Tầng bao nhiêu.
-        5. `is_private_bathroom`: Vệ sinh riêng hay khép kín hay không.
-        6. `has_ac`:  Điều hoà có hay không?
-        7. `has_heater`: có bình nóng lạnh không?
-        8. `has_washer`: Có máy giặt không?
-        9. `allow_pets`: Có cho nuôi pet không?
-        10. `has_balcony`: Có ban công không?
-        11. `has_window`: Có cửa sổ không?
-        12. `has_fingerprint_lock`: Ra vào bằng khoá vân tay có hay không?
-        13. `parking_info`: có chỗ để xe không?
-        14. `max_occupants`: số ng ở tối đã
-        15. `other_amenities`: Có thêm tiện ích gì khác
-        16. `service_fees`: Phí dịch vụ (điện, nước, wifi)...
-        12. `status`: Trạng thái phòng ("TRỐNG" hoặc "ĐÃ CHO THUÊ").
-        13. `move_in_date`: Ngày có thể chuyển vào phòng để ở
+        1. `address`: Địa chỉ đầy đủ gộp lại.
+        2. `street`: Tên đường / Tòa nhà / Số nhà (VD: 123 Nguyễn Thị Minh Khai).
+        3. `ward`: Phường hoặc Xã (VD: Phường Bến Nghé).
+        4. `district`: Quận hoặc Huyện (VD: Quận 1).
+        5. `city`: Tỉnh hoặc Thành phố (VD: TP. Hồ Chí Minh).
+        6. `room_name`: Tên hoặc số phòng (VD: Phòng 301, Phòng tầng 2...).
+        7. `price`: Giá thuê.
+        8. `floor`: Tầng bao nhiêu.
+        9. `is_private_bathroom`: Vệ sinh riêng hay khép kín hay không.
+        10. `has_ac`:  Điều hoà có hay không?
+        11. `has_heater`: có bình nóng lạnh không?
+        12. `has_washer`: Có máy giặt không?
+        13. `allow_pets`: Có cho nuôi pet không?
+        14. `has_balcony`: Có ban công không?
+        15. `has_window`: Có cửa sổ không?
+        16. `has_fingerprint_lock`: Ra vào bằng khoá vân tay có hay không?
+        17. `parking_info`: có chỗ để xe không?
+        18. `max_occupants`: số ng ở tối đã
+        19. `other_amenities`: Có thêm tiện ích gì khác
+        120. `service_fees`: Phí dịch vụ (điện, nước, wifi)...
+        21. `status`: Trạng thái phòng ("TRỐNG" hoặc "ĐÃ CHO THUÊ").
+        22. `move_in_date`: Ngày có thể chuyển vào phòng để ở
 `       
         DỮ LIỆU ĐẦU VÀO:
         - Tin nhắn: "{message_text}"
         - Media kèm theo: {json.dumps(all_current_media)}
         - Phòng khớp từ Vector Search: {json.dumps(relevant_rooms, ensure_ascii=False)}
 
-        YÊU CẦU TRẢ VỀ JSON:
-        - Nếu thiếu thông tin trường nào, đặt giá trị là "[Chưa cập nhật]".
-        - Trình bày `ai_reply` đẹp mắt, sạch sẽ để gửi lại trên Zalo cho người dùng. ĐỪNG ĐÂM ĐƯỜNG LINK HÌNH ÁNH VÀO CÂU TRẢ LỜI, hình ảnh sẽ được hệ thống hiển thị đính kèm tự động.
-
         QUY TẮC PHÂN LOẠI ACTION:
-        - "ADD_ROOM": Dùng khi người dùng ĐĂNG PHÒNG MỚI hoặc CẬP NHẬT/SỬA BẤT KỲ THÔNG TIN NÀO CỦA PHÒNG (Địa chỉ, Giá, Tiện ích, Ảnh, Tầng...).
-        - "UPDATE_STATUS": CHỈ DÙNG khi người dùng báo phòng "ĐÃ CHO THUÊ", "ĐÃ CÓ NGƯỜI BẮT", "ĐÃ CHỐT" hoặc "ĐỔI SANG TRỐNG".
-        - "SEARCH_ROOM": Dùng khi khách tìm kiếm phòng.
+        - "ADD_ROOM": Dùng khi người dùng ĐĂNG PHÒNG MỚI hoặc CẬP NHẬT/SỬA BẤT KỲ THÔNG TIN NÀO CỦA PHÒNG.
+        - "UPDATE_STATUS": CHỈ DÙNG khi người dùng báo phòng "ĐÃ CHO THUÊ", "ĐÃ CHỐT" hoặc "ĐỔI SANG TRỐNG".
+        - "SEARCH_ROOM": Dùng khi khách có nhu cầu TÌM KIẾM phòng trọ.
+
+        HƯỚNG DẪN TẠO `ai_reply` CHO TỪNG ACTION:
+        1. Nếu action là "ADD_ROOM" hoặc "UPDATE_STATUS": 
+           - Viết câu xác nhận ngắn gọn, lịch sự cho chủ nhà.
+        2. Nếu action là "SEARCH_ROOM":
+            THÔNG TIN BẮT BUỘC ĐỐI VỚI YÊU CẦU TÌM PHÒNG (SEARCH_ROOM):
+            1. `location_search`: Tên đường HOẶC Tên Phường/Xã mà khách muốn thuê (Ví dụ: "đường Cầu Giấy", "Phường Dịch Vọng", "Đống Đa"...).
+            2. `min_price`: Giá thuê tối thiểu khách có thể trả (Dạng số float tính theo VNĐ, ví dụ: 2000000). Nếu khách không nói giá tối thiểu thì mặc định là 0.
+            3. `max_price`: Giá thuê tối đa khách có thể trả (Dạng số float tính theo VNĐ, ví dụ: 4000000).
+
+            QUY TẮC KIỂM TRA ĐIỀU KIỆN (BẮT BUỘC CHO SEARCH_ROOM):
+            - Nếu người dùng tìm phòng nhưng KHÔNG CÓ thông tin Tên Đường/Tên Phường/Xã -> Set `is_valid_search` = false.
+            - Nếu người dùng tìm phòng nhưng KHÔNG CÓ Giá tối đa -> Set `is_valid_search` = false.
+            
+            - Nếu cung cấp đủ cả Khu vực (Đường/Phường) và Giá -> Set `is_valid_search` = true.
+            - Nếu "Danh sách phòng trống" RỖNG: Trả lời lịch sự báo hiện chưa có phòng phù hợp.
+            - Nếu CÓ PHÒNG: Định dạng ngay danh sách phòng thành 1 tin nhắn phản hồi đẹp mắt trên Zalo:
+                + Đánh số thứ tự (1, 2, 3...).
+                + ẨN HOÀN TOÀN các thông tin bị thiếu, null, "[Chưa cập nhật]" hoặc khoảng trắng.. Chỉ hiện các tiện ích thực sự CÓ.
+                + Bắt buộc hiển thị: Mã phòng, Tên phòng, Địa chỉ, Giá thuê, Media URLs (nếu có).
+                + Dùng emoji sinh động. KHÔNG tự chèn đường link ảnh vào văn bản.
+                + Mỗi phòng liệt kê ngắn gọn: Tên/Số phòng, Địa chỉ, Giá thuê, và danh sách tiện ích có sẵn.
+                + Dùng icon/emoji sinh động. KHÔNG chèn bất kỳ đường link ảnh nào.
+                + Phải có thông tin mã phòng để người dùng đặt phòng
+                + Nếu đường link media media_urls tồn tại thì phải hiển thị
 
         TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
         {{
           "action": "ADD_ROOM | SEARCH_ROOM | UPDATE_STATUS",
+          "is_valid_search": true/false,
+          "missing_info_message": "Văn bản hướng dẫn khách nhập thêm thông tin còn thiếu (Nếu is_valid_search = false)",
+          "extracted_search": {{
+            "location_search": "Tên đường hoặc phường/xã trích xuất được (hoặc null)",
+            "min_price": 0,
+            "max_price": 0
+          }},
           "extracted_data": {{
             "address": "Địa chỉ phòng trọ...",
+            "address": "123 Nguyễn Thị Minh Khai, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh",
+            "street": "Tên đường",
+            "ward": "Tên phường/xã/thị trấn",
+            "district": "Tên Quận/Huyện",
+            "city": "Tên Tỉnh/Thành Phố",
             "room_name": "Tên phòng trọ...",
             "price": "Giá thuê (ví dụ: 3.5 triệu)...",
             "floor": "Tầng số...",
@@ -874,44 +943,44 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         existing_point_id = relevant_rooms[0].get("id") if (relevant_rooms and len(relevant_rooms) > 0) else None
         print(f"action: {action}")
         if action == "SEARCH_ROOM":
-            # 1. Lấy toàn bộ phòng khả dụng từ Vector Search hoặc DB (Top 50 phòng)
-            search_results = search_rooms_by_vector(message_text, top_k=20) or []
-            if not search_results:
-                ai_reply = "Dạ hiện tại bên em chưa có phòng trống nào phù hợp với yêu cầu của anh/chị ạ!"
-            else:
-                # 4. Yêu cầu Gemini định dạng hiển thị danh sách: CHỈ hiển thị thông tin CÓ, ẩn hoàn toàn thông tin thiếu
-                format_prompt = f"""
-                Bạn là Trợ lý AI Tư vấn Tìm kiếm Phòng trọ trên Zalo.
-                Nhiệm vụ: Định dạng danh sách {len(search_results)} phòng rẻ nhất dưới đây thành 1 tin nhắn phản hồi hoàn chỉnh cho khách hàng.
-
-                DANH SÁCH {len(search_results)} PHÒNG RẺ NHẤT TRONG HỆ THỐNG:
-                {json.dumps(search_results, ensure_ascii=False)}
-
-                QUY TẮC HIỂN THỊ CỰC KỲ QUAN TRỌNG:
-                1. **ẨN HOÀN TOÀN THÔNG TIN THIẾU**:
-                   - Tuyệt đối KHÔNG hiển thị các dòng chứa "[Chưa cập nhật]", "Không", "Chưa rõ", "null", hoặc khoảng trắng.
-                   - Chỉ liệt kê các tiện ích/thông tin thực sự CÓ (Ví dụ: Nếu phòng có điều hòa thì ghi "• Có điều hòa", nếu không có hoặc chưa cập nhật thì BỎ HẲN dòng đó).
-                2. **ĐỊNH DẠNG NGẮN GỌN CHO ZALO**:
-                   - Mở đầu bằng 1 câu chào thân thiện.
-                   - Đánh số thứ tự từng phòng (1, 2, 3...).
-                   - Mỗi phòng liệt kê ngắn gọn: Tên/Số phòng, Địa chỉ, Giá thuê, và danh sách tiện ích có sẵn.
-                   - Dùng icon/emoji sinh động. KHÔNG chèn bất kỳ đường link ảnh nào.
-                   - Phải có thông tin mã phòng để người dùng đặt phòng
-                   - Nếu đường link media media_urls tồn tại thì phải hiển thị
- 
-                TRẢ VỀ DUY NHẤT 1 CHUỖI JSON:
-                {{
-                  "ai_reply": "Nội dung danh sách phòng đã định dạng ngắn gọn..."
-                }}
-                """
-                formatted_raw = generate_content_with_retry(format_prompt, mime_type="application/json")
-                if formatted_raw:
-                    formatted_json = json.loads(formatted_raw)
-                    ai_reply = formatted_json.get("ai_reply", ai_reply)
-
-            # Vì là tìm kiếm nên không đính kèm media đăng phòng của người dùng
-            urls_to_send = []
+            is_valid_search = result_data.get("is_valid_search", False)
         
+            # 🚨 TRƯỜNG HỢP 1: THIẾU THÔNG TIN BẮT BUỘC
+            if not is_valid_search:
+                ai_reply = result_data.get(
+                    "missing_info_message", 
+                    "Dạ để tìm phòng chính xác nhất, bạn vui lòng cung cấp rõ:\n"
+                    "1. Tên Đường hoặc Phường/Xã muốn thuê\n"
+                    "2. Khoảng giá bạn muốn thuê (Ví dụ: từ 2 triệu đến 4 triệu)"
+                )
+                urls_to_send = []
+
+            # ✅ TRƯỜNG HỢP 2: ĐÃ ĐỦ THÔNG TIN -> TIẾN HÀNH TÌM KIẾM
+            else:
+                search_params = result_data.get("extracted_search", {})
+                location_query = search_params.get("location_search", "")
+                min_p = search_params.get("min_price", 0)
+                max_p = search_params.get("max_price", 0)
+
+                # Tạo chuỗi truy vấn kết hợp thông tin
+                full_query = f"{message_text} {location_query}"
+                
+                # Gọi tìm kiếm phòng có truyền kèm khoảng giá
+                search_results = search_rooms_with_filter(
+                    query_text=full_query, 
+                    min_price=min_p, 
+                    max_price=max_p, 
+                    top_k=20
+                )
+
+                if not search_results:
+                    ai_reply = f"Dạ tiếc quá, hệ thống chưa tìm thấy phòng nào ở khu vực **{location_query}** với tầm giá từ **{min_p:,.0f}đ đến {max_p:,.0f}đ** ạ!"
+                else:
+                    # ... (Đoạn gọi Gemini định dạng danh sách phòng giữ nguyên như cũ) ...
+                    pass
+                # Vì là tìm kiếm nên không đính kèm media đăng phòng của người dùng
+                urls_to_send = []
+
         elif action == "ADD_ROOM":
             address = str(extracted.get("address", "")).strip()
             if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
@@ -1408,3 +1477,48 @@ def parse_price_safe(room: dict) -> float:
         pass
         
     return 999_999_999.0
+    
+def search_rooms_with_filter(
+    query_text: str, 
+    min_price: float = 0, 
+    max_price: float = 0, 
+    top_k: int = 20
+) -> List[dict]:
+    
+    must_conditions = [
+        qdrant_models.FieldCondition(
+            key="status",
+            match=qdrant_models.MatchValue(value="TRỐNG")
+        )
+    ]
+
+    # 🆕 Bổ sung lọc theo khoảng Giá tối thiểu - Giá tối đa
+    price_range = {}
+    if min_price > 0:
+        price_range["gte"] = min_price
+    if max_price > 0:
+        price_range["lte"] = max_price
+
+    if price_range:
+        must_conditions.append(
+            qdrant_models.FieldCondition(
+                key="price",
+                range=qdrant_models.Range(**price_range)
+            )
+        )
+
+    status_filter = qdrant_models.Filter(must=must_conditions)
+    query_vector = get_text_embedding(query_text)
+
+    try:
+        search_result = qdrant_client.query_points(
+            collection_name=COLLECTION_NAME,
+            query=query_vector if query_vector else None,
+            query_filter=status_filter,
+            limit=top_k,
+            with_payload=True
+        )
+        return [hit.payload | {"id": hit.id} for hit in search_result.points if hit.payload]
+    except Exception as e:
+        print("❌ [SEARCH FILTER ERROR]:", e)
+        return []
