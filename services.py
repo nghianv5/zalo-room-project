@@ -692,8 +692,12 @@ def ai_validate_and_extract_room_batch(rows_list: List[dict]) -> List[Optional[d
                 raw_text = re.sub(r"^```(?:json)?\n?", "", raw_text)
                 raw_text = re.sub(r"\n?```$", "", raw_text)
             parsed_list = json.loads(raw_text)
-            if isinstance(parsed_list, list):
-                return parsed_list
+            # Xử lý trường hợp AI bọc mảng trong mảng dạng [[{...}]]
+            if isinstance(parsed_data, list) and len(parsed_data) > 0 and isinstance(parsed_data[0], list):
+                parsed_data = parsed_data[0]
+                
+            if isinstance(parsed_data, list):
+                return parsed_data
     except Exception as e:
         print(f"⚠️ Lỗi AI Batch Validation: {e}")
 
@@ -711,7 +715,6 @@ def process_excel_file(file_url: str, sender_id: str) -> str:
         df = pd.read_excel(temp_file).fillna("[Chưa cập nhật]")
         success_count, fail_count, ai_rejected_count = 0, 0, 0
         
-        # Chia dữ liệu thành các Batch (mỗi batch 15 dòng)
         BATCH_SIZE = 15
         rows = df.to_dict(orient="records")
         
@@ -720,11 +723,18 @@ def process_excel_file(file_url: str, sender_id: str) -> str:
             batch_results = ai_validate_and_extract_room_batch(batch_rows)
             
             for validated_data in batch_results:
-                if not validated_data:
+                if isinstance(validated_data, list) and len(validated_data) > 0:
+                    validated_data = validated_data[0]
+
+                if not validated_data or not isinstance(validated_data, dict):
                     ai_rejected_count += 1
                     continue
                 
-                extracted = validated_data.get("extracted_data", {}) if isinstance(validated_data, dict) else {}
+                extracted = validated_data.get("extracted_data", {})
+                if not isinstance(extracted, dict):
+                    ai_rejected_count += 1
+                    continue
+
                 raw_address = str(extracted.get("address") or "").strip()
 
                 if not raw_address or raw_address.lower() in ["[chưa cập nhật]", "none", "null", "chưa rõ", ""]:
