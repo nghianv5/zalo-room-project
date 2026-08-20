@@ -685,80 +685,118 @@ def update_room_status_in_db(point_id: str, new_status: str) -> bool:
         return False
 
 def ai_validate_and_extract_room_batch(rows_list: List[dict]) -> List[Optional[dict]]:
-    """Xử lý nhóm 10-20 dòng dữ liệu Excel cùng lúc trong 1 API Call để tối ưu tốc độ và chi phí."""
+    """Xử lý nhóm dữ liệu Excel - Fix triệt để UnboundLocalError & Lỗi parse giá tiền."""
     if not gemini_client or not rows_list:
         return [None] * len(rows_list)
 
-    # Clean dicts (chuyển NaN thành None)
-    clean_rows = [
-        {k: (None if pd.isna(v) else v) for k, v in row.items()}
-        for row in rows_list
-    ]
+    # 1. Clean dicts (Chuyển NaN thành None và ép chuỗi an toàn cho từng trường)
+    clean_rows = []
+    for row in rows_list:
+        clean_row = {}
+        for k, v in row.items():
+            if pd.isna(v):
+                clean_row[k] = None
+            else:
+                # Chuyển mọi giá trị sang chuỗi để tránh lỗi kiểu dữ liệu khi gửi cho Prompt
+                clean_row[k] = str(v).strip()
+        clean_rows.append(clean_row)
 
     prompt = f"""
         Bạn là Trợ lý AI Xử lý và Chuẩn hóa Dữ liệu Phòng trọ từ File Excel.
         Nhiệm vụ: Phân tích và chuẩn hóa DANH SÁCH {len(clean_rows)} dòng dữ liệu thô dưới đây.
 
-        DỮ LIỆU CÁC DÒNG EXCEL THÔ (Định dạng JSON):
+        DỮ LIỆU CÁC DÒNG EXCEL THÔ (JSON):
         {json.dumps(clean_rows, ensure_ascii=False)}
 
-        YÊU CẦU XỬ LÝ CHO TỪNG DÒNG:
-        1. Trích xuất các trường thông tin phòng. Nếu thiếu hoặc rỗng, để giá trị "[Chưa cập nhật]".
-        2. Đưa các trường Có/Không (điều hòa, nóng lạnh, vệ sinh riêng, pet, ban công, v.v.) về "Có", "Không", hoặc "[Chưa cập nhật]".
-        3. Định dạng `status`: "TRỐNG" hoặc "ĐÃ CHO THUÊ".
-        4. Xác định `action`: "ADD_ROOM", "UPDATE_STATUS", hoặc "SEARCH_ROOM".
+        YÊU CẦU XỬ LÝ QUAN TRỌNG VỀ GIÁ PHÒNG (`price`):
+        - Hãy trích xuất giá phòng dưới dạng CHUỖI NGUYÊN BẢN hoặc CHUYỂN VỀ DẠNG SỐ TRÒN CHUẨN (Ví dụ: "3500000", "3.5 triệu", "3,500,000"). 
+        - Nếu không có giá hoặc bị trống, để mặc định là "[Chưa cập nhật]".
 
-        TRẢ VỀ DUY NHẤT 1 MẢNG JSON CHỨA KẾT QUẢ CHO TỪNG DÒNG THEO ĐÚNG THỨ TỰ CỦA ĐẦU VÀO:
+        YÊU CẦU XỬ LÝ CÁC TRƯỜNG KHÁC:
+        1. Trích xuất địa chỉ phân tách: `address` (đầy đủ), `street`, `ward`, `district`, `city`.
+        2. Đưa các tiện ích (điều hòa, nóng lạnh, vệ sinh...) về "Có", "Không", hoặc "[Chưa cập nhật]".
+        3. Định dạng `status`: "TRỐNG" hoặc "ĐÃ CHO THUÊ".
+
+        TRẢ VỀ DUY NHẤT 1 MẢNG JSON CÓ ĐÚNG {len(clean_rows)} PHẦN TỬ THEO THỨ TỰ:
         [
           {{
             "index": 0,
-            "action": "ADD_ROOM | SEARCH_ROOM | UPDATE_STATUS",
+            "action": "ADD_ROOM",
             "extracted_data": {{
-              "address": "Địa chỉ...",
-              "room_name": "Tên phòng...",
-              "price": "Giá thuê...",
-              "floor": "Tầng...",
-              "is_private_bathroom": "Có/Không/[Chưa cập nhật]",
-              "has_ac": "Có/Không/[Chưa cập nhật]",
-              "has_heater": "Có/Không/[Chưa cập nhật]",
-              "has_washer": "Có/Không/[Chưa cập nhật]",
-              "allow_pets": "Có/Không/[Chưa cập nhật]",
-              "has_balcony": "Có/Không/[Chưa cập nhật]",
-              "has_window": "Có/Không/[Chưa cập nhật]",
-              "has_fingerprint_lock": "Có/Không/[Chưa cập nhật]",
-              "parking_info": "Chỗ để xe...",
-              "max_occupants": "Số người ở...",
-              "other_amenities": "Tiện ích...",
-              "service_fees": "Phí dịch vụ...",
-              "status": "TRỐNG hoặc ĐÃ CHO THUÊ",
-              "move_in_date": "Ngày chuyển vào...",
-              "media_urls": "Link ảnh/video phân cách bởi dấu phẩy"
+              "address": "[Chưa cập nhật]",
+              "street": "[Chưa cập nhật]",
+              "ward": "[Chưa cập nhật]",
+              "district": "[Chưa cập nhật]",
+              "city": "[Chưa cập nhật]",
+              "room_name": "[Chưa cập nhật]",
+              "price": "[Chưa cập nhật]",
+              "floor": "[Chưa cập nhật]",
+              "is_private_bathroom": "[Chưa cập nhật]",
+              "has_ac": "[Chưa cập nhật]",
+              "has_heater": "[Chưa cập nhật]",
+              "has_washer": "[Chưa cập nhật]",
+              "allow_pets": "[Chưa cập nhật]",
+              "has_balcony": "[Chưa cập nhật]",
+              "has_window": "[Chưa cập nhật]",
+              "has_fingerprint_lock": "[Chưa cập nhật]",
+              "parking_info": "[Chưa cập nhật]",
+              "max_occupants": "[Chưa cập nhật]",
+              "other_amenities": "[Chưa cập nhật]",
+              "service_fees": "[Chưa cập nhật]",
+              "status": "TRỐNG",
+              "move_in_date": "[Chưa cập nhật]",
+              "media_urls": ""
             }}
           }}
         ]
     """
 
-    try:
-        response = gemini_client.models.generate_content(
-            model="models/gemini-2.5-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(response_mime_type="application/json")
-        )
-        if response and response.text:
-            raw_text = response.text.strip()
-            if raw_text.startswith("```"):
-                raw_text = re.sub(r"^```(?:json)?\n?", "", raw_text)
-                raw_text = re.sub(r"\n?```$", "", raw_text)
-            parsed_list = json.loads(raw_text)
-            # Xử lý trường hợp AI bọc mảng trong mảng dạng [[{...}]]
-            if isinstance(parsed_data, list) and len(parsed_data) > 0 and isinstance(parsed_data[0], list):
-                parsed_data = parsed_data[0]
-                
-            if isinstance(parsed_data, list):
-                return parsed_data
-    except Exception as e:
-        print(f"⚠️ Lỗi AI Batch Validation: {e}")
+    models_to_try = [
+        "models/gemini-2.5-flash", 
+        "models/gemini-2.0-flash", 
+        "models/gemini-1.5-flash"
+    ]
 
+    for model_name in models_to_try:
+        for attempt in range(3):
+            # 💡 FIX LỖI: Khởi tạo parsed_data = None ngay trước khối try
+            parsed_data = None 
+            try:
+                response = gemini_client.models.generate_content(
+                    model=model_name,
+                    contents=prompt,
+                    config=types.GenerateContentConfig(response_mime_type="application/json")
+                )
+                
+                if response and response.text:
+                    raw_text = response.text.strip()
+                    
+                    # Cắt bỏ Markdown Codeblock nếu AI lỡ đính kèm
+                    if raw_text.startswith("```"):
+                        raw_text = re.sub(r"^```(?:json)?\n?", "", raw_text)
+                        raw_text = re.sub(r"\n?```$", "", raw_text)
+                    
+                    # Parse JSON từ câu trả lời của AI
+                    parsed_data = json.loads(raw_text)
+                    
+                    # Xử lý trường hợp AI trả về mảng lồng mảng [[{...}]]
+                    if isinstance(parsed_data, list) and len(parsed_data) > 0 and isinstance(parsed_data[0], list):
+                        parsed_data = parsed_data[0]
+                        
+                    if isinstance(parsed_data, list):
+                        return parsed_data
+
+            except Exception as e:
+                err_str = str(e)
+                print(f"⚠️ Lỗi Batch Retry ({model_name} - Thử {attempt+1}): {err_str}")
+                
+                if "503" in err_str or "429" in err_str or "UNAVAILABLE" in err_str:
+                    wait_time = (2 ** attempt) + random.uniform(0.5, 1.5)
+                    time.sleep(wait_time)
+                else:
+                    break # Chuyển sang model tiếp theo nếu dính lỗi parse JSON/Logic
+
+    # Trả về danh sách Mặc định nếu tất cả Model/Retry đều thất bại (Tránh văng crash ứng dụng)
     return [None] * len(rows_list)
 
 def process_excel_file(file_url: str, sender_id: str) -> str:
