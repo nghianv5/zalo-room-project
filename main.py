@@ -184,7 +184,6 @@ async def upload_excel_rooms(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Không thể đọc tệp: {str(e)}")
 
-    df.fillna("Chưa rõ", inplace=True)
     success_count, fail_count, ai_rejected_count = 0, 0, 0
 
     BATCH_SIZE = 15

@@ -808,7 +808,6 @@ def process_excel_file(file_url: str, sender_id: str) -> str:
         with open(temp_file, "wb") as f:
             f.write(res.content)
 
-        df = pd.read_excel(temp_file).fillna("[Chưa cập nhật]")
         success_count, fail_count, ai_rejected_count = 0, 0, 0
         
         BATCH_SIZE = 15
