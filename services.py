@@ -1634,7 +1634,8 @@ def refresh_zalo_tokens(db_session):
     }
 
     response = requests.post(url, headers=headers, data=data).json()
-
+    print(1111)
+    print(response)
     if "access_token" in response:
         new_access_token = response["access_token"]
         # ⚠️ QUAN TRỌNG: Zalo trả về refresh_token MỚI, bắt buộc phải lưu lại
