@@ -27,7 +27,7 @@ import string
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 import redis
-from app.database import SessionLocal
+from database import SessionLocal
 
 redis_client = redis.Redis()
 
