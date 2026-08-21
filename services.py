@@ -381,13 +381,13 @@ def add_pending_media(user_id: str, new_urls: list):
 
 def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None) -> bool:
     db = SessionLocal()
-    access_token = tokens = get_current_tokens_from_db(db)
-    if not access_token:
+    data_token =  get_current_tokens_from_db(db)
+    if not data_token:
         print("❌ [ZALO ERROR]: Thiếu ZALO_ACCESS_TOKEN")
         return False
         
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
-    headers = {"Content-Type": "application/json", "access_token": access_token}
+    headers = {"Content-Type": "application/json", "access_token": data_token["access_token"]}
 
     # 1. Chia nhỏ ai_reply thành các đoạn dưới 1800 ký tự
     text_chunks = split_text_by_limit(ai_reply, max_length=1800)
