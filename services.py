@@ -1699,3 +1699,6 @@ def save_tokens_to_db(db: Session, access_token: str, refresh_token: str, expire
         db.rollback()
         print(f"❌ [DB SAVE TOKEN ERROR]: {e}")
         return False
+        
+def notify_admin_reauth(message: str = ""):
+    send_zalo_message(os.environ.get("ZALO_ADMIN_ID"), message)
