@@ -38,7 +38,8 @@ scheduler = BackgroundScheduler()
 @app.on_event("startup")
 def start_scheduler():
     # Thêm job chạy mỗi 6 tiếng (hours=6)
-    scheduler.add_job(cron_refresh_zalo_job, 'interval', hours=6)
+    #scheduler.add_job(cron_refresh_zalo_job, 'interval', hours=6)
+    scheduler.add_job(cron_refresh_zalo_job, 'interval', minutes=1)
     scheduler.start()
     print("🚀 Background Scheduler gia hạn Zalo Token đã kích hoạt!")
 
