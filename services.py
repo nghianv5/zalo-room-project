@@ -1633,7 +1633,7 @@ def refresh_zalo_tokens(db):
         "Content-Type": "application/x-www-form-urlencoded"
     }
     data = {
-        "refresh_token": current_token_entry.refresh_token,
+        "refresh_token": current_token_entry["refresh_token"],
         "app_id": app_id,
         "grant_type": "refresh_token"
     }

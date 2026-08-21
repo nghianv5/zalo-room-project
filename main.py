@@ -19,28 +19,28 @@ import sys
 from apscheduler.schedulers.background import BackgroundScheduler
 import logging
 
-# Khởi tạo Scheduler
-scheduler = BackgroundScheduler()
-scheduler.add_job(cron_refresh_zalo_job, 'interval', minutes=1)
-
-logging.basicConfig(level=logging.INFO)
-logging.getLogger('apscheduler').setLevel(logging.DEBUG)
-
-# ĐỊNH NGHĨA LIFESPAN TRƯỚC
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # --- Code chạy khi SERVER KHỞI ĐỘNG ---
-    print("🚀 [SCHEDULER] Bắt đầu chạy BackgroundScheduler...", flush=True)
-    scheduler.start()
-    
-    yield  # Ứng dụng hoạt động ở đây
-    
-    # --- Code chạy khi SERVER TẮT ---
-    print("🛑 [SCHEDULER] Dừng BackgroundScheduler...", flush=True)
-    scheduler.shutdown()
-
-# TRUYỀN LIFESPAN VÀO FASTAPI APP
-app = FastAPI(lifespan=lifespan)
+# # Khởi tạo Scheduler
+# scheduler = BackgroundScheduler()
+# scheduler.add_job(cron_refresh_zalo_job, 'interval', minutes=1)
+# 
+# logging.basicConfig(level=logging.INFO)
+# logging.getLogger('apscheduler').setLevel(logging.DEBUG)
+# 
+# # ĐỊNH NGHĨA LIFESPAN TRƯỚC
+# @asynccontextmanager
+# async def lifespan(app: FastAPI):
+#     # --- Code chạy khi SERVER KHỞI ĐỘNG ---
+#     print("🚀 [SCHEDULER] Bắt đầu chạy BackgroundScheduler...", flush=True)
+#     scheduler.start()
+#     
+#     yield  # Ứng dụng hoạt động ở đây
+#     
+#     # --- Code chạy khi SERVER TẮT ---
+#     print("🛑 [SCHEDULER] Dừng BackgroundScheduler...", flush=True)
+#     scheduler.shutdown()
+# 
+# # TRUYỀN LIFESPAN VÀO FASTAPI APP
+# app = FastAPI(lifespan=lifespan)
 
 
 
