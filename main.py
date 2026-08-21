@@ -15,8 +15,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from qdrant_client.http import models as qdrant_models
 from services import *
-from database import SessionLocal
 import sys
+from apscheduler.schedulers.background import BackgroundScheduler
 
 app = FastAPI()
 
@@ -25,15 +25,7 @@ app = FastAPI()
 
 
 
-def cron_refresh_zalo_job():
-    print("🔄 [REFRESH TOKEN ZALO] Bắt đầu tự động làm mới Zalo Token...")
-    db = SessionLocal()
-    try:
-        refresh_zalo_tokens(db)
-    except Exception as e:
-        print(f"❌ [REFRESH TOKEN ZALO ERROR]: {e}")
-    finally:
-        db.close()
+
 
 # Khởi tạo Scheduler
 scheduler = BackgroundScheduler()

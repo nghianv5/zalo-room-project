@@ -27,7 +27,6 @@ import string
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 import redis
-from database import SessionLocal
 
 redis_client = redis.Redis()
 
@@ -59,6 +58,9 @@ VECTOR_SIZE = 768
 engine = create_engine(SQLALCHEMY_DATABASE_URL, pool_pre_ping=True)
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 Base = declarative_base()
+
+
+
 
 # External Clients
 qdrant_client = QdrantClient(
@@ -239,8 +241,15 @@ class RoomCreateUpdateSchema(BaseModel):
         return val_str
 
 
-
-    
+def cron_refresh_zalo_job():
+    print("🔄 [REFRESH TOKEN ZALO] Bắt đầu tự động làm mới Zalo Token...")
+    db = SessionLocal()
+    try:
+        refresh_zalo_tokens(db)
+    except Exception as e:
+        print(f"❌ [REFRESH TOKEN ZALO ERROR]: {e}")
+    finally:
+        db.close()
     
 # --- DATABASE DEPENDENCY & CURRENT USER HELPER ---
 def get_db():
