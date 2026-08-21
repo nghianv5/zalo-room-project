@@ -14,8 +14,6 @@ from phonenumbers import NumberParseException
 import pandas as pd
 from pydantic import BaseModel, Field, validator
 from fastapi import HTTPException, Header, Depends, status
-from sqlalchemy import Column, String, DateTime, create_engine
-from sqlalchemy.orm import declarative_base, sessionmaker, Session
 from qdrant_client import QdrantClient
 from qdrant_client.models import Distance, VectorParams, PointStruct
 from qdrant_client.http import models as qdrant_models
@@ -27,6 +25,9 @@ import string
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 import redis
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
+from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.sql import func
 
 redis_client = redis.Redis()
 
