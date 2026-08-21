@@ -1619,46 +1619,42 @@ def search_rooms_with_filter(
         print("❌ [SEARCH FILTER ERROR]:", e)
         return []
         
-        
-def refresh_zalo_tokens(db_session):
-    # 1. Lấy Refresh Token hiện tại từ DB
-    tokens_meta = get_current_tokens_from_db(db_session)
-    current_refresh_token = tokens_meta.get("refresh_token")
+def refresh_zalo_tokens(db):
+    current_token_entry = get_current_tokens_from_db(db)
     
-    url = "https://oauth.zaloapp.com/v4/oa/access_token"
+    oauth_url = "https://oauth.zaloapp.com/v4/oa/access_token"
+    
+    # ⚠️ Ép kiểu app_id và secret_key thành chuỗi str
+    app_id = str(ZALO_OA_ID).strip()
+    secret_key = str(ZALO_SECRET_KEY).strip()
+    
     headers = {
-        "secret_key": str(ZALO_SECRET_KEY), # Secret key từ App Settings
+        "secret_key": secret_key,
         "Content-Type": "application/x-www-form-urlencoded"
     }
     data = {
-        "refresh_token": current_refresh_token,
-        "app_id": str(ZALO_OA_ID),          # App ID từ App Settings
+        "refresh_token": current_token_entry.refresh_token,
+        "app_id": app_id,
         "grant_type": "refresh_token"
     }
-
-    response = requests.post(url, headers=headers, data=data).json()
-    print(1111)
-    print(response)
-    if "access_token" in response:
-        new_access_token = response["access_token"]
-        # ⚠️ QUAN TRỌNG: Zalo trả về refresh_token MỚI, bắt buộc phải lưu lại
-        new_refresh_token = response.get("refresh_token", current_refresh_token)
-        expires_in = int(response.get("expires_in", 219600)) # Thường là 6 tiếng (21600s)
-
-        # 2. Cập nhật ngay lập tức cả Access Token & Refresh Token mới vào DB
-        save_tokens_to_db(
-            db_session, 
-            access_token=new_access_token, 
-            refresh_token=new_refresh_token,
-            expires_at=time.time() + expires_in
-        )
-        return new_access_token
+    
+    response = requests.post(oauth_url, headers=headers, data=data)
+    res_json = response.json()
+    
+    # 🛑 KIỂM TRA KẾT QUẢ: Chỉ thành công khi có 'access_token'
+    if "access_token" in res_json:
+        current_token_entry.access_token = res_json["access_token"]
+        current_token_entry.refresh_token = res_json["refresh_token"]
+        db.commit()
+        db.refresh(current_token_entry)
+        print("🎉 [ZALO OAUTH] Refresh token thành công và đã lưu DB!", flush=True)
     else:
-        # Trường hợp Refresh Token đã chết hẳn -> Gửi cảnh báo
+        # Nếu lỗi (bao gồm -14002), in log chi tiết và NÉM LỖI ĐỂ DỪNG HÀM
+        print(f"❌ [ZALO OAUTH FAIL]: {res_json}", flush=True)
         notify_admin_reauth("⚠️ Refresh Token Zalo đã hết hạn hẳn! Vui lòng đăng nhập cấp lại quyền.")
-        return None
+        raise Exception(f"Zalo OAuth Error {res_json.get('error')}: {res_json.get('error_description')}")
 
-        
+
 def get_current_tokens_from_db(db: Session) -> dict:
     """
     Lấy thông tin Zalo Token hiện tại từ Database.
