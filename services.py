@@ -380,7 +380,7 @@ def add_pending_media(user_id: str, new_urls: list):
     }
 
 def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None) -> bool:
-    access_token = get_zalo_access_token_from_db()
+    access_token = get_current_tokens_from_db()
     if not access_token:
         print("❌ [ZALO ERROR]: Thiếu ZALO_ACCESS_TOKEN")
         return False
