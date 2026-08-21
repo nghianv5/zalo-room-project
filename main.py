@@ -38,17 +38,7 @@ async def lifespan(app: FastAPI):
     print("🛑 [SCHEDULER] Dừng BackgroundScheduler...", flush=True)
     scheduler.shutdown()
 
-@app.on_event("startup")
-def start_scheduler():
-    # Thêm job chạy mỗi 6 tiếng (hours=6)
-    #scheduler.add_job(cron_refresh_zalo_job, 'interval', hours=6)
-    scheduler.add_job(cron_refresh_zalo_job, 'interval', minutes=1)
-    scheduler.start()
-    print("🚀 Background Scheduler gia hạn Zalo Token đã kích hoạt!")
 
-@app.on_event("shutdown")
-def stop_scheduler():
-    scheduler.shutdown()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))

@@ -28,6 +28,7 @@ import redis
 from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.sql import func
+from contextlib import asynccontextmanager
 
 redis_client = redis.Redis()
 
