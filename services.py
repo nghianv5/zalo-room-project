@@ -27,6 +27,7 @@ import string
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 import redis
+from app.database import SessionLocal
 
 redis_client = redis.Redis()
 
@@ -249,23 +250,23 @@ def get_db():
     finally:
         db.close()
 
-def get_current_user(
-    x_user_phone: str = Header(None, alias="X-User-Phone"),
-    db: Session = Depends(get_db)
-) -> UserWeb:
-    if not x_user_phone:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Vui lòng cung cấp số điện thoại hoặc thông tin xác thực!"
-        )
-    clean_phone = x_user_phone if x_user_phone == "adminpro" else format_national_phone(x_user_phone)
-    user = db.query(UserWeb).filter(UserWeb.phone == clean_phone).first()
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Không tìm thấy thông tin người dùng!"
-        )
-    return user
+#def get_current_user(
+#    x_user_phone: str = Header(None, alias="X-User-Phone"),
+#    db: Session = Depends(get_db)
+#) -> UserWeb:
+#    if not x_user_phone:
+#        raise HTTPException(
+#            status_code=status.HTTP_401_UNAUTHORIZED,
+#            detail="Vui lòng cung cấp số điện thoại hoặc thông tin xác thực!"
+#        )
+#    clean_phone = x_user_phone if x_user_phone == "adminpro" else format_national_phone(x_user_phone)
+#    user = db.query(UserWeb).filter(UserWeb.phone == clean_phone).first()
+#    if not user:
+#        raise HTTPException(
+#            status_code=status.HTTP_404_NOT_FOUND,
+#            detail="Không tìm thấy thông tin người dùng!"
+#        )
+#    return user
 
 # --- CORE UTILITY FUNCTIONS ---
 def format_national_phone(phone_str: str, default_region: str = "VN") -> str:
