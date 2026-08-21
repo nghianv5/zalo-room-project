@@ -1626,10 +1626,13 @@ def refresh_zalo_tokens(db_session):
     current_refresh_token = tokens_meta.get("refresh_token")
     
     url = "https://oauth.zaloapp.com/v4/oa/access_token"
-    headers = {"secret_key": ZALO_SECRET_KEY, "Content-Type": "application/x-www-form-urlencoded"}
+    headers = {
+        "secret_key": str(ZALO_SECRET_KEY), # Secret key từ App Settings
+        "Content-Type": "application/x-www-form-urlencoded"
+    }
     data = {
         "refresh_token": current_refresh_token,
-        "app_id": ZALO_OA_ID,
+        "app_id": str(ZALO_OA_ID),          # App ID từ App Settings
         "grant_type": "refresh_token"
     }
 
