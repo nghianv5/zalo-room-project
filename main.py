@@ -14,9 +14,11 @@ from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from qdrant_client.http import models as qdrant_models
-from database import SessionLocal
 from services import *
+
+import sys
 app = FastAPI()
+from app.database import SessionLocal
 # Import toàn bộ các Service, Helper & Models từ service.py
 
 
