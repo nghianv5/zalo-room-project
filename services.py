@@ -243,7 +243,7 @@ class RoomCreateUpdateSchema(BaseModel):
 
 
 def cron_refresh_zalo_job():
-    print("🔄 [REFRESH TOKEN ZALO] Bắt đầu tự động làm mới Zalo Token...")
+    print("🔄 [REFRESH TOKEN ZALO] Bắt đầu tự động...", flush=True)
     db = SessionLocal()
     try:
         refresh_zalo_tokens(db)

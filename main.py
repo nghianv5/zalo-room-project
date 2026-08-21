@@ -22,13 +22,21 @@ app = FastAPI()
 
 # Import toàn bộ các Service, Helper & Models từ service.py
 
-
-
-
-
-
 # Khởi tạo Scheduler
 scheduler = BackgroundScheduler()
+scheduler.add_job(cron_refresh_zalo_job, 'interval', minutes=1)
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # --- Code chạy khi SERVER KHỞI ĐỘNG ---
+    print("🚀 [SCHEDULER] Bắt đầu chạy BackgroundScheduler...", flush=True)
+    scheduler.start()
+    
+    yield  # Ứng dụng hoạt động ở đây
+    
+    # --- Code chạy khi SERVER TẮT ---
+    print("🛑 [SCHEDULER] Dừng BackgroundScheduler...", flush=True)
+    scheduler.shutdown()
 
 @app.on_event("startup")
 def start_scheduler():
