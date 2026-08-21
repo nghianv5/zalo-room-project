@@ -18,14 +18,12 @@ from services import *
 import sys
 from apscheduler.schedulers.background import BackgroundScheduler
 
-app = FastAPI()
-
-# Import toàn bộ các Service, Helper & Models từ service.py
 
 # Khởi tạo Scheduler
 scheduler = BackgroundScheduler()
 scheduler.add_job(cron_refresh_zalo_job, 'interval', minutes=1)
 
+# ĐỊNH NGHĨA LIFESPAN TRƯỚC
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # --- Code chạy khi SERVER KHỞI ĐỘNG ---
@@ -37,6 +35,9 @@ async def lifespan(app: FastAPI):
     # --- Code chạy khi SERVER TẮT ---
     print("🛑 [SCHEDULER] Dừng BackgroundScheduler...", flush=True)
     scheduler.shutdown()
+
+# TRUYỀN LIFESPAN VÀO FASTAPI APP
+app = FastAPI(lifespan=lifespan)
 
 
 

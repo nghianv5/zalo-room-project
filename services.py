@@ -172,6 +172,7 @@ class ZaloToken(Base):
     refresh_token = Column(String, nullable=False)
     expires_at = Column(Float, nullable=False)  # Lưu dạng Timestamp (ví dụ: time.time() + 90000)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
 Base.metadata.create_all(bind=engine)
 
 # --- PYDANTIC SCHEMAS ---
