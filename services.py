@@ -26,7 +26,9 @@ import cloudinary.uploader
 import string
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
+import redis
 
+redis_client = redis.Redis()
 
 app = FastAPI()
 
@@ -39,7 +41,10 @@ if not os.path.exists("static"):
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # --- CẤU HÌNH MÔI TRƯỜNG & KHỞI TẠO SERVICES ---
+ZALO_OA_ID = os.environ.get("ZALO_OA_ID")
 ZALO_ACCESS_TOKEN = os.environ.get("ZALO_ACCESS_TOKEN")
+ZALO_SECRET_KEY = os.environ.get("ZALO_SECRET_KEY")
+ZALO_REFRESH_TOKEN = os.environ.get("ZALO_REFRESH_TOKEN")
 ZALO_TEMPLATE_ID = os.environ.get("YOUR_ZNS_TEMPLATE_ID")
 SQLALCHEMY_DATABASE_URL = os.environ.get("SQLALCHEMY_DATABASE_URL")
 MEDIA_DIR = "static/media"
@@ -153,7 +158,15 @@ class OrderRoom(Base):
     # 🆕 Thêm trường thời gian đến xem phòng
     viewing_time = Column(DateTime, nullable=True)
     created_at = Column(DateTime, default=datetime.utcnow)
-    
+
+class ZaloToken(Base):
+    __tablename__ = "zalo_tokens"
+
+    id = Column(Integer, primary_key=True, index=True)
+    access_token = Column(String, nullable=False)
+    refresh_token = Column(String, nullable=False)
+    expires_at = Column(Float, nullable=False)  # Lưu dạng Timestamp (ví dụ: time.time() + 90000)
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 Base.metadata.create_all(bind=engine)
 
 # --- PYDANTIC SCHEMAS ---
@@ -353,7 +366,7 @@ def add_pending_media(user_id: str, new_urls: list):
     }
 
 def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None) -> bool:
-    access_token = ZALO_ACCESS_TOKEN
+    access_token = get_zalo_access_token_from_db()
     if not access_token:
         print("❌ [ZALO ERROR]: Thiếu ZALO_ACCESS_TOKEN")
         return False
@@ -1590,3 +1603,85 @@ def search_rooms_with_filter(
     except Exception as e:
         print("❌ [SEARCH FILTER ERROR]:", e)
         return []
+        
+        
+def refresh_zalo_tokens(db_session):
+    # 1. Lấy Refresh Token hiện tại từ DB
+    tokens_meta = get_current_tokens_from_db(db_session)
+    current_refresh_token = tokens_meta.get("refresh_token")
+    
+    url = "https://oauth.zaloapp.com/v4/oa/access_token"
+    headers = {"secret_key": ZALO_SECRET_KEY, "Content-Type": "application/x-www-form-urlencoded"}
+    data = {
+        "refresh_token": current_refresh_token,
+        "app_id": ZALO_OA_ID,
+        "grant_type": "refresh_token"
+    }
+
+    response = requests.post(url, headers=headers, data=data).json()
+
+    if "access_token" in response:
+        new_access_token = response["access_token"]
+        # ⚠️ QUAN TRỌNG: Zalo trả về refresh_token MỚI, bắt buộc phải lưu lại
+        new_refresh_token = response.get("refresh_token", current_refresh_token)
+        expires_in = int(response.get("expires_in", 219600)) # Thường là 6 tiếng (21600s)
+
+        # 2. Cập nhật ngay lập tức cả Access Token & Refresh Token mới vào DB
+        save_tokens_to_db(
+            db_session, 
+            access_token=new_access_token, 
+            refresh_token=new_refresh_token,
+            expires_at=time.time() + expires_in
+        )
+        return new_access_token
+    else:
+        # Trường hợp Refresh Token đã chết hẳn -> Gửi cảnh báo
+        notify_admin_reauth("⚠️ Refresh Token Zalo đã hết hạn hẳn! Vui lòng đăng nhập cấp lại quyền.")
+        return None
+
+        
+def get_current_tokens_from_db(db: Session) -> dict:
+    """
+    Lấy thông tin Zalo Token hiện tại từ Database.
+    Nếu DB chưa có, fallback về biến môi trường .env.
+    """
+    token_record = db.query(ZaloToken).first()
+    
+    # 🟢 Sửa lỗi cú pháp: dùng `is None` thay vì `is none`
+    if not token_record or token_record.access_token is None:
+        return {
+            "access_token": ZALO_ACCESS_TOKEN,
+            "refresh_token": ZALO_REFRESH_TOKEN,
+            "expires_at": 0  # 0 để hệ thống hiểu token này đã hết hạn và kích hoạt refresh ngay
+        }
+    
+    return {
+        "access_token": token_record.access_token,
+        "refresh_token": token_record.refresh_token,
+        "expires_at": token_record.expires_at or 0
+    }
+
+
+def save_tokens_to_db(db: Session, access_token: str, refresh_token: str, expires_at: float) -> bool:
+    """
+    Cập nhật hoặc khởi tạo mới Access Token & Refresh Token vào Database.
+    """
+    try:
+        token_record = db.query(ZaloToken).first()
+        
+        # Nếu chưa có bản ghi nào thì tạo mới, có rồi thì cập nhật
+        if not token_record:
+            token_record = ZaloToken()
+            db.add(token_record)
+            
+        token_record.access_token = access_token
+        token_record.refresh_token = refresh_token
+        token_record.expires_at = expires_at
+        
+        db.commit()
+        db.refresh(token_record)
+        return True
+    except Exception as e:
+        db.rollback()
+        print(f"❌ [DB SAVE TOKEN ERROR]: {e}")
+        return False

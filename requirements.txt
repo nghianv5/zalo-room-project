@@ -15,3 +15,5 @@ sqlalchemy
 psycopg2-binary
 bcrypt
 phonenumbers
+redis
+APScheduler>=3.10.0

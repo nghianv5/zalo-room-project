@@ -14,11 +14,37 @@ from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from qdrant_client.http import models as qdrant_models
-
-
+from database import SessionLocal
+from services import *
 app = FastAPI()
 # Import toàn bộ các Service, Helper & Models từ service.py
-from services import *
+
+
+
+
+def cron_refresh_zalo_job():
+    print("🔄 [REFRESH TOKEN ZALO] Bắt đầu tự động làm mới Zalo Token...")
+    db = SessionLocal()
+    try:
+        refresh_zalo_tokens(db)
+    except Exception as e:
+        print(f"❌ [REFRESH TOKEN ZALO ERROR]: {e}")
+    finally:
+        db.close()
+
+# Khởi tạo Scheduler
+scheduler = BackgroundScheduler()
+
+@app.on_event("startup")
+def start_scheduler():
+    # Thêm job chạy mỗi 6 tiếng (hours=6)
+    scheduler.add_job(cron_refresh_zalo_job, 'interval', hours=6)
+    scheduler.start()
+    print("🚀 Background Scheduler gia hạn Zalo Token đã kích hoạt!")
+
+@app.on_event("shutdown")
+def stop_scheduler():
+    scheduler.shutdown()
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
