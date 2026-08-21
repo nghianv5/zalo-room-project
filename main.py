@@ -17,11 +17,14 @@ from qdrant_client.http import models as qdrant_models
 from services import *
 import sys
 from apscheduler.schedulers.background import BackgroundScheduler
-
+import logging
 
 # Khởi tạo Scheduler
 scheduler = BackgroundScheduler()
 scheduler.add_job(cron_refresh_zalo_job, 'interval', minutes=1)
+
+logging.basicConfig(level=logging.INFO)
+logging.getLogger('apscheduler').setLevel(logging.DEBUG)
 
 # ĐỊNH NGHĨA LIFESPAN TRƯỚC
 @asynccontextmanager
@@ -453,4 +456,4 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)[cite: 3]

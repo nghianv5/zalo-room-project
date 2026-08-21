@@ -245,14 +245,15 @@ class RoomCreateUpdateSchema(BaseModel):
 
 
 def cron_refresh_zalo_job():
-    print("🔄 [REFRESH TOKEN ZALO] Bắt đầu tự động...", flush=True)
-    db = SessionLocal()
+    print("🔄 [REFRESH TOKEN ZALO] Bắt đầu tự động...", flush=True) # Thêm flush=True[cite: 4]
+    db = SessionLocal()[cite: 4]
     try:
-        refresh_zalo_tokens(db)
+        refresh_zalo_tokens(db)[cite: 4]
+        print("✅ [REFRESH TOKEN ZALO] Thành công!", flush=True)
     except Exception as e:
-        print(f"❌ [REFRESH TOKEN ZALO ERROR]: {e}")
+        print(f"❌ [REFRESH TOKEN ZALO ERROR]: {e}", flush=True)[cite: 4]
     finally:
-        db.close()
+        db.close()[cite: 4]
     
 # --- DATABASE DEPENDENCY & CURRENT USER HELPER ---
 def get_db():
