@@ -1621,35 +1621,36 @@ def search_rooms_with_filter(
         
 
 
+
 def refresh_zalo_tokens(db):
-    # Hàm này trả về 1 Dictionary
     current_token_entry = get_current_tokens_from_db(db)
-    
-    # 1. Truy cập bằng cú pháp Dictionary ['...']
     current_refresh_token = current_token_entry["refresh_token"]
     
+    app_id_clean = str(ZALO_OA_ID).strip() if ZALO_OA_ID else ""
+    secret_key_clean = str(ZALO_SECRET_KEY).strip() if ZALO_SECRET_KEY else ""
+
+    # Kiểm tra an toàn trước khi gọi API
+    if not app_id_clean or app_id_clean.lower() == "none":
+        raise Exception("❌ Thiếu ZALO_OA_ID trong biến môi trường!")
+
     oauth_url = "https://oauth.zaloapp.com/v4/oa/access_token"
     headers = {
-        "secret_key": str(ZALO_SECRET_KEY).strip(),
+        "secret_key": secret_key_clean,
         "Content-Type": "application/x-www-form-urlencoded"
     }
     data = {
         "refresh_token": current_refresh_token,
-        "app_id": str(ZALO_OA_ID).strip(),
+        "app_id": app_id_clean, # Bắt buộc phải là App ID hợp lệ
         "grant_type": "refresh_token"
     }
     
     response = requests.post(oauth_url, headers=headers, data=data)
     res_json = response.json()
     
-    # 2. Xử lý kết quả trả về từ Zalo OAuth
     if "access_token" in res_json:
         new_access_token = res_json["access_token"]
         new_refresh_token = res_json["refresh_token"]
-        
-        # Gọi hàm update token vào DB của bạn (truyền dict hoặc gọi hàm update_db)
         update_tokens_in_db(db, new_access_token, new_refresh_token)
-        
         print("🎉 [ZALO OAUTH] Tự động Refresh Token và lưu DB thành công!", flush=True)
     else:
         print(f"❌ [ZALO OAUTH FAIL]: {res_json}", flush=True)
