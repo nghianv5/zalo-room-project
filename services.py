@@ -1004,19 +1004,16 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
             ====================================================
             QUY TẮC XỬ LÝ VÀ CHUẨN HÓA ĐỊA CHỈ (ĐẶC BIỆT QUAN TRỌNG CHO ADD_ROOM):
             ====================================================
-            1. CHUẨN HÓA & TỰ ĐỘNG SỬA LỖI ĐỊA CHỈ (AUTO-CORRECTION):
-               - Làm sạch chuỗi: Bỏ các từ thừa như "số", "nhà ở", "ngõ", "cho thuê phòng ở..." trong `address`.
-               - Tự suy luận Tỉnh/Thành phố (`city`): Nếu có Quận/Đường quen thuộc mà thiếu Thành phố (VD: "Cầu Giấy" -> "Thành phố Hà Nội", "Quận 1" -> "TP. Hồ Chí Minh").
-               - TỰ ĐỘNG SỬA TÊN PHƯỜNG / QUẬN NẾU LỆCH THỰC TẾ:
-                 * Người dùng có thể ghi sai Tên Phường do ranh giới phức tạp (Ví dụ: "155 Nguyễn Khang, Phường Trung Hòa" hoặc "Phường Yên Hòa").
-                 * AI hãy ưu tiên trích xuất đúng `street` ("155 Nguyễn Khang") và `district` ("Quận Cầu Giấy"), sau đó tự động suy luận `ward` chuẩn xác nhất theo bản đồ thực tế. 
-                 * Nếu `ward` của người dùng nhập không chắc chắn, hãy giữ nguyên `street`  + `ward` + `district` + `city` để phục vụ Geocoding chính xác, tránh làm trượt API bản đồ.
-            2. KIỂM TRA ĐIỀU KIỆN ĐỊA CHỈ (`is_valid_address`):
-               - Địa chỉ VALID (true): nếu từ địa chỉ nhập có thể trích xuất đủ `street` + `ward` + `city`. Còn `district` là thông tin quận hiện đơn vị hành chính này là cũ nên có thể có hoặc không đều được
-                 -> Đặt `is_valid_address` = true.
-               - Địa chỉ INVALID (false): nếu từ địa chỉ nhập có thể trích xuất thiếu `street` hoặc `ward` hoặc `city`
-                 -> Đặt `is_valid_address` = false.               
-                 -> Trả về `missing_address_msg` yêu cầu nhập chi tiết số nhà/đường, phường, quận.
+            1. Bỏ qua các từ dẫn nhập không liên quan như: "tôi cần cho thuê", "cho thuê phòng ở", "có phòng ở", "số".
+            2. Bóc tách tối đa các cấp địa chỉ từ câu nói người dùng:
+               - `street`: Tên đường / Số nhà / Ngõ / Tòa nhà (Ví dụ: "155 Nguyễn Khang" hoặc "15 ngõ 100 Nguyễn Phong Sắc").
+               - `ward`: Phường hoặc Xã (Ví dụ: "Phường Yên Hòa" hoặc "Dịch Vọng").
+               - `district`: Quận hoặc Huyện (Ví dụ: "Quận Cầu Giấy").
+               - `city`: Tỉnh hoặc Thành phố (Tự suy luận nếu người dùng ghi Quận/Đường quen thuộc. VD: "Cầu Giấy" -> "Hà Nội").
+               - `address`: Chuỗi địa chỉ đầy đủ ghép lại từ các thành phần trên.
+            3. ĐÁNH GIÁ `is_valid_address`:
+               - Set `true`: Nếu trích xuất được ít nhất (`street` + `district`) HOẶC (`street` + `ward`).
+               - Set `false`: Nếu địa chỉ quá chung chung (chỉ có "Hà Nội", "Cầu Giấy", "Gần Bách Khoa") hoặc không tìm thấy địa chỉ.
         
         TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
         {{
