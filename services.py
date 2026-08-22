@@ -112,26 +112,6 @@ try:
         field_name="room_code",
         field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
     )
-    qdrant_client.create_payload_index(
-        collection_name=COLLECTION_NAME,
-        field_name="street",
-        field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
-    )
-    qdrant_client.create_payload_index(
-        collection_name=COLLECTION_NAME,
-        field_name="ward",
-        field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
-    )
-    qdrant_client.create_payload_index(
-        collection_name=COLLECTION_NAME,
-        field_name="district",
-        field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
-    )
-    qdrant_client.create_payload_index(
-        collection_name=COLLECTION_NAME,
-        field_name="city",
-        field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
-    )
 except Exception:
     pass
 
@@ -201,12 +181,6 @@ class RequestOTPModel(BaseModel):
 class RoomCreateUpdateSchema(BaseModel):
     room_code: Optional[str] = Field(default=None, description="Mã phòng 6 ký tự")
     address: str = Field(..., min_length=1, description="Địa chỉ phòng không được để trống")
-    # 🆕 Bổ sung các trường địa chỉ phân tách
-    street: Optional[str] = "Chưa rõ"
-    ward: Optional[str] = "Chưa rõ"
-    district: Optional[str] = "Chưa rõ"
-    city: Optional[str] = "Chưa rõ"
-    
     price: str = Field(..., min_length=1, description="Giá phòng không được để trống")
     room_name: Optional[str] = "Phòng trọ"
     floor: Optional[str] = "Chưa rõ"                  
@@ -564,12 +538,6 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
 
         payload = {
             "address": address,
-            # 🆕 Lưu rõ ràng 4 cấp địa chỉ vào Payload
-            "street": str(data.get("street", "Chưa rõ")).strip(),
-            "ward": str(data.get("ward", "Chưa rõ")).strip(),
-            "district": str(data.get("district", "Chưa rõ")).strip(),
-            "city": str(data.get("city", "Chưa rõ")).strip(),
-            
             "room_name": room_name,
             "room_code": room_code,
             "price": parse_price_to_number(data.get("price", "")),
@@ -783,9 +751,8 @@ def ai_validate_and_extract_room_batch(rows_list: List[dict]) -> List[Optional[d
         - Nếu không có giá hoặc bị trống, để mặc định là "".
 
         YÊU CẦU XỬ LÝ CÁC TRƯỜNG KHÁC:
-        1. Trích xuất địa chỉ phân tách: `address` (đầy đủ), `street`, `ward`, `district`, `city`.
-        2. Đưa các tiện ích (điều hòa, nóng lạnh, vệ sinh...) về "Có", "Không".
-        3. Định dạng `status`: "TRỐNG" hoặc "ĐÃ CHO THUÊ".
+        1. Đưa các tiện ích (điều hòa, nóng lạnh, vệ sinh...) về "Có", "Không".
+        2. Định dạng `status`: "TRỐNG" hoặc "ĐÃ CHO THUÊ".
 
         TRẢ VỀ DUY NHẤT 1 MẢNG JSON CÓ ĐÚNG {len(clean_rows)} PHẦN TỬ THEO THỨ TỰ:
         [
@@ -794,10 +761,6 @@ def ai_validate_and_extract_room_batch(rows_list: List[dict]) -> List[Optional[d
             "action": "ADD_ROOM",
             "extracted_data": {{
               "address": "",
-              "street": "",
-              "ward": "",
-              "district": "",
-              "city": "",
               "room_name": "",
               "price": "",
               "floor": "",
@@ -943,27 +906,23 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         Phân tích tin nhắn người dùng và trích xuất đúng 13 trường thông tin:
 
         1. `address`: Địa chỉ đầy đủ gộp lại.
-        2. `street`: Tên đường / Tòa nhà / Số nhà (VD: 123 Nguyễn Thị Minh Khai).
-        3. `ward`: Phường hoặc Xã (VD: Phường Bến Nghé).
-        4. `district`: Quận hoặc Huyện (VD: Quận 1).
-        5. `city`: Tỉnh hoặc Thành phố (VD: TP. Hồ Chí Minh).
-        6. `room_name`: Tên hoặc số phòng (VD: Phòng 301, Phòng tầng 2...).
-        7. `price`: Giá thuê.
-        8. `floor`: Tầng bao nhiêu.
-        9. `is_private_bathroom`: Vệ sinh riêng hay khép kín hay không.
-        10. `has_ac`:  Điều hoà có hay không?
-        11. `has_heater`: có bình nóng lạnh không?
-        12. `has_washer`: Có máy giặt không?
-        13. `allow_pets`: Có cho nuôi pet không?
-        14. `has_balcony`: Có ban công không?
-        15. `has_window`: Có cửa sổ không?
-        16. `has_fingerprint_lock`: Ra vào bằng khoá vân tay có hay không?
-        17. `parking_info`: có chỗ để xe không?
-        18. `max_occupants`: số ng ở tối đã
-        19. `other_amenities`: Có thêm tiện ích gì khác
-        120. `service_fees`: Phí dịch vụ (điện, nước, wifi)...
-        21. `status`: Trạng thái phòng ("TRỐNG" hoặc "ĐÃ CHO THUÊ").
-        22. `move_in_date`: Ngày có thể chuyển vào phòng để ở
+        2. `room_name`: Tên hoặc số phòng (VD: Phòng 301, Phòng tầng 2...).
+        3. `price`: Giá thuê.
+        4. `floor`: Tầng bao nhiêu.
+        5. `is_private_bathroom`: Vệ sinh riêng hay khép kín hay không.
+        6. `has_ac`:  Điều hoà có hay không?
+        7. `has_heater`: có bình nóng lạnh không?
+        8. `has_washer`: Có máy giặt không?
+        9. `allow_pets`: Có cho nuôi pet không?
+        10. `has_balcony`: Có ban công không?
+        11. `has_window`: Có cửa sổ không?
+        12. `has_fingerprint_lock`: Ra vào bằng khoá vân tay có hay không?
+        13. `parking_info`: có chỗ để xe không?
+        14. `max_occupants`: số ng ở tối đã
+        15. `other_amenities`: Có thêm tiện ích gì khác
+        16. `service_fees`: Phí dịch vụ (điện, nước, wifi)...
+        17. `status`: Trạng thái phòng ("TRỐNG" hoặc "ĐÃ CHO THUÊ").
+        18. `move_in_date`: Ngày có thể chuyển vào phòng để ở
 `       
         DỮ LIỆU ĐẦU VÀO:
         - Tin nhắn: "{message_text}"
@@ -1001,25 +960,12 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                 + Nếu đường link media media_urls tồn tại thì phải hiển thị
 
         
-            ====================================================
-            QUY TẮC XỬ LÝ VÀ CHUẨN HÓA ĐỊA CHỈ (ĐẶC BIỆT QUAN TRỌNG CHO ADD_ROOM):
-            ====================================================
-            1. Bỏ qua các từ dẫn nhập không liên quan như: "tôi cần cho thuê", "cho thuê phòng ở", "có phòng ở", "số".
-            2. Bóc tách tối đa các cấp địa chỉ từ câu nói người dùng:
-               - `street`: Tên đường / Số nhà / Ngõ / Tòa nhà (Ví dụ: "155 Nguyễn Khang" hoặc "15 ngõ 100 Nguyễn Phong Sắc").
-               - `ward`: Phường hoặc Xã (Ví dụ: "Phường Yên Hòa" hoặc "Dịch Vọng").
-               - `district`: Quận hoặc Huyện (Ví dụ: "Quận Cầu Giấy").
-               - `city`: Tỉnh hoặc Thành phố (Tự suy luận nếu người dùng ghi Quận/Đường quen thuộc. VD: "Cầu Giấy" -> "Hà Nội").
-               - `address`: Chuỗi địa chỉ đầy đủ ghép lại từ các thành phần trên.
-            3. ĐÁNH GIÁ `is_valid_address`:
-               - Set `true`: Nếu trích xuất được ít nhất (`street` + `district`) HOẶC (`street` + `ward`).
-               - Set `false`: Nếu địa chỉ quá chung chung (chỉ có "Hà Nội", "Cầu Giấy", "Gần Bách Khoa") hoặc không tìm thấy địa chỉ.
+          
         
         TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
         {{
           "action": "ADD_ROOM | SEARCH_ROOM | UPDATE_STATUS",
           "is_valid_search": true/false,
-          "missing_info_message": "Văn bản hướng dẫn khách nhập thêm thông tin còn thiếu (Nếu is_valid_search = false)",
           "extracted_search": {{
             "location_search": "Tên đường hoặc phường/xã trích xuất được (hoặc null)",
             "min_price": 0,
@@ -1027,10 +973,6 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
           }},
           "extracted_data": {{
             "address": "Địa chỉ phòng trọ...",
-            "street": "Tên đường",
-            "ward": "Tên phường/xã/thị trấn",
-            "district": "Tên Quận/Huyện",
-            "city": "Tên Tỉnh/Thành Phố",
             "room_name": "Tên phòng trọ...",
             "price": "Giá thuê (ví dụ: 3.5 triệu)...",
             "floor": "Tầng số...",
@@ -1103,56 +1045,38 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                 urls_to_send = []
 
         elif action == "ADD_ROOM":
-            is_valid_address = result_data.get("is_valid_address", False)
-            
-            print(f"address {result_data.get("address")}")
-            print(f"street {result_data.get("street")}")
-            print(f"ward {result_data.get("ward")}")
-            print(f"district {result_data.get("district")}")
-            print(f"district {result_data.get("city")}")
-
-            # 🚨 TRƯỜNG HỢP 1: ĐỊA CHỈ CHƯA RÕ RÀNG -> YÊU CẦU BỔ SUNG
-            if not is_valid_address:
-                ai_reply = result_data.get(
-                    "missing_address_msg", 
-                    "Dạ để tạo bài đăng phòng, bạn vui lòng cho em xin địa chỉ rõ ràng hơn nhé!\n"
-                    "👉 Ví dụ: Số 15 ngõ 100 Nguyễn Phong Sắc, Phường Dịch Vọng, Quận Cầu Giấy"
-                )
-                urls_to_send = []
-            
-            else:
-                # ✅ TRƯỜNG HỢP 2: ĐỊA CHỈ ĐÃ ĐỦ RÕ RÀNG -> TIẾN HÀNH LƯU DATABASE
-                address = str(extracted.get("address", "")).strip()
-                if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
-                    #nếu người dùng chưa đăng ký phòng trên zalo hay web thì sẽ tạo mới data cho user
+            # ✅ TRƯỜNG HỢP 2: ĐỊA CHỈ ĐÃ ĐỦ RÕ RÀNG -> TIẾN HÀNH LƯU DATABASE
+            address = str(extracted.get("address", "")).strip()
+            if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
+                #nếu người dùng chưa đăng ký phòng trên zalo hay web thì sẽ tạo mới data cho user
           
-                    if not phone:
-                        # 🚨 BẮT BUỘC: Nếu chưa có SĐT -> Chặn lại và yêu cầu chia sẻ SĐT
-                        request_phone_message = {
-                                "recipient": {"user_id": zalo_user_id},
-                                "message": {
-                                    "text": "⚠️ Để đăng bài cho thuê phòng, bạn vui lòng bấm nút bên dưới để chia sẻ Số điện thoại liên hệ nhé!",
-                                    "attachment": {
-                                        "type": "template",
-                                        "payload": {
-                                            "template_type": "request_user_info",
-                                            "elements": [{
-                                                "title": "Xác thực Số điện thoại",
-                                                "subtitle": "Yêu cầu cung cấp SĐT chính chủ trên Zalo để tạo tài khoản đăng phòng.",
-                                                "image_url": "https://your-domain.com/static/icon.png"
-                                            }]
-                                        }
+                if not phone:
+                    # 🚨 BẮT BUỘC: Nếu chưa có SĐT -> Chặn lại và yêu cầu chia sẻ SĐT
+                    request_phone_message = {
+                            "recipient": {"user_id": zalo_user_id},
+                            "message": {
+                                "text": "⚠️ Để đăng bài cho thuê phòng, bạn vui lòng bấm nút bên dưới để chia sẻ Số điện thoại liên hệ nhé!",
+                                "attachment": {
+                                    "type": "template",
+                                    "payload": {
+                                        "template_type": "request_user_info",
+                                        "elements": [{
+                                            "title": "Xác thực Số điện thoại",
+                                            "subtitle": "Yêu cầu cung cấp SĐT chính chủ trên Zalo để tạo tài khoản đăng phòng.",
+                                            "image_url": "https://your-domain.com/static/icon.png"
+                                        }]
                                     }
                                 }
                             }
-                        # Gọi Zalo Open API gửi yêu cầu xin SĐT
-                        send_zalo_request(request_phone_message)
-                        return {"status": "phone_required"}
+                        }
+                    # Gọi Zalo Open API gửi yêu cầu xin SĐT
+                    send_zalo_request(request_phone_message)
+                    return {"status": "phone_required"}
 
-                    success = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None)
-                    if success:
-                        get_get_and_clear_pending_media(user_id)
-                   
+                success = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None)
+                if success:
+                    get_get_and_clear_pending_media(user_id)
+               
         elif action == "UPDATE_STATUS" and existing_point_id:
             new_status = extracted.get("status") or "ĐÃ CHO THUÊ"
             update_room_status_in_db(point_id=existing_point_id, new_status=new_status, zalo_user_id=user_id)
