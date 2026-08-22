@@ -170,8 +170,6 @@ class ZaloToken(Base):
     id = Column(Integer, primary_key=True, index=True)
     access_token = Column(String, nullable=False)
     refresh_token = Column(String, nullable=False)
-    expires_at = Column(Float, nullable=False)  # Lưu dạng Timestamp (ví dụ: time.time() + 90000)
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
 Base.metadata.create_all(bind=engine)
 
@@ -1668,13 +1666,11 @@ def get_current_tokens_from_db(db: Session) -> dict:
         return {
             "access_token": ZALO_ACCESS_TOKEN,
             "refresh_token": ZALO_REFRESH_TOKEN,
-            "expires_at": 0  # 0 để hệ thống hiểu token này đã hết hạn và kích hoạt refresh ngay
         }
     
     return {
         "access_token": token_record.access_token,
         "refresh_token": token_record.refresh_token,
-        "expires_at": token_record.expires_at or 0
     }
 
 
