@@ -660,9 +660,11 @@ def search_rooms_by_vector(query_text: str, top_k: int = 20) -> List[dict]:
 
                 # QUAN TRỌNG:
                 # Qdrant tự sắp xếp trên toàn bộ database
-                order_by=qdrant_models.OrderBy(
-                    key="price",
-                    direction=qdrant_models.Direction.ASC
+                query=qdrant_models.OrderByQuery(
+                    order_by=qdrant_models.OrderBy(
+                        key="price",
+                        direction=qdrant_models.Direction.ASC
+                    )
                 ),
 
                 # Chỉ lấy đúng số lượng cần

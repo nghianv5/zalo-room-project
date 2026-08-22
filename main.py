@@ -25,7 +25,7 @@ scheduler.add_job(cron_refresh_zalo_job, 'interval', hours=6) # 6 giờ chạy 1
 
 logging.basicConfig(level=logging.INFO)
 logging.getLogger('apscheduler').setLevel(logging.DEBUG)
-print(qdrant_client.__version__)
+
 # ĐỊNH NGHĨA LIFESPAN TRƯỚC
 @asynccontextmanager
 async def lifespan(app: FastAPI):
