@@ -1108,11 +1108,11 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         elif action == "ADD_ROOM":
             is_valid_address = result_data.get("is_valid_address", False)
             
-            print(f"address {address}")
-            print(f"street {street}")
-            print(f"ward {ward}")
-            print(f"district {district}")
-            print(f"district {city}")
+            print(f"address {result_data.get("address")}")
+            print(f"street {result_data.get("street")}")
+            print(f"ward {result_data.get("ward")}")
+            print(f"district {result_data.get("district")}")
+            print(f"district {result_data.get("city")}")
 
             # 🚨 TRƯỜNG HỢP 1: ĐỊA CHỈ CHƯA RÕ RÀNG -> YÊU CẦU BỔ SUNG
             if not is_valid_address:
