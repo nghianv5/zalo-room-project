@@ -1619,41 +1619,41 @@ def search_rooms_with_filter(
         print("❌ [SEARCH FILTER ERROR]:", e)
         return []
         
+
+
 def refresh_zalo_tokens(db):
+    # Hàm này trả về 1 Dictionary
     current_token_entry = get_current_tokens_from_db(db)
     
+    # 1. Truy cập bằng cú pháp Dictionary ['...']
+    current_refresh_token = current_token_entry["refresh_token"]
+    
     oauth_url = "https://oauth.zaloapp.com/v4/oa/access_token"
-    
-    # ⚠️ Ép kiểu app_id và secret_key thành chuỗi str
-    app_id = str(ZALO_OA_ID).strip()
-    secret_key = str(ZALO_SECRET_KEY).strip()
-    
     headers = {
-        "secret_key": secret_key,
+        "secret_key": str(ZALO_SECRET_KEY).strip(),
         "Content-Type": "application/x-www-form-urlencoded"
     }
     data = {
-        "refresh_token": current_token_entry["refresh_token"],
-        "app_id": app_id,
+        "refresh_token": current_refresh_token,
+        "app_id": str(ZALO_OA_ID).strip(),
         "grant_type": "refresh_token"
     }
     
     response = requests.post(oauth_url, headers=headers, data=data)
     res_json = response.json()
     
-    # 🛑 KIỂM TRA KẾT QUẢ: Chỉ thành công khi có 'access_token'
+    # 2. Xử lý kết quả trả về từ Zalo OAuth
     if "access_token" in res_json:
-        current_token_entry.access_token = res_json["access_token"]
-        current_token_entry.refresh_token = res_json["refresh_token"]
-        db.commit()
-        db.refresh(current_token_entry)
-        print("🎉 [ZALO OAUTH] Refresh token thành công và đã lưu DB!", flush=True)
+        new_access_token = res_json["access_token"]
+        new_refresh_token = res_json["refresh_token"]
+        
+        # Gọi hàm update token vào DB của bạn (truyền dict hoặc gọi hàm update_db)
+        update_tokens_in_db(db, new_access_token, new_refresh_token)
+        
+        print("🎉 [ZALO OAUTH] Tự động Refresh Token và lưu DB thành công!", flush=True)
     else:
-        # Nếu lỗi (bao gồm -14002), in log chi tiết và NÉM LỖI ĐỂ DỪNG HÀM
         print(f"❌ [ZALO OAUTH FAIL]: {res_json}", flush=True)
-        notify_admin_reauth("⚠️ Refresh Token Zalo đã hết hạn hẳn! Vui lòng đăng nhập cấp lại quyền.")
-        raise Exception(f"Zalo OAuth Error {res_json.get('error')}: {res_json.get('error_description')}")
-
+        raise Exception(f"Zalo OAuth Error: {res_json.get('error_description', res_json)}")
 
 def get_current_tokens_from_db(db: Session) -> dict:
     """
@@ -1677,29 +1677,36 @@ def get_current_tokens_from_db(db: Session) -> dict:
     }
 
 
-def save_tokens_to_db(db: Session, access_token: str, refresh_token: str, expires_at: float) -> bool:
+
+   
+def update_tokens_in_db(db: Session, new_access_token: str, new_refresh_token: str):
     """
-    Cập nhật hoặc khởi tạo mới Access Token & Refresh Token vào Database.
+    Cập nhật Access Token và Refresh Token mới vào Database.
     """
     try:
-        token_record = db.query(ZaloToken).first()
+        # 1. Lấy bản ghi token đầu tiên trong DB
+        token_entry = db.query(ZaloToken).first()
         
-        # Nếu chưa có bản ghi nào thì tạo mới, có rồi thì cập nhật
-        if not token_record:
-            token_record = ZaloToken()
-            db.add(token_record)
+        if token_entry:
+            # Nếu đã có dữ liệu -> Cập nhật bản ghi hiện tại
+            token_entry.access_token = new_access_token
+            token_entry.refresh_token = new_refresh_token
+        else:
+            # Nếu chưa có bản ghi nào -> Tạo mới bản ghi đầu tiên
+            token_entry = ZaloToken(
+                access_token=new_access_token,
+                refresh_token=new_refresh_token
+            )
+            db.add(token_entry)
             
-        token_record.access_token = access_token
-        token_record.refresh_token = refresh_token
-        token_record.expires_at = expires_at
-        
+        # 2. Lưu thay đổi vào Database
         db.commit()
-        db.refresh(token_record)
-        return True
+        db.refresh(token_entry)
+        print("💾 [DATABASE] Đã lưu thành công cặp Token mới vào DB!", flush=True)
+        return token_entry
+
     except Exception as e:
+        # Nếu có lỗi DB -> Rollback để tránh nghẽn/khóa connection pool
         db.rollback()
-        print(f"❌ [DB SAVE TOKEN ERROR]: {e}")
-        return False
-        
-def notify_admin_reauth(message: str = ""):
-    send_zalo_message(os.environ.get("ZALO_ADMIN_ID"), message)
+        print(f"❌ [DATABASE ERROR]: Không thể lưu token vào DB: {e}", flush=True)
+        raise e
