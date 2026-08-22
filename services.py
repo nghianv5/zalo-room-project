@@ -710,13 +710,6 @@ def search_rooms_by_vector(query_text: str, top_k: int = 20) -> List[dict]:
 
             query_filter=status_filter,
             
-            query=qdrant_models.OrderByQuery(
-                order_by=qdrant_models.OrderBy(
-                    key="price",
-                    direction=qdrant_models.Direction.ASC
-                )
-            ),
-                
             # Lấy dư một chút để có thêm lựa chọn
             limit=min(top_k * 3, 300),
 
