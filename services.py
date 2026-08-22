@@ -1004,21 +1004,19 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
             ====================================================
             QUY TẮC XỬ LÝ VÀ CHUẨN HÓA ĐỊA CHỈ (ĐẶC BIỆT QUAN TRỌNG CHO ADD_ROOM):
             ====================================================
-            1. KIỂM TRA ĐIỀU KIỆN ĐỊA CHỈ (`is_valid_address`):
-               - Địa chỉ VALID (true): Phải có ít nhất Tên Đường/Số nhà + Tên Phường (hoặc Tên Quận/Huyện).
-                 -> Đặt `is_valid_address` = true.
-               - Địa chỉ INVALID (false): Chỉ ghi chung chung như "Hà Nội", "Cầu Giấy", "Gần Bách Khoa", "Chưa rõ".
-                 -> Đặt `is_valid_address` = false.               
-                 -> Trả về `missing_address_msg` yêu cầu nhập chi tiết số nhà/đường, phường, quận.
-
-            2. CHUẨN HÓA & TỰ ĐỘNG SỬA LỖI ĐỊA CHỈ (AUTO-CORRECTION):
+            1. CHUẨN HÓA & TỰ ĐỘNG SỬA LỖI ĐỊA CHỈ (AUTO-CORRECTION):
                - Làm sạch chuỗi: Bỏ các từ thừa như "số", "nhà ở", "ngõ", "cho thuê phòng ở..." trong `address`.
                - Tự suy luận Tỉnh/Thành phố (`city`): Nếu có Quận/Đường quen thuộc mà thiếu Thành phố (VD: "Cầu Giấy" -> "Thành phố Hà Nội", "Quận 1" -> "TP. Hồ Chí Minh").
                - TỰ ĐỘNG SỬA TÊN PHƯỜNG / QUẬN NẾU LỆCH THỰC TẾ:
                  * Người dùng có thể ghi sai Tên Phường do ranh giới phức tạp (Ví dụ: "155 Nguyễn Khang, Phường Trung Hòa" hoặc "Phường Yên Hòa").
                  * AI hãy ưu tiên trích xuất đúng `street` ("155 Nguyễn Khang") và `district` ("Quận Cầu Giấy"), sau đó tự động suy luận `ward` chuẩn xác nhất theo bản đồ thực tế. 
-                 * Nếu `ward` của người dùng nhập không chắc chắn, hãy giữ nguyên `street` + `district` + `city` để phục vụ Geocoding chính xác, tránh làm trượt API bản đồ.
-                 
+                 * Nếu `ward` của người dùng nhập không chắc chắn, hãy giữ nguyên `street`  + `ward` + `district` + `city` để phục vụ Geocoding chính xác, tránh làm trượt API bản đồ.
+            2. KIỂM TRA ĐIỀU KIỆN ĐỊA CHỈ (`is_valid_address`):
+               - Địa chỉ VALID (true): nếu từ địa chỉ nhập có thể trích xuất đủ `street` + `ward` + `district` + `city`
+                 -> Đặt `is_valid_address` = true.
+               - Địa chỉ INVALID (false): nếu từ địa chỉ nhập có thể trích xuất thiếu `street` hoặc `ward` hoặc `district` hoặc `city`
+                 -> Đặt `is_valid_address` = false.               
+                 -> Trả về `missing_address_msg` yêu cầu nhập chi tiết số nhà/đường, phường, quận.
         
         TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
         {{
@@ -1032,7 +1030,6 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
           }},
           "extracted_data": {{
             "address": "Địa chỉ phòng trọ...",
-            "address": "123 Nguyễn Thị Minh Khai, Phường Bến Nghé, Quận 1, TP. Hồ Chí Minh",
             "street": "Tên đường",
             "ward": "Tên phường/xã/thị trấn",
             "district": "Tên Quận/Huyện",
