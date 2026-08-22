@@ -21,7 +21,7 @@ import logging
 
 # Khởi tạo Scheduler
 scheduler = BackgroundScheduler()
-scheduler.add_job(cron_refresh_zalo_job, 'interval', minutes=1) # 1 phút chạy 1 lần
+scheduler.add_job(cron_refresh_zalo_job, 'interval', hours=6) # 6 giờ chạy 1 lần
 
 logging.basicConfig(level=logging.INFO)
 logging.getLogger('apscheduler').setLevel(logging.DEBUG)
