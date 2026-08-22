@@ -147,7 +147,6 @@ class UserWeb(Base):
     expired_at = Column(DateTime, nullable=True)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
-
 # --- MODEL ORDER_ROOM TRONG SQLALCHEMY ---
 class OrderRoom(Base):
     __tablename__ = "order_room"
