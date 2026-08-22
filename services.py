@@ -606,9 +606,24 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         return False
 
 def search_rooms_by_vector(query_text: str, top_k: int = 20) -> List[dict]:
+    """
+    Tìm phòng trống.
+
+    QUAN TRỌNG:
+    - Với truy vấn chung / tìm phòng rẻ:
+      Qdrant ORDER BY price ASC trên toàn bộ collection.
+    - Không fallback sang scroll 200 record vì cách đó
+      KHÔNG đảm bảo tìm được phòng rẻ nhất toàn DB.
+    - Với truy vấn có nội dung cụ thể:
+      dùng vector search.
+    """
+
     clean_query = query_text.strip().lower() if query_text else ""
-    
-    # 1. Bộ lọc bắt buộc: Chỉ lấy phòng còn TRỐNG
+
+    # Giới hạn top_k để tránh request quá lớn
+    top_k = max(1, min(int(top_k), 100))
+
+    # Chỉ tìm phòng còn trống
     status_filter = qdrant_models.Filter(
         must=[
             qdrant_models.FieldCondition(
@@ -618,75 +633,108 @@ def search_rooms_by_vector(query_text: str, top_k: int = 20) -> List[dict]:
         ]
     )
 
-    # Kiểm tra xem người dùng có phải đang tìm phòng rẻ/chung chung không
-    is_general_cheap_search = any(kw in clean_query for kw in [
-        "giá rẻ", "phòng rẻ", "rẻ nhất", "danh sách phòng", "phòng trống", "tìm phòng"
-    ]) and len(clean_query.split()) <= 5
+    # Các câu hỏi mang tính tìm phòng chung / tìm phòng rẻ
+    is_general_cheap_search = any(
+        kw in clean_query
+        for kw in [
+            "giá rẻ",
+            "phòng rẻ",
+            "rẻ nhất",
+            "danh sách phòng",
+            "phòng trống",
+            "tìm phòng"
+        ]
+    ) and len(clean_query.split()) <= 5
 
-    # =========================================================================
-    # THÚ VỊ 1: TÌM RẺ NHẤT TOÀN DB (Không dùng Vector / Khi câu tìm quá chung)
-    # =========================================================================
+    # ============================================================
+    # 1. TÌM PHÒNG RẺ NHẤT TOÀN DATABASE
+    # ============================================================
     if not clean_query or is_general_cheap_search:
-        try:
-            # Thử dùng Payload Sorting trực tiếp của Qdrant (Cực nhanh & chuẩn)
-            try:
-                search_result = qdrant_client.query_points(
-                    collection_name=COLLECTION_NAME,
-                    query_filter=status_filter,
-                    order_by=qdrant_models.OrderBy(
-                        key="price",
-                        direction=qdrant_models.Direction.ASC  # Tăng dần từ thấp đến cao
-                    ),
-                    limit=top_k,
-                    with_payload=True
-                )
-                results = [hit.payload | {"id": hit.id} for hit in search_result.points if hit.payload]
-                if results:
-                    return results
-            except Exception:
-                pass  # Fallback nếu DB chưa đánh Index cho field price
 
-            # Fallback: Scroll lấy lượng lớn phòng trống để Python tự sắp xếp
-            records, _ = qdrant_client.scroll(
+        try:
+            search_result = qdrant_client.query_points(
                 collection_name=COLLECTION_NAME,
-                scroll_filter=status_filter,
-                limit=200,  # Quét rộng để lọc giá chuẩn
+
+                # Chỉ lấy phòng TRỐNG
+                query_filter=status_filter,
+
+                # QUAN TRỌNG:
+                # Qdrant tự sắp xếp trên toàn bộ database
+                order_by=qdrant_models.OrderBy(
+                    key="price",
+                    direction=qdrant_models.Direction.ASC
+                ),
+
+                # Chỉ lấy đúng số lượng cần
+                limit=top_k,
+
                 with_payload=True
             )
-            results = [rec.payload | {"id": rec.id} for rec in records if rec.payload]
-            
-            # Sắp xếp chính xác từ THẤP ĐẾN CAO
-            return sorted(results, key=parse_price_safe)[:top_k]
+
+            results = [
+                hit.payload | {"id": hit.id}
+                for hit in search_result.points
+                if hit.payload
+            ]
+
+            return results
 
         except Exception as e:
-            print("❌ [CHEAPEST SEARCH ERROR]:", e)
+            # KHÔNG fallback về scroll(200)
+            # vì sẽ có nguy cơ trả kết quả sai.
+            print(
+                "❌ [CHEAPEST SEARCH ERROR] "
+                "Qdrant không thể ORDER BY price:",
+                repr(e)
+            )
+
             return []
 
-    # =========================================================================
-    # THỨ VỊ 2: TÌM THEO VECTOR NGỮ NGHĨA (Có yêu cầu địa chỉ/tiện ích)
-    # =========================================================================
+    # ============================================================
+    # 2. TÌM THEO NGỮ NGHĨA / VECTOR
+    # ============================================================
+
     query_vector = get_text_embedding(query_text)
+
     if not query_vector:
-        return search_rooms_by_vector("", top_k=top_k)
+        print("⚠️ Không tạo được embedding cho query.")
+        return []
 
     try:
-        # Lấy Top phòng tương đồng nhất
         search_result = qdrant_client.query_points(
             collection_name=COLLECTION_NAME,
+
             query=query_vector,
+
             query_filter=status_filter,
-            limit=top_k * 3,
+            
+            order_by=qdrant_models.OrderBy(
+                    key="price",
+                    direction=qdrant_models.Direction.ASC
+            ),
+                
+            # Lấy dư một chút để có thêm lựa chọn
+            limit=min(top_k * 3, 300),
+
             with_payload=True
         )
 
-        results = [hit.payload | {"id": hit.id} for hit in search_result.points if hit.payload]
+        results = [
+            hit.payload | {"id": hit.id}
+            for hit in search_result.points
+            if hit.payload
+        ]
 
-        # Sắp xếp các phòng tương đồng tìm được theo thứ tự GIÁ TỪ THẤP ĐẾN CAO
-        sorted_results = sorted(results, key=parse_price_safe)
-        return sorted_results[:top_k]
+        # Sắp xếp các kết quả tương đồng theo giá tăng dần
+        results.sort(key=parse_price_safe)
+
+        return results[:top_k]
 
     except Exception as e:
-        print("❌ [VECTOR SEARCH ERROR]:", e)
+        print(
+            "❌ [VECTOR SEARCH ERROR]:",
+            repr(e)
+        )
         return []
 
 def update_room_status_in_db(point_id: str, new_status: str) -> bool:
@@ -1650,7 +1698,8 @@ def refresh_zalo_tokens(db):
         update_tokens_in_db(db, new_access_token, new_refresh_token)
         print("🎉 [ZALO OAUTH] Tự động Refresh Token và lưu DB thành công!", flush=True)
     else:
-        print(f"❌ [ZALO OAUTH FAIL]: {res_json}", flush=True)
+        print(f"❌ [ZALO Refresh access token False: ]: {res_json}", flush=True)
+        send_zalo_message(os.environ.get("ZALO_ADMIN_ID"), "⚠️ Refresh Token Zalo đã hết hạn hẳn! Vui lòng đăng nhập cấp lại quyền.")
         raise Exception(f"Zalo OAuth Error: {res_json.get('error_description', res_json)}")
 
 def get_current_tokens_from_db(db: Session) -> dict:
