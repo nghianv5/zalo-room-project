@@ -1012,9 +1012,9 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                  * AI hãy ưu tiên trích xuất đúng `street` ("155 Nguyễn Khang") và `district` ("Quận Cầu Giấy"), sau đó tự động suy luận `ward` chuẩn xác nhất theo bản đồ thực tế. 
                  * Nếu `ward` của người dùng nhập không chắc chắn, hãy giữ nguyên `street`  + `ward` + `district` + `city` để phục vụ Geocoding chính xác, tránh làm trượt API bản đồ.
             2. KIỂM TRA ĐIỀU KIỆN ĐỊA CHỈ (`is_valid_address`):
-               - Địa chỉ VALID (true): nếu từ địa chỉ nhập có thể trích xuất đủ `street` + `ward` + `district` + `city`
+               - Địa chỉ VALID (true): nếu từ địa chỉ nhập có thể trích xuất đủ `street` + `ward` + `city`. Còn `district` là thông tin quận hiện đơn vị hành chính này là cũ nên có thể có hoặc không đều được
                  -> Đặt `is_valid_address` = true.
-               - Địa chỉ INVALID (false): nếu từ địa chỉ nhập có thể trích xuất thiếu `street` hoặc `ward` hoặc `district` hoặc `city`
+               - Địa chỉ INVALID (false): nếu từ địa chỉ nhập có thể trích xuất thiếu `street` hoặc `ward` hoặc `city`
                  -> Đặt `is_valid_address` = false.               
                  -> Trả về `missing_address_msg` yêu cầu nhập chi tiết số nhà/đường, phường, quận.
         
