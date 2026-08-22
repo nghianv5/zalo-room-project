@@ -493,7 +493,11 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         room_name = str(data.get("room_name", "Phòng trọ")).strip()
         phone = str(data.get("landlord_phone", "")).strip()
 
-
+        point_id = find_existing_room_id(address=address, landlord_phone=phone, room_name=room_name)
+        
+        if not point_id:
+            return False
+        
         if not address:
             return False
 
@@ -1004,7 +1008,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         action = result_data.get("action")
         extracted = result_data.get("extracted_data", {})
         existing_point_id = relevant_rooms[0].get("id") if (relevant_rooms and len(relevant_rooms) > 0) else None
-        print(f"action: {action}")
+        print(f"landlord_phone: {extracted.get("landlord_phone")}")
         if action == "SEARCH_ROOM":
             is_valid_search = result_data.get("is_valid_search", False)
         
@@ -1678,3 +1682,54 @@ def update_tokens_in_db(db: Session, new_access_token: str, new_refresh_token: s
         db.rollback()
         print(f"❌ [DATABASE ERROR]: Không thể lưu token vào DB: {e}", flush=True)
         raise e
+        
+        
+def find_existing_room_id(address: str, landlord_phone: str, room_name: str = "") -> Optional[str]:
+    """
+    Tìm ID phòng đã tồn tại bằng cách lọc trực tiếp trên Qdrant theo Address và Landlord Phone.
+    """
+    clean_address = str(address).strip()
+    clean_phone = format_national_phone(landlord_phone)
+    
+    if not clean_address:
+        return None
+
+    try:
+        must_conditions = [
+            qdrant_models.FieldCondition(
+                key="address", 
+                match=qdrant_models.MatchValue(value=clean_address)
+            )
+        ]
+        
+        # Nếu có SĐT chủ nhà -> Thêm điều kiện lọc để chính xác hơn
+        if clean_phone:
+            must_conditions.append(
+                qdrant_models.FieldCondition(
+                    key="landlord_phone", 
+                    match=qdrant_models.MatchValue(value=clean_phone)
+                )
+            )
+
+        # Nếu có tên/số phòng -> Thêm điều kiện lọc theo room_name
+        if room_name and room_name.strip():
+            must_conditions.append(
+                qdrant_models.FieldCondition(
+                    key="room_name", 
+                    match=qdrant_models.MatchValue(value=room_name.strip())
+                )
+            )
+
+        records, _ = qdrant_client.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=qdrant_models.Filter(must=must_conditions),
+            limit=1
+        )
+        
+        if records:
+            return records[0].id
+
+    except Exception as e:
+        print(f"❌ Lỗi truy vấn Qdrant khi tìm phòng trùng: {e}")
+        
+    return None
