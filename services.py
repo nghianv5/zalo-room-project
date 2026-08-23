@@ -927,7 +927,7 @@ def process_excel_file(file_url: str, sender_id: str) -> str:
                     return (f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Địa chỉ trống hoặc không hợp lệ")
 
                 # upsert_room_to_db trả về None/"" nếu thành công, trả về string lỗi nếu thất bại
-                message = upsert_room_to_db(data=extracted, current_excel_row=current_excel_row)
+                message = upsert_room_to_db(data=extracted)
                 
                 if message in ("SUCCESS", "REGISTED"):
                     success_count += 1
