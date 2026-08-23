@@ -252,7 +252,7 @@ async def upload_excel_rooms(file: UploadFile = File(...)):
                 }
 
             # Kiểm tra lưu DB (hàm trả về None/"" nếu thành công, trả về string lỗi nếu thất bại)
-            message = upsert_room_to_db(data=extracted, current_excel_row)
+            message = upsert_room_to_db(data=extracted, current_excel_row=current_excel_row)
             if message in ("SUCCESS", "REGISTED"):
                 success_count += 1
             else:
