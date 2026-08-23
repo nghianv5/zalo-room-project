@@ -94,6 +94,11 @@ except Exception as e:
 try:
     qdrant_client.create_payload_index(
         collection_name=COLLECTION_NAME,
+        field_name="address",
+        field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
+    )
+    qdrant_client.create_payload_index(
+        collection_name=COLLECTION_NAME,
         field_name="status",
         field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
     )
@@ -487,28 +492,62 @@ def generate_content_with_retry(prompt: str, mime_type: str = "application/json"
     return ""
 
 # --- QDRANT VECTOR & ROOM SERVICES ---
-def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[List[str]] = None) -> bool:
+def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[List[str]] = None, row_) -> Optional[str]:
     try:
         address = str(data.get("address", "")).strip()
         room_name = str(data.get("room_name", "Phòng trọ")).strip()
         phone = str(data.get("landlord_phone", "")).strip()
 
-        point_id = find_existing_room_id(address=address, landlord_phone=phone, room_name=room_name)
+        point_id = find_existing_room_id(address=address, room_name=room_name)
         
         if not point_id:
-            return False
+            return "REGISTED"
         
         if not address:
-            return False
+            return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Địa chỉ thiếu hoặc địa chỉ không đúng."
 
         media_list = media_urls if media_urls is not None else data.get("media_urls", [])
         if isinstance(media_list, str):
             media_list = [x.strip() for x in media_list.split(",") if x.strip()]
 
-        text_to_embed = f"Địa chỉ: {address} Tên phòng: {room_name} Giá: {data.get('price', '')} Đồ đạc: {data.get('other_amenities', '')} Phí dịch vụ: {data.get('service_fees', '')}"
+        # 1. Thu thập và chuẩn hóa dữ liệu tiện ích (Booleans)
+        amenities_list = [
+            bool_to_text(data.get("is_private_bathroom"), "Vệ sinh khép kín / VS riêng", "Vệ sinh chung"),
+            bool_to_text(data.get("has_ac"), "Có điều hòa"),
+            bool_to_text(data.get("has_heater"), "Có nóng lạnh"),
+            bool_to_text(data.get("has_washer"), "Có máy giặt"),
+            bool_to_text(data.get("allow_pets"), "Cho phép nuôi thú cưng / pet"),
+            bool_to_text(data.get("has_balcony"), "Có ban công thoáng mát"),
+            bool_to_text(data.get("has_window"), "Có cửa sổ thoáng"),
+            bool_to_text(data.get("has_fingerprint_lock"), "Khóa vân tay ra vào tự do"),
+        ]
+        # Lọc bỏ các giá trị rỗng
+        amenities_str = ", ".join([item for item in amenities_list if item])
+
+        # 2. Xử lý các trường thông tin bổ sung
+        floor_str = f"Tầng {data.get('floor')}" if data.get('floor') else ""
+        max_occ_str = f"Tối đa {data.get('max_occupants')} người ở" if data.get('max_occupants') else ""
+        move_in_str = f"Vào ở từ ngày: {data.get('move_in_date')}" if data.get('move_in_date') else ""
+
+        # 3. Ghép thành văn bản hoàn chỉnh để tạo Vector
+        text_to_embed = f"""
+        Thông tin phòng trọ:
+        - Địa chỉ: {data.get('address', '')}
+        - Tên phòng: {data.get('room_name', '')} {floor_str}
+        - Giá thuê: {data.get('price', '')}
+        - Tiện nghi: {amenities_str}. {data.get('other_amenities', '')}
+        - Chỗ để xe: {data.get('parking_info', '')}
+        - Quy định: {max_occ_str}. {move_in_str}
+        - Phí dịch vụ: {data.get('service_fees', '')}
+        """.strip()
+
+        # 4. Lấy vector embedding từ chuỗi văn bản trên
         vector = get_text_embedding(text_to_embed)
+        
         if not vector:
-            return False
+            print(f"❌ [SYSTEM ERROR] Không thể tạo Vector Embedding cho phòng: {data.get('address')}")
+            return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: [SYSTEM ERROR] Không thể tạo Vector Embedding cho phòng."
+            # Trả về thông báo ngắn gọn cho NGUỜI DÙNG
 
         now_vn = datetime.now(VN_TZ)
         now_str = now_vn.strftime("%Y-%m-%d %H:%M:%S")
@@ -575,7 +614,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         return True
     except Exception as e:
         print("❌ [QDRANT UPSERT EXCEPTION]:", e)
-        return False
+        return f"❌ [QDRANT UPSERT EXCEPTION]: {e}"
 
 def search_rooms_by_vector(query_text: str, top_k: int = 20) -> List[dict]:
     """
@@ -836,53 +875,90 @@ def ai_validate_and_extract_room_batch(rows_list: List[dict]) -> List[Optional[d
     # Trả về danh sách Mặc định nếu tất cả Model/Retry đều thất bại (Tránh văng crash ứng dụng)
     return [None] * len(rows_list)
 
+import os
+import requests
+import pandas as pd
+
 def process_excel_file(file_url: str, sender_id: str) -> str:
+    temp_file = "temp_rooms.xlsx"
     try:
+        # 1. Tải file về local
         res = requests.get(file_url, timeout=30)
         if res.status_code != 200:
-            return "0"
-        temp_file = "temp_rooms.xlsx"
+            return "Không thể tải file Excel từ đường dẫn được cung cấp."
+
         with open(temp_file, "wb") as f:
             f.write(res.content)
 
-        success_count, fail_count, ai_rejected_count = 0, 0, 0
-        
-        BATCH_SIZE = 15
+        # 2. Đọc dữ liệu file Excel
+        df = pd.read_excel(temp_file)
         rows = df.to_dict(orient="records")
+
+        success_count = 0
         
+        # Danh sách lưu thông tin lỗi theo dạng: [(số_dòng, lý_do)]
+        failed_rows_details = []
+
+        BATCH_SIZE = 15
+
+        # 3. Duyệt theo từng batch
         for i in range(0, len(rows), BATCH_SIZE):
             batch_rows = rows[i:i + BATCH_SIZE]
             batch_results = ai_validate_and_extract_room_batch(batch_rows)
-            
-            for validated_data in batch_results:
+
+            # 4. Duyệt qua từng kết quả trong batch bằng enumerate
+            for offset, validated_data in enumerate(batch_results):
+                # Tính số dòng chính xác trong Excel (+2 do Header và Index từ 1)
+                current_excel_row = i + offset + 2
+
                 if isinstance(validated_data, list) and len(validated_data) > 0:
                     validated_data = validated_data[0]
 
                 if not validated_data or not isinstance(validated_data, dict):
-                    ai_rejected_count += 1
-                    continue
-                
+                    return (f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: AI không phân tích được dữ liệu.")
+
                 extracted = validated_data.get("extracted_data", {})
                 if not isinstance(extracted, dict):
-                    ai_rejected_count += 1
-                    continue
+                    return (f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Dữ liệu AI trích xuất không hợp lệ")
 
                 raw_address = str(extracted.get("address") or "").strip()
 
                 if not raw_address or raw_address.lower() in ["[chưa cập nhật]", "none", "null", "chưa rõ", ""]:
-                    ai_rejected_count += 1
-                    continue
+                    return (f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Địa chỉ trống hoặc không hợp lệ")
 
-                if upsert_room_to_db(data=extracted):
+                # upsert_room_to_db trả về None/"" nếu thành công, trả về string lỗi nếu thất bại
+                message = upsert_room_to_db(data=extracted, current_excel_row)
+                
+                if message in ("SUCCESS", "REGISTED"):
                     success_count += 1
                 else:
-                    fail_count += 1
+                    return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Lỗi DB - {message}"
 
+
+        # Dọn dẹp file tạm
         if os.path.exists(temp_file):
             os.remove(temp_file)
-        return f"AI đã xử lý xong! Thành công: {success_count} phòng. (Bỏ qua {ai_rejected_count} dòng lỗi, {fail_count} lỗi DB)."
+
+        # 5. Đóng gói thông báo trả về
+        msg = (
+            f"AI đã xử lý xong!\n"
+            f"- Thành công: {success_count} phòng.\n"
+        )
+
+        if failed_rows_details:
+            # Lấy tối đa 10 dòng lỗi đầu tiên để tránh tin nhắn quá dài
+            error_lines = [f"  + Dòng {row}: {reason}" for row, reason in failed_rows_details[:10]]
+            msg += "\n\nChi tiết các dòng bị lỗi:\n" + "\n".join(error_lines)
+
+            if len(failed_rows_details) > 10:
+                msg += f"\n  ... và {len(failed_rows_details) - 10} dòng lỗi khác."
+
+        return msg
+
     except Exception as e:
         print("❌ [EXCEL PROCESS ERROR]:", e)
+        if os.path.exists(temp_file):
+            os.remove(temp_file)
         return "Lỗi trong quá trình xử lý file Excel."
 
 def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: str = "SYSTEM", db: Session = None):
@@ -1684,12 +1760,11 @@ def update_tokens_in_db(db: Session, new_access_token: str, new_refresh_token: s
         raise e
         
         
-def find_existing_room_id(address: str, landlord_phone: str, room_name: str = "") -> Optional[str]:
+def find_existing_room_id(address: str, room_name: str = "") -> Optional[str]:
     """
-    Tìm ID phòng đã tồn tại bằng cách lọc trực tiếp trên Qdrant theo Address và Landlord Phone.
+    Tìm ID phòng đã tồn tại bằng cách lọc trực tiếp trên Qdrant theo Address và Room name.
     """
     clean_address = str(address).strip()
-    clean_phone = format_national_phone(landlord_phone)
     
     if not clean_address:
         return None
@@ -1702,14 +1777,6 @@ def find_existing_room_id(address: str, landlord_phone: str, room_name: str = ""
             )
         ]
         
-        # Nếu có SĐT chủ nhà -> Thêm điều kiện lọc để chính xác hơn
-        if clean_phone:
-            must_conditions.append(
-                qdrant_models.FieldCondition(
-                    key="landlord_phone", 
-                    match=qdrant_models.MatchValue(value=clean_phone)
-                )
-            )
 
         # Nếu có tên/số phòng -> Thêm điều kiện lọc theo room_name
         if room_name and room_name.strip():
@@ -1733,3 +1800,11 @@ def find_existing_room_id(address: str, landlord_phone: str, room_name: str = ""
         print(f"❌ Lỗi truy vấn Qdrant khi tìm phòng trùng: {e}")
         
     return None
+    
+# Hàm trợ lý nhỏ để đổi True/False thành văn bản dễ hiểu cho Model Embedding
+def bool_to_text(val, true_str, false_str=""):
+    if isinstance(val, bool):
+        return true_str if val else false_str
+    if str(val).lower() in ["true", "1", "có", "yes"]:
+        return true_str
+    return false_str

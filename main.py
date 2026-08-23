@@ -208,7 +208,7 @@ async def upload_excel_rooms(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Không thể đọc tệp: {str(e)}")
 
-    success_count, fail_count, ai_rejected_count = 0, 0, 0
+    success_count= 0
 
     BATCH_SIZE = 15
     rows = df.to_dict(orient="records")
@@ -217,34 +217,54 @@ async def upload_excel_rooms(file: UploadFile = File(...)):
         batch_rows = rows[i:i + BATCH_SIZE]
         batch_results = ai_validate_and_extract_room_batch(batch_rows)
 
-        for validated_data in batch_results:
+        # Sử dụng enumerate để lấy chỉ số offset của từng bản ghi trong batch
+        for offset, validated_data in enumerate(batch_results):
+            # Tính số dòng chính xác trong file Excel
+            current_excel_row = i + offset + 2
+
             # Kiểm tra an toàn: nếu validated_data là list, lấy phần tử đầu tiên
             if isinstance(validated_data, list) and len(validated_data) > 0:
                 validated_data = validated_data[0]
 
             if not validated_data or not isinstance(validated_data, dict):
-                ai_rejected_count += 1
-                continue
+                print(f"❌ Dòng {current_excel_row}: AI không phân tích được dữ liệu.")
+                return {
+                    "status": "error",
+                    "message": f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: AI không phân tích được dữ liệu."
+                }
+                
 
             extracted = validated_data.get("extracted_data", {})
             if not isinstance(extracted, dict):
-                ai_rejected_count += 1
-                continue
+                print(f"❌ Dòng {current_excel_row}: Dữ liệu AI trích xuất sai định dạng.")
+                return {
+                    "status": "error",
+                    "message": f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Dữ liệu AI trích xuất sai định dạng."
+                }
 
             raw_address = str(extracted.get("address") or "").strip()
 
             if not raw_address or raw_address.lower() in ["[chưa cập nhật]", "none", "null", "chưa rõ", ""]:
-                ai_rejected_count += 1
-                continue
+                print(f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Thiếu hoặc sai địa chỉ.")
+                return {
+                    "status": "error",
+                    "message": f"❌ Dòng {current_excel_row}: Thiếu hoặc sai địa chỉ."
+                }
 
-            if upsert_room_to_db(data=extracted):
+            # Kiểm tra lưu DB (hàm trả về None/"" nếu thành công, trả về string lỗi nếu thất bại)
+            message = upsert_room_to_db(data=extracted, current_excel_row)
+            if message in ("SUCCESS", "REGISTED"):
                 success_count += 1
             else:
-                fail_count += 1
+                print(f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Lỗi DB - {message}")
+                return {
+                    "status": "error",
+                    "message": f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Lỗi DB - {message}"
+                }
 
     return {
         "status": "success",
-        "message": f"AI đã xử lý xong! Thành công: {success_count} phòng. (Bỏ qua {ai_rejected_count} dòng lỗi, {fail_count} lỗi DB)."
+        "message": f"AI đã xử lý xong! Thành công: {success_count} phòng."
     }
 
 @app.get("/api/rooms/download-template")
@@ -457,3 +477,5 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
 
 if __name__ == "__main__":
     uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)[cite: 3]
+    
+    
