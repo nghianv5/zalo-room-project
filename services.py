@@ -505,7 +505,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         phone = str(data.get("landlord_phone", "")).strip()
 
         point_id = find_existing_room_id(address=address, room_name=room_name)
-        print(address)
+        
         if not point_id:
             return "REGISTED"
         
