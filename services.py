@@ -117,6 +117,12 @@ try:
         field_name="room_code",
         field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
     )
+    
+    qdrant_client.create_payload_index(
+    collection_name=COLLECTION_NAME,
+    field_name="room_name",
+    field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
+)
 except Exception:
     pass
 
