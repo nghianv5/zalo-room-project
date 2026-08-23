@@ -492,7 +492,7 @@ def generate_content_with_retry(prompt: str, mime_type: str = "application/json"
     return ""
 
 # --- QDRANT VECTOR & ROOM SERVICES ---
-def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[List[str]] = None, row_) -> Optional[str]:
+def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[List[str]] = None) -> Optional[str]:
     try:
         address = str(data.get("address", "")).strip()
         room_name = str(data.get("room_name", "Phòng trọ")).strip()
