@@ -30,7 +30,7 @@ from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.sql import func
 from contextlib import asynccontextmanager
 
-redis_client = redis.Redis()
+redis_client = redis.Redis.from_url(os.environ.get("REDIS_URL"), decode_responses=True)
 
 app = FastAPI()
 
