@@ -341,25 +341,19 @@ def parse_price_to_number(price_str: str) -> float:
 
     return 0.0
 
+# 2. Lấy dữ liệu và xóa Cache
 def get_get_and_clear_pending_media(user_id: str) -> list:
-    if user_id in PENDING_MEDIA_CACHE:
-        cached_data = PENDING_MEDIA_CACHE.pop(user_id)
-        if time.time() - cached_data["timestamp"] <= CACHE_TTL_SECONDS:
-            return cached_data["urls"]
+    cache_key = f"pending_media:{user_id}"
+    data = redis_client.get(cache_key)
+    if data:
+        redis_client.delete(cache_key)  # Xóa sau khi lấy thành công
+        return json.loads(data)
     return []
 
+# 1. Lưu Cache với thời hạn tự xóa (ex = CACHE_TTL_SECONDS)
 def add_pending_media(user_id: str, new_urls: list):
-    if not new_urls:
-        return
-    current_urls = []
-    if user_id in PENDING_MEDIA_CACHE:
-        if time.time() - PENDING_MEDIA_CACHE[user_id]["timestamp"] <= CACHE_TTL_SECONDS:
-            current_urls = PENDING_MEDIA_CACHE[user_id]["urls"]
-    merged_urls = list(dict.fromkeys(current_urls + new_urls))
-    PENDING_MEDIA_CACHE[user_id] = {
-        "urls": merged_urls,
-        "timestamp": time.time()
-    }
+    cache_key = f"pending_media:{user_id}"
+    redis_client.set(cache_key, json.dumps(new_urls), ex=CACHE_TTL_SECONDS)
 
 def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None) -> bool:
     db = SessionLocal()
@@ -498,7 +492,7 @@ def generate_content_with_retry(prompt: str, mime_type: str = "application/json"
     return ""
 
 # --- QDRANT VECTOR & ROOM SERVICES ---
-def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[List[str]] = None) -> Optional[str]:
+def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[List[str]] = None, current_excel_row: int = 0) -> Optional[str]:
     try:
         address = str(data.get("address", "")).strip()
         room_name = str(data.get("room_name", "Phòng trọ")).strip()
@@ -507,7 +501,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         point_id = find_existing_room_id(address=address, room_name=room_name)
         
         if not point_id:
-            return "REGISTED"
+            return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Phòng đã được bạn hoặc người dùng khác đăng ký."
         
         if not address:
             return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Địa chỉ thiếu hoặc địa chỉ không đúng."
@@ -933,7 +927,7 @@ def process_excel_file(file_url: str, sender_id: str) -> str:
                     return (f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Địa chỉ trống hoặc không hợp lệ")
 
                 # upsert_room_to_db trả về None/"" nếu thành công, trả về string lỗi nếu thất bại
-                message = upsert_room_to_db(data=extracted)
+                message = upsert_room_to_db(data=extracted, current_excel_row=current_excel_row)
                 
                 if message in ("SUCCESS", "REGISTED"):
                     success_count += 1
@@ -1025,12 +1019,12 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
            - Viết câu xác nhận ngắn gọn, lịch sự cho chủ nhà.
         2. Nếu action là "SEARCH_ROOM":
             THÔNG TIN BẮT BUỘC ĐỐI VỚI YÊU CẦU TÌM PHÒNG (SEARCH_ROOM):
-            1. `location_search`: Tên đường HOẶC Tên Phường/Xã mà khách muốn thuê (Ví dụ: "đường Cầu Giấy", "Phường Dịch Vọng", "Đống Đa"...).
+            1. `location_search`: Yêu cầu người dùng nhập địa chỉ muốn thuê
             2. `min_price`: Giá thuê tối thiểu khách có thể trả (Dạng số float tính theo VNĐ, ví dụ: 2000000). Nếu khách không nói giá tối thiểu thì mặc định là 0.
             3. `max_price`: Giá thuê tối đa khách có thể trả (Dạng số float tính theo VNĐ, ví dụ: 4000000).
 
             QUY TẮC KIỂM TRA ĐIỀU KIỆN (BẮT BUỘC CHO SEARCH_ROOM):
-            - Nếu người dùng tìm phòng nhưng KHÔNG CÓ thông tin Tên Đường/Tên Phường/Xã -> Set `is_valid_search` = false.
+            - Nếu người dùng tìm phòng nhưng KHÔNG CÓ thông tin địa chỉ -> Set `is_valid_search` = false.
             - Nếu người dùng tìm phòng nhưng KHÔNG CÓ Giá tối đa -> Set `is_valid_search` = false.
             
             - Nếu cung cấp đủ cả Khu vực (Đường/Phường) và Giá -> Set `is_valid_search` = true.

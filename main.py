@@ -127,10 +127,10 @@ async def save_or_update_room(
             media_urls=room_dict.get("media_urls", [])
         )
         
-        if success:
+        if success == "SUCCESS":
             return {"status": "success", "message": "Lưu thông tin phòng thành công!"}
         else:
-            raise HTTPException(status_code=400, detail="Không thể ghi dữ liệu phòng vào cơ sở dữ liệu!")
+            raise HTTPException(status_code=400, detail=f"Không thể ghi dữ liệu: {success}")
             
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
@@ -252,7 +252,7 @@ async def upload_excel_rooms(file: UploadFile = File(...)):
                 }
 
             # Kiểm tra lưu DB (hàm trả về None/"" nếu thành công, trả về string lỗi nếu thất bại)
-            message = upsert_room_to_db(data=extracted)
+            message = upsert_room_to_db(data=extracted, current_excel_row=current_excel_row)
             if message in ("SUCCESS", "REGISTED"):
                 success_count += 1
             else:
@@ -332,7 +332,9 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
 
         if not sender_id:
             return {"status": "ignored"}
-
+            
+        domain_host = str(request.base_url)
+        
         if "user_follow_oa" in event_name:
             send_zalo_message(sender_id, "👋 Chào mừng bạn! Hãy gửi thông tin hoặc hình ảnh phòng trọ để bắt đầu nhé!")
             return {"status": "success"}
@@ -355,7 +357,6 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                     return {"status": "success"}
 
         if event_name == "user_send_text":
-            user_id = data.get("sender", {}).get("id")
             message_obj = data.get("message", {})
             raw_message = message_obj.get("text", "")
             clean_message = raw_message.strip().lower()
@@ -378,14 +379,14 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                         # Lưu vào Database
                         saved_user = save_or_update_user_web(
                             db=db,
-                            zalo_user_id=str(user_id),
+                            zalo_user_id=str(sender_id),
                             phone=extracted_phone
                         )
-                        print(f"✅ [SUCCESS] Đã bắt thành công SĐT từ text: {extracted_phone} (User ID: {user_id})")
+                        print(f"✅ [SUCCESS] Đã bắt thành công SĐT từ text: {extracted_phone} (User ID: {sender_id})")
                         
                         # Phản hồi lại cho khách
                         send_zalo_message(
-                            str(user_id),
+                            str(sender_id),
                             f"✅ Cảm ơn bạn! Hệ thống đã ghi nhận thành công Số điện thoại: {extracted_phone}."
                         )
                         return {"status": "success", "phone": extracted_phone}
@@ -403,9 +404,9 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                     expired_at = now + timedelta(minutes=5)
 
                     existing_phone_record = db.query(UserWeb).filter(UserWeb.phone == phone_number).first()
-                    existing_user_record = db.query(UserWeb).filter(UserWeb.user_id == user_id).first()
+                    existing_user_record = db.query(UserWeb).filter(UserWeb.user_id == sender_id).first()
 
-                    if existing_phone_record and existing_phone_record.user_id != user_id:
+                    if existing_phone_record and existing_phone_record.user_id != sender_id:
                         db.delete(existing_phone_record)
                         db.commit()
 
@@ -416,8 +417,8 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                         existing_user_record.updated_at = now
                     else:
                         new_record = UserWeb(
-                            id=user_id,
-                            user_id=user_id,
+                            id=sender_id,
+                            user_id=sender_id,
                             phone=phone_number,
                             otp=otp,
                             expired_at=expired_at,
@@ -427,11 +428,11 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
 
                     db.commit()
                     reply_text = f"Mã OTP xác thực của bạn là: {otp}\nMã có hiệu lực trong 5 phút (đến {expired_at.strftime('%H:%M:%S')}). Vui lòng không chia sẻ mã này."
-                    send_zalo_message(user_id=user_id, ai_reply=reply_text)
+                    send_zalo_message(user_id=sender_id, ai_reply=reply_text)
                     return {"status": "success", "message": "OTP generated and sent"}
                 else:
                     reply_text = "Cú pháp không đúng! Vui lòng nhắn theo cú pháp: OTP <Số thoại điện> (Ví dụ: OTP 0333593681)"
-                    send_zalo_message(user_id=user_id, ai_reply=reply_text)
+                    send_zalo_message(user_id=sender_id, ai_reply=reply_text)
                     return {"status": "invalid_syntax"}
             # 2. Xử lý Đặt lịch xem phòng theo mã phòng 6 ký tự
             booking_match = re.search(r'(?:đặt lịch|xem phòng|mã phòng|đặt phòng)\s*([a-zA-Z0-9]{6})\b', clean_message, re.IGNORECASE)
@@ -476,6 +477,6 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
 
 
 if __name__ == "__main__":
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)[cite: 3]
+    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=False)
     
     
