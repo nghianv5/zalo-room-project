@@ -1115,8 +1115,8 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                 # Gọi tìm kiếm phòng có truyền kèm khoảng giá
                 search_results = search_rooms_with_filter(
                     query_text=full_query, 
-                    min_price=min_p, 
-                    max_price=max_p, 
+#                    min_price=min_p, 
+#                    max_price=max_p, 
                     top_k=20
                 )
 
@@ -1542,8 +1542,6 @@ def parse_price_safe(room: dict) -> float:
     
 def search_rooms_with_filter(
     query_text: str, 
-    min_price: float = 0, 
-    max_price: float = 0, 
     top_k: int = 20
 ) -> List[dict]:
     
@@ -1554,20 +1552,20 @@ def search_rooms_with_filter(
         )
     ]
 
-    # 🆕 Bổ sung lọc theo khoảng Giá tối thiểu - Giá tối đa
-    price_range = {}
-    if min_price > 0:
-        price_range["gte"] = min_price
-    if max_price > 0:
-        price_range["lte"] = max_price
-
-    if price_range:
-        must_conditions.append(
-            qdrant_models.FieldCondition(
-                key="price",
-                range=qdrant_models.Range(**price_range)
-            )
-        )
+#    # 🆕 Bổ sung lọc theo khoảng Giá tối thiểu - Giá tối đa
+#    price_range = {}
+#    if min_price > 0:
+#        price_range["gte"] = min_price
+#    if max_price > 0:
+#        price_range["lte"] = max_price
+#
+#    if price_range:
+#        must_conditions.append(
+#            qdrant_models.FieldCondition(
+#                key="price",
+#                range=qdrant_models.Range(**price_range)
+#            )
+#        )
 
     status_filter = qdrant_models.Filter(must=must_conditions)
     query_vector = get_text_embedding(query_text)
