@@ -497,10 +497,12 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         address = str(data.get("address", "")).strip()
         room_name = str(data.get("room_name", "Phòng trọ")).strip()
         phone = str(data.get("landlord_phone", "")).strip()
-
-        point_id = find_existing_room_id(address=address, room_name=room_name)
         
-        if not point_id:
+        # Nếu tìm thấy thì bản ghi thì k cập nhật mà bỏ qua
+        existing_id = find_existing_room_id(address=address, room_name=room_name)
+
+        if existing_id:
+            point_id = existing_id
             return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Phòng đã được bạn hoặc người dùng khác đăng ký."
         
         if not address:
