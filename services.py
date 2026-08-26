@@ -1106,10 +1106,12 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                 location_query = search_params.get("location_search", "")
                 min_p = search_params.get("min_price", 0)
                 max_p = search_params.get("max_price", 0)
-
+                print(f"min_p : {min_p}")
+                print(f"max_p : {max_p}")
+                
                 # Tạo chuỗi truy vấn kết hợp thông tin
                 full_query = f"{message_text} {location_query}"
-                
+                print(f"full_query : {full_query}")
                 # Gọi tìm kiếm phòng có truyền kèm khoảng giá
                 search_results = search_rooms_with_filter(
                     query_text=full_query, 
