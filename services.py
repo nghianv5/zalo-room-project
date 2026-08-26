@@ -1033,7 +1033,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
             - Nếu "Danh sách phòng trống" RỖNG: Trả lời lịch sự báo hiện chưa có phòng phù hợp.
             - Nếu CÓ PHÒNG: Định dạng ngay danh sách phòng thành 1 tin nhắn phản hồi đẹp mắt trên Zalo:
                 + Đánh số thứ tự (1, 2, 3...).
-                + ẨN HOÀN TOÀN các thông tin bị thiếu, null, "[Chưa cập nhật]" hoặc khoảng trắng.. Chỉ hiện các tiện ích thực sự CÓ.
+                + Tuyệt đối KHÔNG hiển thị các trường ghi "[Chưa cập nhật]", "Không", "Chưa rõ", "null", hoặc rỗng.
                 + Bắt buộc hiển thị: Mã phòng, Tên phòng, Địa chỉ, Giá thuê, Media URLs (nếu có).
                 + Dùng emoji sinh động. KHÔNG tự chèn đường link ảnh vào văn bản.
                 + Mỗi phòng liệt kê ngắn gọn: Tên/Số phòng, Địa chỉ, Giá thuê, và danh sách tiện ích có sẵn.
@@ -1485,93 +1485,7 @@ def extract_viewing_time(text: str):
         extracted_date = datetime(now.year, now.month, now.day, extracted_hour, extracted_minute)
 
     return extracted_date
-    
-def ai_search_rooms(user_message: str, database_rooms: list) -> Optional[dict]:
-    """
-    Hàm xử lý tìm kiếm phòng trọ trên Zalo.
-    - Lọc và sắp xếp lấy 20 phòng rẻ nhất trong DB.
-    - AI định dạng văn bản gửi cho khách: chỉ hiển thị thông tin CÓ, ẩn hoàn toàn thông tin thiếu.
-    """
-    if not gemini_client:
-        print("⚠️ Gemini Client chưa được khởi tạo!")
-        return None
-
-    if not database_rooms:
-        return {
-            "action": "SEARCH_ROOM",
-            "ai_reply": "Rất tiếc, hiện tại hệ thống chưa có dữ liệu phòng trọ phù hợp."
-        }
-
-    # 1. Hàm hỗ trợ trích xuất giá tiền dạng số để sắp xếp chính xác bằng Python
-    def parse_price(room):
-        try:
-            p_str = str(room.get("price", "999999999")).lower().replace(",", ".")
-            num = float(re.search(r"[\d.]+", p_str).group())
-            if "triệu" in p_str or "tr" in p_str:
-                num *= 1_000_000
-            elif "k" in p_str:
-                num *= 1_000
-            return num
-        except Exception:
-            return 999_999_999  # Nếu không đọc được giá thì đẩy xuống cuối danh sách
-
-    # 2. Lọc chỉ lấy các phòng còn "TRỐNG", sắp xếp từ giá thấp đến cao và lấy đúng 20 phòng rẻ nhất
-    available_rooms = [r for r in database_rooms if str(r.get("status", "")).upper() != "ĐÃ CHO THUÊ"]
-    top_20_cheapest_rooms = sorted(available_rooms, key=parse_price)[:20]
-
-    # Clean dữ liệu trước khi gửi vào prompt
-    clean_rooms = [
-        {k: (None if pd.isna(v) else v) for k, v in room.items()} 
-        for room in top_20_cheapest_rooms
-    ]
-
-    # 3. Prompt yêu cầu Gemini tạo câu trả lời ngắn gọn
-    prompt = f"""
-        Bạn là Trợ lý AI Tư vấn Tìm kiếm Phòng trọ trên Zalo.
-        Nhiệm vụ: Trình bày danh sách 20 phòng rẻ nhất dưới đây để gửi phản hồi cho khách hàng trên Zalo.
-
-        YÊU CẦU CỦA KHÁCH HÀNG:
-        "{user_message}"
-
-        DANH SÁCH 20 PHÒNG RẺ NHẤT TRONG DATABASE:
-        {json.dumps(clean_rooms, ensure_ascii=False)}
-
-        QUY TẮC BẮT BUỘC KHI TẠO `ai_reply`:
-        1. **CHỈ HIỂN THỊ THÔNG TIN CÓ**:
-           - Tuyệt đối KHÔNG hiển thị các trường ghi "[Chưa cập nhật]", "Không", "Chưa rõ", "null", hoặc rỗng.
-           - Chỉ trình bày các thông tin thực sự CÓ của phòng (Ví dụ: Nếu phòng có Điều hòa thì ghi "• Điều hòa", nếu không có hoặc chưa cập nhật thì BỎ HOÀN TOÀN dòng đó).
-        2. **ĐỊNH DẠNG NGẮN GỌN CHO ZALO**:
-           - Mở đầu bằng 1 câu chào ngắn gọn nhẹ nhàng.
-           - Đánh số thứ tự từng phòng (1, 2, 3...).
-           - Mỗi phòng trình bày ngắn gọn: Tên/Số phòng, Địa chỉ, Giá, và danh sách tiện ích có sẵn.
-           - ĐƯỢC CHÈN icon/emoji nhẹ nhàng cho dễ đọc.
-           - KHÔNG chèn bất kỳ đường link hình ảnh nào vào văn bản `ai_reply`.
-
-        TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
-        {{
-          "action": "SEARCH_ROOM",
-          "total_found": {len(top_20_cheapest_rooms)},
-          "ai_reply": "Văn bản danh sách tối đa 20 phòng rẻ nhất cực kỳ ngắn gọn, đẹp mắt trên Zalo, chỉ chứa thông tin CÓ, ẩn toàn bộ thông tin thiếu."
-        }}
-        """
-
-    try:
-        response = gemini_client.models.generate_content(
-            model="models/gemini-2.5-flash",
-            contents=prompt,
-            config=types.GenerateContentConfig(response_mime_type="application/json")
-        )
-        if response and response.text:
-            raw_text = response.text.strip()
-            if raw_text.startswith("```"):
-                raw_text = re.sub(r"^```(?:json)?\n?", "", raw_text)
-                raw_text = re.sub(r"\n?```$", "", raw_text)
-            return json.loads(raw_text)
-    except Exception as e:
-        print(f"⚠️ Lỗi AI Search Rooms: {e}")
-        return None
-        
-        
+ 
         
 def split_text_by_limit(text: str, max_length: int = 1800) -> List[str]:
     """Cắt nhỏ văn bản dưới max_length ký tự, ưu tiên cắt tại vị trí xuống dòng"""
