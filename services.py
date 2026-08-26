@@ -931,7 +931,7 @@ def process_excel_file(file_url: str, sender_id: str) -> str:
                 # upsert_room_to_db trả về None/"" nếu thành công, trả về string lỗi nếu thất bại
                 message = upsert_room_to_db(data=extracted, current_excel_row=current_excel_row)
                 
-                if message in ("SUCCESS", "REGISTED"):
+                if message in ("SUCCESS"):
                     success_count += 1
                 else:
                     return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Lỗi DB - {message}"
@@ -1155,8 +1155,8 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     send_zalo_request(request_phone_message)
                     return {"status": "phone_required"}
 
-                success = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None)
-                if success:
+                message = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None)
+                if message in ("SUCCESS"):
                     get_get_and_clear_pending_media(user_id)
                
         elif action == "UPDATE_STATUS" and existing_point_id:
