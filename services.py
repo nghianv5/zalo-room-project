@@ -980,11 +980,27 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
     all_current_media = list(dict.fromkeys(pending_urls + incoming_media_urls))
     urls_to_send = all_current_media
     
+    # 1. Lấy lịch sử chat của User từ Redis
+    history_list = get_chat_history(user_id)
+    history_context_str = json.dumps(history_list, ensure_ascii=False) if history_list else "Chưa có lịch sử hội thoại trước đó."
+    
+    # Kiểm tra từ khóa Reset Session từ người dùng
+    clean_message = message_text.strip().lower()
+    if any(keyword in clean_message for keyword in ["bắt đầu lại", "tìm phòng khác", "xóa lịch sử", "reset", "làm mới"]):
+        clear_chat_history(user_id)
+        ai_reply = "Dạ em đã làm mới cuộc hội thoại rồi ạ. Anh/chị muốn tìm phòng trọ ở khu vực nào và ngân sách khoảng bao nhiêu ạ?"
+        send_zalo_message(user_id, ai_reply)[cite: 6]
+        return
+    
     phone = get_phone_by_user_id(db, user_id)
     try:
         relevant_rooms = search_rooms_by_vector(message_text, top_k=5)
         system_prompt = f"""
         Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ thông minh trên Zalo.
+        
+        LỊCH SỬ HỘI THOẠI GẦN ĐÂY CỦA NGUỜI DÙNG:
+        {history_context_str}
+        
         Phân tích tin nhắn người dùng và trích xuất đúng 13 trường thông tin:
 
         1. `address`: Địa chỉ đầy đủ gộp lại.
@@ -1540,6 +1556,8 @@ def parse_price_safe(room: dict) -> float:
         
     return 999_999_999.0
     
+    
+    
 def search_rooms_with_filter(
     query_text: str, 
     top_k: int = 20
@@ -1724,3 +1742,39 @@ def bool_to_text(val, true_str, false_str=""):
     if str(val).lower() in ["true", "1", "có", "yes"]:
         return true_str
     return false_str
+    
+    
+MAX_HISTORY_MESSAGES = 30  # Lưu 5 cặp câu hỏi - trả lời gần nhất
+CHAT_HISTORY_TTL = 7200    # Hết hạn sau 1 giờ không tương tác
+
+def get_chat_history(user_id: str) -> list:
+    """Lấy lịch sử hội thoại của user từ Redis"""
+    cache_key = f"chat_history:{user_id}"
+    data = redis_client.get(cache_key)
+    if data:
+        try:
+            return json.loads(data)
+        except Exception:
+            return []
+    return []
+
+def add_chat_history(user_id: str, user_message: str, ai_reply: str):
+    """Lưu tin nhắn người dùng và phản hồi AI vào Redis"""
+    history = get_chat_history(user_id)
+    
+    if user_message:
+        history.append({"role": "user", "text": user_message})
+    if ai_reply:
+        history.append({"role": "model", "text": ai_reply})
+        
+    # Giữ lại số lượng tin nhắn gần nhất
+    history = history[-MAX_HISTORY_MESSAGES:]
+    
+    cache_key = f"chat_history:{user_id}"
+    redis_client.set(cache_key, json.dumps(history, ensure_ascii=False), ex=CHAT_HISTORY_TTL)
+    
+    
+def clear_chat_history(user_id: str):
+    """Xóa toàn bộ lịch sử hội thoại của user trong Redis"""
+    cache_key = f"chat_history:{user_id}"
+    redis_client.delete(cache_key)
