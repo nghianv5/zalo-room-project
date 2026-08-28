@@ -1137,7 +1137,30 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     ai_reply = f"Dạ tiếc quá, hệ thống chưa tìm thấy phòng nào ở khu vực **{location_query}** với tầm giá từ **{min_p:,.0f}đ đến {max_p:,.0f}đ** ạ!"
                 else:
                     # ... (Đoạn gọi Gemini định dạng danh sách phòng giữ nguyên như cũ) ...
-                    pass
+                    # 1. Chuẩn bị Prompt cho Gemini định dạng danh sách phòng
+                    prompt_format_rooms = f"""
+                    Bạn là một trợ lý tư vấn tìm phòng trọ thân thiện và chuyên nghiệp.
+                    Dưới đây là danh sách các phòng trọ phù hợp với yêu cầu của khách hàng:
+                    
+                    Yêu cầu của khách: "{message_text}"
+                    Danh sách phòng tìm được: {search_results}
+                    
+                    Hãy viết câu trả lời tổng hợp các phòng trên cho khách hàng. 
+                    Yêu cầu:
+                    - Liệt kê các phòng rõ ràng, dễ đọc (tên/mã phòng, địa chỉ, giá tiền, tiện ích nổi bật).
+                    - Giữ văn phong lịch sự, tư vấn nhiệt tình.
+                    - Không tự bịa ra thông tin ngoài dữ liệu được cung cấp.
+                    """
+                    
+                    # 2. Gọi model Gemini để sinh response (sử dụng instance client của bạn)
+                    response = client.models.generate_content(
+                        model="gemini-2.5-flash",
+                        contents=prompt_format_rooms
+                    )
+                    
+                    ai_reply = response.text
+                    send_zalo_message(user_id, ai_reply)
+                    return
                 # Vì là tìm kiếm nên không đính kèm media đăng phòng của người dùng
                 urls_to_send = []
 
