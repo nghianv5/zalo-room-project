@@ -1111,6 +1111,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         
             # 🚨 TRƯỜNG HỢP 1: THIẾU THÔNG TIN BẮT BUỘC
             if 1==2:
+                print(f"landlor")
 #            if not is_valid_search:
 #                ai_reply = result_data.get(
 #                    "missing_info_message", 
