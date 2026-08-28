@@ -984,6 +984,8 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
     history_list = get_chat_history(user_id)
     history_context_str = json.dumps(history_list, ensure_ascii=False) if history_list else "Chưa có lịch sử hội thoại trước đó."
     
+    print(f"history_list: {history_list}")
+    print(f"history_context_str: {history_context_str}")
     # Kiểm tra từ khóa Reset Session từ người dùng
     clean_message = message_text.strip().lower()
     if any(keyword in clean_message for keyword in ["bắt đầu lại", "tìm phòng khác", "xóa lịch sử", "reset", "làm mới"]):
