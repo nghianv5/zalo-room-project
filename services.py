@@ -991,7 +991,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
     if any(keyword in clean_message for keyword in ["bắt đầu lại", "tìm phòng khác", "xóa lịch sử", "reset", "làm mới"]):
         clear_chat_history(user_id)
         ai_reply = "Dạ em đã làm mới cuộc hội thoại rồi ạ. Anh/chị muốn tìm phòng trọ ở khu vực nào và ngân sách khoảng bao nhiêu ạ?"
-        send_zalo_message(user_id, ai_reply)[cite: 6]
+        send_zalo_message(user_id, ai_reply)
         return
     
     phone = get_phone_by_user_id(db, user_id)
