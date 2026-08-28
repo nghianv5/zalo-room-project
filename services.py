@@ -1565,12 +1565,12 @@ def search_rooms_with_filter(
     top_k: int = 20
 ) -> List[dict]:
     
-    must_conditions = [
-        qdrant_models.FieldCondition(
-            key="status",
-            match=qdrant_models.MatchValue(value="TRỐNG")
-        )
-    ]
+#    must_conditions = [
+#        qdrant_models.FieldCondition(
+#            key="status",
+#            match=qdrant_models.MatchValue(value="TRỐNG")
+#        )
+#    ]
 
 #    # 🆕 Bổ sung lọc theo khoảng Giá tối thiểu - Giá tối đa
 #    price_range = {}
@@ -1587,14 +1587,14 @@ def search_rooms_with_filter(
 #            )
 #        )
 #
-    status_filter = qdrant_models.Filter(must=must_conditions)
+#    status_filter = qdrant_models.Filter(must=must_conditions)
     query_vector = get_text_embedding(query_text)
-    
+    print(f"query_text : {query_text}")
     try:
         search_result = qdrant_client.query_points(
             collection_name=COLLECTION_NAME,
             query=query_vector if query_vector else None,
-            query_filter=status_filter,
+#            query_filter=status_filter,
             limit=top_k,
             with_payload=True
         )
