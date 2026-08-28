@@ -1110,14 +1110,15 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
             is_valid_search = result_data.get("is_valid_search", False)
         
             # 🚨 TRƯỜNG HỢP 1: THIẾU THÔNG TIN BẮT BUỘC
-            if not is_valid_search:
-                ai_reply = result_data.get(
-                    "missing_info_message", 
-                    "Dạ để tìm phòng chính xác nhất, bạn vui lòng cung cấp rõ:\n"
-                    "1. Tên Đường hoặc Phường/Xã muốn thuê\n"
-                    "2. Khoảng giá bạn muốn thuê (Ví dụ: từ 2 triệu đến 4 triệu)"
-                )
-                urls_to_send = []
+            if 1==2:
+#            if not is_valid_search:
+#                ai_reply = result_data.get(
+#                    "missing_info_message", 
+#                    "Dạ để tìm phòng chính xác nhất, bạn vui lòng cung cấp rõ:\n"
+#                    "1. Tên Đường hoặc Phường/Xã muốn thuê\n"
+#                    "2. Khoảng giá bạn muốn thuê (Ví dụ: từ 2 triệu đến 4 triệu)"
+#                )
+#                urls_to_send = []
 
             # ✅ TRƯỜNG HỢP 2: ĐÃ ĐỦ THÔNG TIN -> TIẾN HÀNH TÌM KIẾM
             else:
@@ -1596,7 +1597,6 @@ def search_rooms_with_filter(
     status_filter = qdrant_models.Filter(must=must_conditions)
     query_vector = get_text_embedding(query_text)
     
-    print(f"query_vector: {query_vector}")
     try:
         search_result = qdrant_client.query_points(
             collection_name=COLLECTION_NAME,
