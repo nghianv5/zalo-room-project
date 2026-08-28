@@ -997,6 +997,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
     phone = get_phone_by_user_id(db, user_id)
     try:
         relevant_rooms = search_rooms_by_vector(message_text, top_k=5)
+        print("🔍 [DEBUG] Kết quả Vector Search:", relevant_rooms)
         system_prompt = f"""
         Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ thông minh trên Zalo.
         
