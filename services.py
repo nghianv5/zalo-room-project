@@ -1023,7 +1023,9 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         16. `service_fees`: Phí dịch vụ (điện, nước, wifi)...
         17. `status`: Trạng thái phòng ("TRỐNG" hoặc "ĐÃ CHO THUÊ").
         18. `move_in_date`: Ngày có thể chuyển vào phòng để ở
-`       
+        19. `min_price`: Giá thuê thấp nhất
+        20. `max_price`: Giá thuê cao nhất
+
         DỮ LIỆU ĐẦU VÀO:
         - Tin nhắn: "{message_text}"
         - Media kèm theo: {json.dumps(all_current_media)}
@@ -1067,8 +1069,8 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
           "is_valid_search": true/false,
           "extracted_search": {{
             "location_search": "Tên đường hoặc phường/xã trích xuất được (hoặc null)",
-            "min_price": 0,
-            "max_price": 0
+            "min_price": Giá thuê thấp nhất,
+            "max_price": Giá thuê cao nhất
           }},
           "extracted_data": {{
             "address": "Địa chỉ phòng trọ...",
@@ -1564,8 +1566,8 @@ def parse_price_safe(room: dict) -> float:
     
 def search_rooms_with_filter(
     query_text: str, 
-    min_price: int = 0,
-    max_price: int,
+    min_price: str,
+    max_price: str,
     top_k: int = 20
 ) -> List[dict]:
     
