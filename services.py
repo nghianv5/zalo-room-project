@@ -1564,6 +1564,8 @@ def parse_price_safe(room: dict) -> float:
     
 def search_rooms_with_filter(
     query_text: str, 
+    min_price: int = 0,
+    max_price: int,
     top_k: int = 20
 ) -> List[dict]:
     
