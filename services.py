@@ -1040,15 +1040,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
            - Viết câu xác nhận ngắn gọn, lịch sự cho chủ nhà.
         2. Nếu action là "SEARCH_ROOM":
             THÔNG TIN BẮT BUỘC ĐỐI VỚI YÊU CẦU TÌM PHÒNG (SEARCH_ROOM):
-            1. `location_search`: Yêu cầu người dùng nhập địa chỉ muốn thuê
-            2. `min_price`: Giá thuê tối thiểu khách có thể trả (Dạng số float tính theo VNĐ, ví dụ: 2000000). Nếu khách không nói giá tối thiểu thì mặc định là 0.
-            3. `max_price`: Giá thuê tối đa khách có thể trả (Dạng số float tính theo VNĐ, ví dụ: 4000000).
-
-            QUY TẮC KIỂM TRA ĐIỀU KIỆN (BẮT BUỘC CHO SEARCH_ROOM):
-            - Nếu người dùng tìm phòng nhưng KHÔNG CÓ thông tin địa chỉ -> Set `is_valid_search` = false.
-            - Nếu người dùng tìm phòng nhưng KHÔNG CÓ Giá tối đa -> Set `is_valid_search` = false.
-            
-            - Nếu cung cấp đủ cả Khu vực (Đường/Phường) và Giá -> Set `is_valid_search` = true.
+          
             - Nếu "Danh sách phòng trống" RỖNG: Trả lời lịch sự báo hiện chưa có phòng phù hợp.
             - Nếu CÓ PHÒNG: Định dạng ngay danh sách phòng thành 1 tin nhắn phản hồi đẹp mắt trên Zalo:
                 + Đánh số thứ tự (1, 2, 3...).
