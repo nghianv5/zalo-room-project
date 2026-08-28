@@ -1132,8 +1132,8 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                 # Gọi tìm kiếm phòng có truyền kèm khoảng giá
                 search_results = search_rooms_with_filter(
                     query_text=full_query, 
-#                    min_price=min_p, 
-#                    max_price=max_p, 
+                    min_price=min_p, 
+                    max_price=max_p, 
                     top_k=20
                 )
 
