@@ -1598,6 +1598,7 @@ def search_rooms_with_filter(
             limit=top_k,
             with_payload=True
         )
+        print(f"search_result : {search_result}")
         return [hit.payload | {"id": hit.id} for hit in search_result.points if hit.payload]
     except Exception as e:
         print("❌ [SEARCH FILTER ERROR]:", e)
