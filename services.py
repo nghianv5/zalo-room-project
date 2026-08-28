@@ -997,8 +997,8 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
     phone = get_phone_by_user_id(db, user_id)
     try:
         raw_text = generate_content_with_retry(system_prompt, mime_type="application/json")
-            if not raw_text:
-                raise Exception("Gemini không phản hồi dữ liệu.")
+        if not raw_text:
+            raise Exception("Gemini không phản hồi dữ liệu.")
 
         result_data = json.loads(raw_text)
         ai_reply = result_data.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
