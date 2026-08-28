@@ -1151,16 +1151,10 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     - Giữ văn phong lịch sự, tư vấn nhiệt tình.
                     - Không tự bịa ra thông tin ngoài dữ liệu được cung cấp.
                     """
-                    
-                    # 2. Gọi model Gemini để sinh response (sử dụng instance client của bạn)
-                    response = client.models.generate_content(
-                        model="gemini-2.5-flash",
-                        contents=prompt_format_rooms
-                    )
-                    
+
+                    response = generate_content_with_retry(prompt_format_rooms, mime_type="application/json")
                     ai_reply = response.text
-                    send_zalo_message(user_id, ai_reply)
-                    return
+
                 # Vì là tìm kiếm nên không đính kèm media đăng phòng của người dùng
                 urls_to_send = []
 
