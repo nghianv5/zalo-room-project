@@ -996,8 +996,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
     
     phone = get_phone_by_user_id(db, user_id)
     try:
-        relevant_rooms = search_rooms_by_vector(message_text, top_k=5)
-        print("🔍 [DEBUG] Kết quả Vector Search:", relevant_rooms)
+        
         system_prompt = f"""
         Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ thông minh trên Zalo.
         
@@ -1028,7 +1027,6 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         DỮ LIỆU ĐẦU VÀO:
         - Tin nhắn: "{message_text}"
         - Media kèm theo: {json.dumps(all_current_media)}
-        - Phòng khớp từ Vector Search: {json.dumps(relevant_rooms, ensure_ascii=False)}
 
         QUY TẮC PHÂN LOẠI ACTION:
         - "ADD_ROOM": Dùng khi người dùng ĐĂNG PHÒNG MỚI hoặc CẬP NHẬT/SỬA BẤT KỲ THÔNG TIN NÀO CỦA PHÒNG.
@@ -1104,7 +1102,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         ai_reply = result_data.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
         action = result_data.get("action")
         extracted = result_data.get("extracted_data", {})
-        existing_point_id = relevant_rooms[0].get("id") if (relevant_rooms and len(relevant_rooms) > 0) else None
+        
         print(f"landlord_phone: {extracted.get("landlord_phone")}")
         if action == "SEARCH_ROOM":
             is_valid_search = result_data.get("is_valid_search", False)
@@ -1180,9 +1178,12 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                 if message in ("SUCCESS"):
                     get_get_and_clear_pending_media(user_id)
                
-        elif action == "UPDATE_STATUS" and existing_point_id:
-            new_status = extracted.get("status") or "ĐÃ CHO THUÊ"
-            update_room_status_in_db(point_id=existing_point_id, new_status=new_status, zalo_user_id=user_id)
+        elif action == "UPDATE_STATUS":
+            relevant_rooms = search_rooms_by_vector(message_text, top_k=5)
+            existing_point_id = relevant_rooms[0].get("id") if (relevant_rooms and len(relevant_rooms) > 0) else None
+            if existing_point_id:
+                new_status = extracted.get("status") or "ĐÃ CHO THUÊ"
+                update_room_status_in_db(point_id=existing_point_id, new_status=new_status, zalo_user_id=user_id)
 
     except Exception as err:
         print("❌ [AI Logic Exception]:", err)
