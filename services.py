@@ -1132,7 +1132,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     max_price=max_p, 
                     top_k=20
                 )
-
+                print(f"search_result : {search_results}")
                 if not search_results:
                     ai_reply = f"Dạ tiếc quá, hệ thống chưa tìm thấy phòng nào ở khu vực **{location_query}** với tầm giá từ **{min_p:,.0f}đ đến {max_p:,.0f}đ** ạ!"
                 else:
@@ -1598,7 +1598,7 @@ def search_rooms_with_filter(
             limit=top_k,
             with_payload=True
         )
-        print(f"search_result : {search_result}")
+        
         return [hit.payload | {"id": hit.id} for hit in search_result.points if hit.payload]
     except Exception as e:
         print("❌ [SEARCH FILTER ERROR]:", e)
