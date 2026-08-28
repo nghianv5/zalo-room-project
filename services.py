@@ -1152,8 +1152,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     - Không tự bịa ra thông tin ngoài dữ liệu được cung cấp.
                     """
 
-                    response = generate_content_with_retry(prompt_format_rooms, mime_type="application/json")
-                    ai_reply = response.text
+                    ai_reply = generate_content_with_retry(prompt_format_rooms, mime_type="application/json")
 
                 # Vì là tìm kiếm nên không đính kèm media đăng phòng của người dùng
                 urls_to_send = []
