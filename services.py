@@ -1580,21 +1580,21 @@ def search_rooms_with_filter(
         )
     ]
 
-    # 🆕 Bổ sung lọc theo khoảng Giá tối thiểu - Giá tối đa
-    price_range = {}
-    if min_price > 0:
-        price_range["gte"] = min_price
-    if max_price > 0:
-        price_range["lte"] = max_price
-
-    if price_range:
-        must_conditions.append(
-            qdrant_models.FieldCondition(
-                key="price",
-                range=qdrant_models.Range(**price_range)
-            )
-        )
-
+#    # 🆕 Bổ sung lọc theo khoảng Giá tối thiểu - Giá tối đa
+#    price_range = {}
+#    if min_price > 0:
+#        price_range["gte"] = min_price
+#    if max_price > 0:
+#        price_range["lte"] = max_price
+#
+#    if price_range:
+#        must_conditions.append(
+#            qdrant_models.FieldCondition(
+#                key="price",
+#                range=qdrant_models.Range(**price_range)
+#            )
+#        )
+#
     status_filter = qdrant_models.Filter(must=must_conditions)
     query_vector = get_text_embedding(query_text)
     
