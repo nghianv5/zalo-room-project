@@ -999,69 +999,12 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         
         system_prompt = f"""
         Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ thông minh trên Zalo.
-        
-        LỊCH SỬ HỘI THOẠI GẦN ĐÂY CỦA NGUỜI DÙNG:
-        {history_context_str}
-        
-        Phân tích tin nhắn người dùng và trích xuất đúng 13 trường thông tin:
-
-        1. `address`: Địa chỉ đầy đủ gộp lại.
-        2. `room_name`: Tên hoặc số phòng (VD: Phòng 301, Phòng tầng 2...).
-        3. `price`: Giá thuê.
-        4. `floor`: Tầng bao nhiêu.
-        5. `is_private_bathroom`: Vệ sinh riêng hay khép kín hay không.
-        6. `has_ac`:  Điều hoà có hay không?
-        7. `has_heater`: có bình nóng lạnh không?
-        8. `has_washer`: Có máy giặt không?
-        9. `allow_pets`: Có cho nuôi pet không?
-        10. `has_balcony`: Có ban công không?
-        11. `has_window`: Có cửa sổ không?
-        12. `has_fingerprint_lock`: Ra vào bằng khoá vân tay có hay không?
-        13. `parking_info`: có chỗ để xe không?
-        14. `max_occupants`: số ng ở tối đã
-        15. `other_amenities`: Có thêm tiện ích gì khác
-        16. `service_fees`: Phí dịch vụ (điện, nước, wifi)...
-        17. `status`: Trạng thái phòng ("TRỐNG" hoặc "ĐÃ CHO THUÊ").
-        18. `move_in_date`: Ngày có thể chuyển vào phòng để ở
-        19. `min_price`: Giá thuê thấp nhất
-        20. `max_price`: Giá thuê cao nhất
-
-        DỮ LIỆU ĐẦU VÀO:
-        - Tin nhắn: "{message_text}"
-        - Media kèm theo: {json.dumps(all_current_media)}
 
         QUY TẮC PHÂN LOẠI ACTION:
         - "ADD_ROOM": Dùng khi người dùng ĐĂNG PHÒNG MỚI hoặc CẬP NHẬT/SỬA BẤT KỲ THÔNG TIN NÀO CỦA PHÒNG.
         - "UPDATE_STATUS": CHỈ DÙNG khi người dùng báo phòng "ĐÃ CHO THUÊ", "ĐÃ CHỐT" hoặc "ĐỔI SANG TRỐNG".
         - "SEARCH_ROOM": Dùng khi khách có nhu cầu TÌM KIẾM phòng trọ.
 
-        HƯỚNG DẪN TẠO `ai_reply` CHO TỪNG ACTION:
-        1. Nếu action là "ADD_ROOM" hoặc "UPDATE_STATUS": 
-           - Viết câu xác nhận ngắn gọn, lịch sự cho chủ nhà.
-        2. Nếu action là "SEARCH_ROOM":
-            THÔNG TIN BẮT BUỘC ĐỐI VỚI YÊU CẦU TÌM PHÒNG (SEARCH_ROOM):
-            1. `location_search`: Yêu cầu người dùng nhập địa chỉ muốn thuê
-            2. `min_price`: Giá thuê tối thiểu khách có thể trả (Dạng số float tính theo VNĐ, ví dụ: 2000000). Nếu khách không nói giá tối thiểu thì mặc định là 0.
-            3. `max_price`: Giá thuê tối đa khách có thể trả (Dạng số float tính theo VNĐ, ví dụ: 4000000).
-
-            QUY TẮC KIỂM TRA ĐIỀU KIỆN (BẮT BUỘC CHO SEARCH_ROOM):
-            - Nếu người dùng tìm phòng nhưng KHÔNG CÓ thông tin địa chỉ -> Set `is_valid_search` = false.
-            - Nếu người dùng tìm phòng nhưng KHÔNG CÓ Giá tối đa -> Set `is_valid_search` = false.
-            
-            - Nếu cung cấp đủ cả Khu vực (Đường/Phường) và Giá -> Set `is_valid_search` = true.
-            - Nếu "Danh sách phòng trống" RỖNG: Trả lời lịch sự báo hiện chưa có phòng phù hợp.
-            - Nếu CÓ PHÒNG: Định dạng ngay danh sách phòng thành 1 tin nhắn phản hồi đẹp mắt trên Zalo:
-                + Đánh số thứ tự (1, 2, 3...).
-                + Tuyệt đối KHÔNG hiển thị các trường ghi "[Chưa cập nhật]", "Không", "Chưa rõ", "null", hoặc rỗng.
-                + Bắt buộc hiển thị: Mã phòng, Tên phòng, Địa chỉ, Giá thuê, Media URLs (nếu có).
-                + Dùng emoji sinh động. KHÔNG tự chèn đường link ảnh vào văn bản.
-                + Mỗi phòng liệt kê ngắn gọn: Tên/Số phòng, Địa chỉ, Giá thuê, và danh sách tiện ích có sẵn.
-                + Dùng icon/emoji sinh động. KHÔNG chèn bất kỳ đường link ảnh nào.
-                + Phải có thông tin mã phòng để người dùng đặt phòng
-                + Nếu đường link media media_urls tồn tại thì phải hiển thị
-
-        
-          
         
         TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
         {{
@@ -1071,29 +1014,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
             "location_search": "Tên đường hoặc phường/xã trích xuất được (hoặc null)",
             "min_price": Giá thuê thấp nhất,
             "max_price": Giá thuê cao nhất
-          }},
-          "extracted_data": {{
-            "address": "Địa chỉ phòng trọ...",
-            "room_name": "Tên phòng trọ...",
-            "price": "Giá thuê (ví dụ: 3.5 triệu)...",
-            "floor": "Tầng số...",
-            "is_private_bathroom": "Có/Không",
-            "has_ac": "Có/Không",
-            "has_heater": "Có/Không",
-            "has_washer": "Có/Không",
-            "allow_pets": "Có/Không",
-            "has_balcony": "Có/Không",
-            "has_window": "Có/Không",
-            "has_fingerprint_lock": "Có/Không",
-            "parking_info": "Thông tin để xe...",
-            "max_occupants": "Số người ở tối đa...",
-            "other_amenities": "Tiện ích khác...",
-            "service_fees": "Phí dịch vụ (điện, nước, wifi)...",
-            "move_in_date": "Ngày có thể chuyển vào...",
-            "media_urls": {json.dumps(all_current_media)},
-            "landlord_phone": "{phone}"
-          }},
-          "ai_reply": "Mô tả chi tiết dạng văn bản đẹp mắt..."
+          }}
         }}
         """
                 
@@ -1106,12 +1027,8 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         if not cleaned_text:
             raise ValueError("Phản hồi từ Gemini bị rỗng sau khi làm sạch.")
         result_data = json.loads(cleaned_text)
-        ai_reply = result_data.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
-        print(f"ai_reply 1: {ai_reply}")
         action = result_data.get("action")
-        extracted = result_data.get("extracted_data", {})
-        
-        print(f"landlord_phone: {extracted.get("landlord_phone")}")
+ 
         if action == "SEARCH_ROOM":
             is_valid_search = result_data.get("is_valid_search", False)
         
@@ -1151,8 +1068,11 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     # ... (Đoạn gọi Gemini định dạng danh sách phòng giữ nguyên như cũ) ...
                     # 1. Chuẩn bị Prompt cho Gemini định dạng danh sách phòng
                     prompt_format_rooms = f"""
-                    Bạn là một trợ lý tư vấn tìm phòng trọ thân thiện và chuyên nghiệp.
-                    Dưới đây là danh sách các phòng trọ phù hợp với yêu cầu của khách hàng:
+                    Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ thông minh trên Zalo.
+                    
+                    LỊCH SỬ HỘI THOẠI GẦN ĐÂY CỦA NGUỜI DÙNG:
+                    {history_context_str}
+                    
                     Phân tích tin nhắn người dùng và trích xuất đúng 13 trường thông tin:
 
                     1. `address`: Địa chỉ đầy đủ gộp lại.
@@ -1175,25 +1095,77 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     18. `move_in_date`: Ngày có thể chuyển vào phòng để ở
                     19. `min_price`: Giá thuê thấp nhất
                     20. `max_price`: Giá thuê cao nhất
+
+                    DỮ LIỆU ĐẦU VÀO:
+                    - Tin nhắn: "{message_text}"
+                    - Media kèm theo: {json.dumps(all_current_media)}
+                    - Phòng khớp từ Vector Search: {json.dumps(search_results, ensure_ascii=False)}
+
+                    QUY TẮC PHÂN LOẠI ACTION:
+                    - "ADD_ROOM": Dùng khi người dùng ĐĂNG PHÒNG MỚI hoặc CẬP NHẬT/SỬA BẤT KỲ THÔNG TIN NÀO CỦA PHÒNG.
+                    - "UPDATE_STATUS": CHỈ DÙNG khi người dùng báo phòng "ĐÃ CHO THUÊ", "ĐÃ CHỐT" hoặc "ĐỔI SANG TRỐNG".
+                    - "SEARCH_ROOM": Dùng khi khách có nhu cầu TÌM KIẾM phòng trọ.
+
+                    HƯỚNG DẪN TẠO `ai_reply` CHO TỪNG ACTION:
+                    1. Nếu action là "ADD_ROOM" hoặc "UPDATE_STATUS": 
+                       - Viết câu xác nhận ngắn gọn, lịch sự cho chủ nhà.
+                    2. Nếu action là "SEARCH_ROOM":
+                        THÔNG TIN BẮT BUỘC ĐỐI VỚI YÊU CẦU TÌM PHÒNG (SEARCH_ROOM):
+                        1. `location_search`: Yêu cầu người dùng nhập địa chỉ muốn thuê
+                        2. `min_price`: Giá thuê tối thiểu khách có thể trả (Dạng số float tính theo VNĐ, ví dụ: 2000000). Nếu khách không nói giá tối thiểu thì mặc định là 0.
+                        3. `max_price`: Giá thuê tối đa khách có thể trả (Dạng số float tính theo VNĐ, ví dụ: 4000000).
+
+                        QUY TẮC KIỂM TRA ĐIỀU KIỆN (BẮT BUỘC CHO SEARCH_ROOM):
+                        - Nếu người dùng tìm phòng nhưng KHÔNG CÓ thông tin địa chỉ -> Set `is_valid_search` = false.
+                        - Nếu người dùng tìm phòng nhưng KHÔNG CÓ Giá tối đa -> Set `is_valid_search` = false.
+                        
+                        - Nếu cung cấp đủ cả Khu vực (Đường/Phường) và Giá -> Set `is_valid_search` = true.
+                        - Nếu "Danh sách phòng trống" RỖNG: Trả lời lịch sự báo hiện chưa có phòng phù hợp.
+                        - Nếu CÓ PHÒNG: Định dạng ngay danh sách phòng thành 1 tin nhắn phản hồi đẹp mắt trên Zalo:
+                            + Đánh số thứ tự (1, 2, 3...).
+                            + Tuyệt đối KHÔNG hiển thị các trường ghi "[Chưa cập nhật]", "Không", "Chưa rõ", "null", hoặc rỗng.
+                            + Bắt buộc hiển thị: Mã phòng, Tên phòng, Địa chỉ, Giá thuê, Media URLs (nếu có).
+                            + Dùng emoji sinh động. KHÔNG tự chèn đường link ảnh vào văn bản.
+                            + Mỗi phòng liệt kê ngắn gọn: Tên/Số phòng, Địa chỉ, Giá thuê, và danh sách tiện ích có sẵn.
+                            + Dùng icon/emoji sinh động. KHÔNG chèn bất kỳ đường link ảnh nào.
+                            + Phải có thông tin mã phòng để người dùng đặt phòng
+                            + Nếu đường link media media_urls tồn tại thì phải hiển thị
+
                     
-                    Yêu cầu của khách: "{message_text}"
-                    Danh sách phòng tìm được: {search_results}
+                      
                     
-                    Hãy viết câu trả lời tổng hợp các phòng trên cho khách hàng. 
-                    Yêu cầu:
-                    - Liệt kê các phòng rõ ràng, dễ đọc (tên/mã phòng, địa chỉ, giá tiền, tiện ích nổi bật).
-                    - Giữ văn phong lịch sự, tư vấn nhiệt tình.
-                    - Không tự bịa ra thông tin ngoài dữ liệu được cung cấp.
-                    - Nếu "Danh sách phòng trống" RỖNG: Trả lời lịch sự báo hiện chưa có phòng phù hợp.
-                    - Nếu CÓ PHÒNG: Định dạng ngay danh sách phòng thành 1 tin nhắn phản hồi đẹp mắt trên Zalo:
-                        + Đánh số thứ tự (1, 2, 3...).
-                        + Tuyệt đối KHÔNG hiển thị các trường ghi "[Chưa cập nhật]", "Không", "Chưa rõ", "null", hoặc rỗng.
-                        + Bắt buộc hiển thị: Mã phòng, Tên phòng, Địa chỉ, Giá thuê, Media URLs (nếu có).
-                        + Dùng emoji sinh động. KHÔNG tự chèn đường link ảnh vào văn bản.
-                        + Mỗi phòng liệt kê ngắn gọn: Tên/Số phòng, Địa chỉ, Giá thuê, và danh sách tiện ích có sẵn.
-                        + Dùng icon/emoji sinh động. KHÔNG chèn bất kỳ đường link ảnh nào.
-                        + Phải có thông tin mã phòng để người dùng đặt phòng
-                        + Nếu đường link media media_urls tồn tại thì phải hiển thị
+                    TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
+                    {{
+                      "action": "ADD_ROOM | SEARCH_ROOM | UPDATE_STATUS",
+                      "is_valid_search": true/false,
+                      "extracted_search": {{
+                        "location_search": "Tên đường hoặc phường/xã trích xuất được (hoặc null)",
+                        "min_price": Giá thuê thấp nhất,
+                        "max_price": Giá thuê cao nhất
+                      }},
+                      "extracted_data": {{
+                        "address": "Địa chỉ phòng trọ...",
+                        "room_name": "Tên phòng trọ...",
+                        "price": "Giá thuê (ví dụ: 3.5 triệu)...",
+                        "floor": "Tầng số...",
+                        "is_private_bathroom": "Có/Không",
+                        "has_ac": "Có/Không",
+                        "has_heater": "Có/Không",
+                        "has_washer": "Có/Không",
+                        "allow_pets": "Có/Không",
+                        "has_balcony": "Có/Không",
+                        "has_window": "Có/Không",
+                        "has_fingerprint_lock": "Có/Không",
+                        "parking_info": "Thông tin để xe...",
+                        "max_occupants": "Số người ở tối đa...",
+                        "other_amenities": "Tiện ích khác...",
+                        "service_fees": "Phí dịch vụ (điện, nước, wifi)...",
+                        "move_in_date": "Ngày có thể chuyển vào...",
+                        "media_urls": {json.dumps(all_current_media)},
+                        "landlord_phone": "{phone}"
+                      }},
+                      "ai_reply": "Mô tả chi tiết dạng văn bản đẹp mắt..."
+                    }}
                     """
                     raw_text_search = generate_content_with_retry(prompt_format_rooms, mime_type="application/json")
                     cleaned_text_search = clean_json_string(raw_text_search)
