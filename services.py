@@ -1618,8 +1618,8 @@ def parse_price_safe(room: dict) -> float:
     
 def search_rooms_with_filter(
     query_text: str, 
-    min_price: str,
-    max_price: str,
+    min_price: int = 0, 
+    max_price: int = 0,
     top_k: int = 20
 ) -> List[dict]:
     
@@ -1652,7 +1652,7 @@ def search_rooms_with_filter(
         search_result = qdrant_client.query_points(
             collection_name=COLLECTION_NAME,
             query=query_vector if query_vector else None,
-#            query_filter=status_filter,
+            query_filter=status_filter,
             limit=top_k,
             with_payload=True
         )
