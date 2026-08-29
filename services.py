@@ -1167,8 +1167,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     Yêu cầu của khách: "{message_text}"
                     Danh sách phòng tìm được: {search_results}
                     
-                    Hãy viết câu trả lời tổng hợp các phòng trên cho khách hàng. 
-                    Yêu cầu:
+                    HƯỚNG DẪN TẠO `ai_reply`:
                     - Liệt kê các phòng rõ ràng, dễ đọc (tên/mã phòng, địa chỉ, giá tiền, tiện ích nổi bật).
                     - Giữ văn phong lịch sự, tư vấn nhiệt tình.
                     - Không tự bịa ra thông tin ngoài dữ liệu được cung cấp.
@@ -1182,6 +1181,12 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                         + Dùng icon/emoji sinh động. KHÔNG chèn bất kỳ đường link ảnh nào.
                         + Phải có thông tin mã phòng để người dùng đặt phòng
                         + Nếu đường link media media_urls tồn tại thì phải hiển thị
+                        
+                    TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
+                    {{
+                      "ai_reply": "Mô tả chi tiết dạng văn bản đẹp mắt..."
+                    }}
+                    
                     """
                     raw_text_search = generate_content_with_retry(prompt_format_rooms, mime_type="application/json")
                     cleaned_text_search = clean_json_string(raw_text_search)
