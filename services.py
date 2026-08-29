@@ -1191,8 +1191,10 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                         + Phải có thông tin mã phòng để người dùng đặt phòng
                         + Nếu đường link media media_urls tồn tại thì phải hiển thị
                     """
-
-                    ai_reply = generate_content_with_retry(prompt_format_rooms, mime_type="application/json")
+                    raw_text = generate_content_with_retry(prompt_format_rooms, mime_type="application/json")
+                    result_data = json.loads(raw_text)
+                    ai_reply = result_data.get("ai_reply")
+                    
 
                 # Vì là tìm kiếm nên không đính kèm media đăng phòng của người dùng
                 urls_to_send = []
