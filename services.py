@@ -1199,6 +1199,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     raw_text = generate_content_with_retry(prompt_format_rooms, mime_type="application/json")
                     result_data = json.loads(raw_text)
                     ai_reply = result_data.get("ai_reply")
+                    print(f"ai_reply: {ai_reply}")
                     
 
                 # Vì là tìm kiếm nên không đính kèm media đăng phòng của người dùng
@@ -1567,6 +1568,9 @@ def extract_viewing_time(text: str):
  
         
 def split_text_by_limit(text: str, max_length: int = 1800) -> List[str]:
+    # Kiểm tra nếu text là None hoặc rỗng
+    if not text:
+        return []
     """Cắt nhỏ văn bản dưới max_length ký tự, ưu tiên cắt tại vị trí xuống dòng"""
     if len(text) <= max_length:
         return [text]
