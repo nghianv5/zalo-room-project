@@ -1107,6 +1107,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
             raise ValueError("Phản hồi từ Gemini bị rỗng sau khi làm sạch.")
         result_data = json.loads(cleaned_text)
         ai_reply = result_data.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
+        print(f"ai_reply 1: {ai_reply}")
         action = result_data.get("action")
         extracted = result_data.get("extracted_data", {})
         
@@ -1198,37 +1199,24 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     cleaned_text_search = clean_json_string(raw_text_search)
                     # 1. Parse JSON
                     result_data_search = json.loads(cleaned_text_search)
-
-                    # Giả sử raw_response là dữ liệu nhận về từ Gemini/Hệ thống
-                    # Bước 1: Parse về JSON/Dict an toàn nếu nó đang là chuỗi string
-                    if isinstance(result_data_search, str):
-                        try:
-                            result_data_search = json.loads(result_data_search)
-                        except Exception:
-                            result_data_search = {}
-
-                    # Bước 2: Xử lý nếu kết quả là List (Lấy phần tử đầu tiên)
-                    if isinstance(result_data_search, list):
-                        print("Log: Dữ liệu là List -> Lấy phần tử đầu")
-                        result_data_search = result_data_search[0] if len(result_data_search) > 0 and isinstance(result_data_search[0], dict) else {}
-
-                    # Bước 3: Bóc tách dữ liệu khi chắc chắn là Dict
-                    if isinstance(result_data_search, dict) and result_data_search:
-                        print("Log: 2222222 -> Bóc tách Dict thành công")
-                        
-                        # Ưu tiên lấy 'zalo_message', nếu không có thì tìm 'ai_reply'
-                        ai_reply = result_data_search.get("zalo_message") or result_data_search.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
-                        action = result_data_search.get("action")
-                        extracted = result_data_search.get("extracted_data", {})
-                    else:
-                        print("Log: 333333333 -> Dữ liệu rỗng hoặc sai định dạng")
-                        ai_reply = "Dạ em đã ghi nhận thông tin rồi ạ!"
-                        action = None
-                        extracted = {}
-                    print(f"result_data_search: {result_data_search}")
-                    print(f"ai_reply: {ai_reply}")
                     
-
+                    ai_reply = result_data_search.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
+                    
+                    
+                    raw_text_search = generate_content_with_retry(prompt_format_rooms, mime_type="application/json")
+                    
+                    
+                    if not raw_text_search:
+                        raise Exception("Gemini không phản hồi dữ liệu.")
+                        
+                    # Clean chuỗi trước khi load JSON
+                    cleaned_text_search = clean_json_string(raw_text_search)
+                    if not cleaned_text_search:
+                        raise ValueError("Phản hồi từ Gemini bị rỗng sau khi làm sạch.")
+                    result_data = json.loads(cleaned_text_search)
+                    ai_reply = result_data.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
+    
+                    
                 # Vì là tìm kiếm nên không đính kèm media đăng phòng của người dùng
                 urls_to_send = []
 
