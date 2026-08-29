@@ -1040,7 +1040,15 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
            - Viết câu xác nhận ngắn gọn, lịch sự cho chủ nhà.
         2. Nếu action là "SEARCH_ROOM":
             THÔNG TIN BẮT BUỘC ĐỐI VỚI YÊU CẦU TÌM PHÒNG (SEARCH_ROOM):
-          
+            1. `location_search`: Yêu cầu người dùng nhập địa chỉ muốn thuê
+            2. `min_price`: Giá thuê tối thiểu khách có thể trả (Dạng số float tính theo VNĐ, ví dụ: 2000000). Nếu khách không nói giá tối thiểu thì mặc định là 0.
+            3. `max_price`: Giá thuê tối đa khách có thể trả (Dạng số float tính theo VNĐ, ví dụ: 4000000).
+
+            QUY TẮC KIỂM TRA ĐIỀU KIỆN (BẮT BUỘC CHO SEARCH_ROOM):
+            - Nếu người dùng tìm phòng nhưng KHÔNG CÓ thông tin địa chỉ -> Set `is_valid_search` = false.
+            - Nếu người dùng tìm phòng nhưng KHÔNG CÓ Giá tối đa -> Set `is_valid_search` = false.
+            
+            - Nếu cung cấp đủ cả Khu vực (Đường/Phường) và Giá -> Set `is_valid_search` = true.
             - Nếu "Danh sách phòng trống" RỖNG: Trả lời lịch sự báo hiện chưa có phòng phù hợp.
             - Nếu CÓ PHÒNG: Định dạng ngay danh sách phòng thành 1 tin nhắn phản hồi đẹp mắt trên Zalo:
                 + Đánh số thứ tự (1, 2, 3...).
@@ -1104,14 +1112,14 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
             # 🚨 TRƯỜNG HỢP 1: THIẾU THÔNG TIN BẮT BUỘC
             if 1==2:
                 print(f"landlor")
-#            if not is_valid_search:
-#                ai_reply = result_data.get(
-#                    "missing_info_message", 
-#                    "Dạ để tìm phòng chính xác nhất, bạn vui lòng cung cấp rõ:\n"
-#                    "1. Tên Đường hoặc Phường/Xã muốn thuê\n"
-#                    "2. Khoảng giá bạn muốn thuê (Ví dụ: từ 2 triệu đến 4 triệu)"
-#                )
-#                urls_to_send = []
+            if not is_valid_search:
+                ai_reply = result_data.get(
+                    "missing_info_message", 
+                    "Dạ để tìm phòng chính xác nhất, bạn vui lòng cung cấp rõ:\n"
+                    "1. Tên Đường hoặc Phường/Xã muốn thuê\n"
+                    "2. Khoảng giá bạn muốn thuê (Ví dụ: từ 2 triệu đến 4 triệu)"
+                )
+                urls_to_send = []
 
             # ✅ TRƯỜNG HỢP 2: ĐÃ ĐỦ THÔNG TIN -> TIẾN HÀNH TÌM KIẾM
             else:
@@ -1141,6 +1149,28 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     prompt_format_rooms = f"""
                     Bạn là một trợ lý tư vấn tìm phòng trọ thân thiện và chuyên nghiệp.
                     Dưới đây là danh sách các phòng trọ phù hợp với yêu cầu của khách hàng:
+                    Phân tích tin nhắn người dùng và trích xuất đúng 13 trường thông tin:
+
+                    1. `address`: Địa chỉ đầy đủ gộp lại.
+                    2. `room_name`: Tên hoặc số phòng (VD: Phòng 301, Phòng tầng 2...).
+                    3. `price`: Giá thuê.
+                    4. `floor`: Tầng bao nhiêu.
+                    5. `is_private_bathroom`: Vệ sinh riêng hay khép kín hay không.
+                    6. `has_ac`:  Điều hoà có hay không?
+                    7. `has_heater`: có bình nóng lạnh không?
+                    8. `has_washer`: Có máy giặt không?
+                    9. `allow_pets`: Có cho nuôi pet không?
+                    10. `has_balcony`: Có ban công không?
+                    11. `has_window`: Có cửa sổ không?
+                    12. `has_fingerprint_lock`: Ra vào bằng khoá vân tay có hay không?
+                    13. `parking_info`: có chỗ để xe không?
+                    14. `max_occupants`: số ng ở tối đã
+                    15. `other_amenities`: Có thêm tiện ích gì khác
+                    16. `service_fees`: Phí dịch vụ (điện, nước, wifi)...
+                    17. `status`: Trạng thái phòng ("TRỐNG" hoặc "ĐÃ CHO THUÊ").
+                    18. `move_in_date`: Ngày có thể chuyển vào phòng để ở
+                    19. `min_price`: Giá thuê thấp nhất
+                    20. `max_price`: Giá thuê cao nhất
                     
                     Yêu cầu của khách: "{message_text}"
                     Danh sách phòng tìm được: {search_results}
@@ -1150,6 +1180,16 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     - Liệt kê các phòng rõ ràng, dễ đọc (tên/mã phòng, địa chỉ, giá tiền, tiện ích nổi bật).
                     - Giữ văn phong lịch sự, tư vấn nhiệt tình.
                     - Không tự bịa ra thông tin ngoài dữ liệu được cung cấp.
+                    - Nếu "Danh sách phòng trống" RỖNG: Trả lời lịch sự báo hiện chưa có phòng phù hợp.
+                    - Nếu CÓ PHÒNG: Định dạng ngay danh sách phòng thành 1 tin nhắn phản hồi đẹp mắt trên Zalo:
+                        + Đánh số thứ tự (1, 2, 3...).
+                        + Tuyệt đối KHÔNG hiển thị các trường ghi "[Chưa cập nhật]", "Không", "Chưa rõ", "null", hoặc rỗng.
+                        + Bắt buộc hiển thị: Mã phòng, Tên phòng, Địa chỉ, Giá thuê, Media URLs (nếu có).
+                        + Dùng emoji sinh động. KHÔNG tự chèn đường link ảnh vào văn bản.
+                        + Mỗi phòng liệt kê ngắn gọn: Tên/Số phòng, Địa chỉ, Giá thuê, và danh sách tiện ích có sẵn.
+                        + Dùng icon/emoji sinh động. KHÔNG chèn bất kỳ đường link ảnh nào.
+                        + Phải có thông tin mã phòng để người dùng đặt phòng
+                        + Nếu đường link media media_urls tồn tại thì phải hiển thị
                     """
 
                     ai_reply = generate_content_with_retry(prompt_format_rooms, mime_type="application/json")
@@ -1581,29 +1621,29 @@ def search_rooms_with_filter(
     top_k: int = 20
 ) -> List[dict]:
     
-#    must_conditions = [
-#        qdrant_models.FieldCondition(
-#            key="status",
-#            match=qdrant_models.MatchValue(value="TRỐNG")
-#        )
-#    ]
+    must_conditions = [
+        qdrant_models.FieldCondition(
+            key="status",
+            match=qdrant_models.MatchValue(value="TRỐNG")
+        )
+    ]
 
-#    # 🆕 Bổ sung lọc theo khoảng Giá tối thiểu - Giá tối đa
-#    price_range = {}
-#    if min_price > 0:
-#        price_range["gte"] = min_price
-#    if max_price > 0:
-#        price_range["lte"] = max_price
-#
-#    if price_range:
-#        must_conditions.append(
-#            qdrant_models.FieldCondition(
-#                key="price",
-#                range=qdrant_models.Range(**price_range)
-#            )
-#        )
-#
-#    status_filter = qdrant_models.Filter(must=must_conditions)
+    # 🆕 Bổ sung lọc theo khoảng Giá tối thiểu - Giá tối đa
+    price_range = {}
+    if min_price > 0:
+        price_range["gte"] = min_price
+    if max_price > 0:
+        price_range["lte"] = max_price
+
+    if price_range:
+        must_conditions.append(
+            qdrant_models.FieldCondition(
+                key="price",
+                range=qdrant_models.Range(**price_range)
+            )
+        )
+
+    status_filter = qdrant_models.Filter(must=must_conditions)
     query_vector = get_text_embedding(query_text)
     print(f"query_text : {query_text}")
     try:
