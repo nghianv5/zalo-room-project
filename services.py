@@ -1123,7 +1123,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                 print(f"max_p : {max_p}")
                 
                 # Tạo chuỗi truy vấn kết hợp thông tin
-                full_query = f"{message_text} {location_query}"
+                full_query = f"{message_text}"
                 print(f"full_query : {full_query}")
                 # Gọi tìm kiếm phòng có truyền kèm khoảng giá
                 search_results = search_rooms_with_filter(
