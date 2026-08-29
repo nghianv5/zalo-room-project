@@ -1048,19 +1048,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
             - Nếu người dùng tìm phòng nhưng KHÔNG CÓ thông tin địa chỉ -> Set `is_valid_search` = false.
             - Nếu người dùng tìm phòng nhưng KHÔNG CÓ Giá tối đa -> Set `is_valid_search` = false.
             
-            - Nếu cung cấp đủ cả Khu vực (Đường/Phường) và Giá -> Set `is_valid_search` = true.
-            - Nếu "Danh sách phòng trống" RỖNG: Trả lời lịch sự báo hiện chưa có phòng phù hợp.
-            - Nếu CÓ PHÒNG: Định dạng ngay danh sách phòng thành 1 tin nhắn phản hồi đẹp mắt trên Zalo:
-                + Đánh số thứ tự (1, 2, 3...).
-                + Tuyệt đối KHÔNG hiển thị các trường ghi "[Chưa cập nhật]", "Không", "Chưa rõ", "null", hoặc rỗng.
-                + Bắt buộc hiển thị: Mã phòng, Tên phòng, Địa chỉ, Giá thuê, Media URLs (nếu có).
-                + Dùng emoji sinh động. KHÔNG tự chèn đường link ảnh vào văn bản.
-                + Mỗi phòng liệt kê ngắn gọn: Tên/Số phòng, Địa chỉ, Giá thuê, và danh sách tiện ích có sẵn.
-                + Dùng icon/emoji sinh động. KHÔNG chèn bất kỳ đường link ảnh nào.
-                + Phải có thông tin mã phòng để người dùng đặt phòng
-                + Nếu đường link media media_urls tồn tại thì phải hiển thị
-
-        
+            - Nếu cung cấp đủ địa chỉ và Giá -> Set `is_valid_search` = true.
           
         
         TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
