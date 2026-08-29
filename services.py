@@ -1202,16 +1202,19 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     # 2. Xử lý trường hợp Gemini trả về dạng List [...]
                     if isinstance(result_data_search, list):
                         if len(result_data_search) > 0 and isinstance(result_data_search[0], dict):
+                            print(f"111111:")
                             result_data_search = result_data_search[0]  # Lấy object đầu tiên trong list
                         else:
                             result_data_search = {}
 
                     # 3. An toàn bóc tách dữ liệu (Lúc này result_data_search chắc chắn là dict)
                     if isinstance(result_data_search, dict):
+                        print(f"2222222:")
                         ai_reply = result_data_search.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
                         action = result_data_search.get("action")
                         extracted = result_data_search.get("extracted_data", {})
                     else:
+                        print(f"333333333:")
                         ai_reply = "Dạ em đã ghi nhận thông tin rồi ạ!"
                         action = None
                         extracted = {}
