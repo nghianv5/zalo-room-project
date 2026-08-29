@@ -1199,22 +1199,29 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     # 1. Parse JSON
                     result_data_search = json.loads(cleaned_text_search)
 
-                    # 2. Xử lý trường hợp Gemini trả về dạng List [...]
-                    if isinstance(result_data_search, list):
-                        if len(result_data_search) > 0 and isinstance(result_data_search[0], dict):
-                            print(f"111111:")
-                            result_data_search = result_data_search[0]  # Lấy object đầu tiên trong list
-                        else:
+                    # Giả sử raw_response là dữ liệu nhận về từ Gemini/Hệ thống
+                    # Bước 1: Parse về JSON/Dict an toàn nếu nó đang là chuỗi string
+                    if isinstance(result_data_search, str):
+                        try:
+                            result_data_search = json.loads(result_data_search)
+                        except Exception:
                             result_data_search = {}
 
-                    # 3. An toàn bóc tách dữ liệu (Lúc này result_data_search chắc chắn là dict)
-                    if isinstance(result_data_search, dict):
-                        print(f"2222222:")
-                        ai_reply = result_data_search.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
+                    # Bước 2: Xử lý nếu kết quả là List (Lấy phần tử đầu tiên)
+                    if isinstance(result_data_search, list):
+                        print("Log: Dữ liệu là List -> Lấy phần tử đầu")
+                        result_data_search = result_data_search[0] if len(result_data_search) > 0 and isinstance(result_data_search[0], dict) else {}
+
+                    # Bước 3: Bóc tách dữ liệu khi chắc chắn là Dict
+                    if isinstance(result_data_search, dict) and result_data_search:
+                        print("Log: 2222222 -> Bóc tách Dict thành công")
+                        
+                        # Ưu tiên lấy 'zalo_message', nếu không có thì tìm 'ai_reply'
+                        ai_reply = result_data_search.get("zalo_message") or result_data_search.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
                         action = result_data_search.get("action")
                         extracted = result_data_search.get("extracted_data", {})
                     else:
-                        print(f"333333333:")
+                        print("Log: 333333333 -> Dữ liệu rỗng hoặc sai định dạng")
                         ai_reply = "Dạ em đã ghi nhận thông tin rồi ạ!"
                         action = None
                         extracted = {}
