@@ -1198,7 +1198,26 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     """
                     raw_text = generate_content_with_retry(prompt_format_rooms, mime_type="application/json")
                     result_data = json.loads(raw_text)
-                    ai_reply = result_data.get("ai_reply")
+                    # 1. Parse JSON
+                    result_data = json.loads(cleaned_text)
+
+                    # 2. Xử lý trường hợp Gemini trả về dạng List [...]
+                    if isinstance(result_data, list):
+                        if len(result_data) > 0 and isinstance(result_data[0], dict):
+                            result_data = result_data[0]  # Lấy object đầu tiên trong list
+                        else:
+                            result_data = {}
+
+                    # 3. An toàn bóc tách dữ liệu (Lúc này result_data chắc chắn là dict)
+                    if isinstance(result_data, dict):
+                        ai_reply = result_data.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
+                        action = result_data.get("action")
+                        extracted = result_data.get("extracted_data", {})
+                    else:
+                        ai_reply = "Dạ em đã ghi nhận thông tin rồi ạ!"
+                        action = None
+                        extracted = {}
+                    print(f"result_data: {result_data}")
                     print(f"ai_reply: {ai_reply}")
                     
 
