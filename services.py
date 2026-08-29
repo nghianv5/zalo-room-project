@@ -1115,8 +1115,6 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
             is_valid_search = result_data.get("is_valid_search", False)
         
             # 🚨 TRƯỜNG HỢP 1: THIẾU THÔNG TIN BẮT BUỘC
-            if 1==2:
-                print(f"landlor")
             if not is_valid_search:
                 ai_reply = result_data.get(
                     "missing_info_message", 
@@ -1196,28 +1194,28 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                         + Phải có thông tin mã phòng để người dùng đặt phòng
                         + Nếu đường link media media_urls tồn tại thì phải hiển thị
                     """
-                    raw_text = generate_content_with_retry(prompt_format_rooms, mime_type="application/json")
-                    result_data = json.loads(raw_text)
+                    raw_text_search = generate_content_with_retry(prompt_format_rooms, mime_type="application/json")
+                    cleaned_text_search = clean_json_string(raw_text_search)
                     # 1. Parse JSON
-                    result_data = json.loads(cleaned_text)
+                    result_data_search = json.loads(cleaned_text_search)
 
                     # 2. Xử lý trường hợp Gemini trả về dạng List [...]
-                    if isinstance(result_data, list):
-                        if len(result_data) > 0 and isinstance(result_data[0], dict):
-                            result_data = result_data[0]  # Lấy object đầu tiên trong list
+                    if isinstance(result_data_search, list):
+                        if len(result_data_search) > 0 and isinstance(result_data_search[0], dict):
+                            result_data_search = result_data_search[0]  # Lấy object đầu tiên trong list
                         else:
-                            result_data = {}
+                            result_data_search = {}
 
-                    # 3. An toàn bóc tách dữ liệu (Lúc này result_data chắc chắn là dict)
-                    if isinstance(result_data, dict):
-                        ai_reply = result_data.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
-                        action = result_data.get("action")
-                        extracted = result_data.get("extracted_data", {})
+                    # 3. An toàn bóc tách dữ liệu (Lúc này result_data_search chắc chắn là dict)
+                    if isinstance(result_data_search, dict):
+                        ai_reply = result_data_search.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
+                        action = result_data_search.get("action")
+                        extracted = result_data_search.get("extracted_data", {})
                     else:
                         ai_reply = "Dạ em đã ghi nhận thông tin rồi ạ!"
                         action = None
                         extracted = {}
-                    print(f"result_data: {result_data}")
+                    print(f"result_data_search: {result_data_search}")
                     print(f"ai_reply: {ai_reply}")
                     
 
