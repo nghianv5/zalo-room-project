@@ -1100,7 +1100,12 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         raw_text = generate_content_with_retry(system_prompt, mime_type="application/json")
         if not raw_text:
             raise Exception("Gemini không phản hồi dữ liệu.")
-        result_data = json.loads(raw_text)
+            
+        # Clean chuỗi trước khi load JSON
+        cleaned_text = clean_json_string(raw_text)
+        if not cleaned_text:
+            raise ValueError("Phản hồi từ Gemini bị rỗng sau khi làm sạch.")
+        result_data = json.loads(cleaned_text)
         ai_reply = result_data.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
         action = result_data.get("action")
         extracted = result_data.get("extracted_data", {})
@@ -1839,3 +1844,12 @@ def clear_chat_history(user_id: str):
     """Xóa toàn bộ lịch sử hội thoại của user trong Redis"""
     cache_key = f"chat_history:{user_id}"
     redis_client.delete(cache_key)
+    
+def clean_json_string(text: str) -> str:
+    """Loại bỏ các ký tự markdown block và khoảng trắng thừa từ phản hồi của AI."""
+    if not text:
+        return ""
+    # Xóa ```json và ``` ở đầu/cuối chuỗi
+    cleaned = re.sub(r"^```(?:json)?\s*", "", text.strip(), flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    return cleaned.strip()
