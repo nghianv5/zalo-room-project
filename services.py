@@ -1116,7 +1116,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
             # ✅ TRƯỜNG HỢP 2: ĐÃ ĐỦ THÔNG TIN -> TIẾN HÀNH TÌM KIẾM
             else:
                 search_params = result_data.get("extracted_search", {})
-                location_query = search_params.get("location_search", "")
+                location_search = search_params.get("location_search", "")
                 min_p = search_params.get("min_price", 0)
                 max_p = search_params.get("max_price", 0)
                 print(f"min_p : {min_p}")
@@ -1128,13 +1128,14 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                 # Gọi tìm kiếm phòng có truyền kèm khoảng giá
                 search_results = search_rooms_with_filter(
                     query_text=full_query, 
+                    location_search=location_search,
                     min_price=min_p, 
                     max_price=max_p, 
                     top_k=20
                 )
                 print(f"search_result : {search_results}")
                 if not search_results:
-                    ai_reply = f"Dạ tiếc quá, hệ thống chưa tìm thấy phòng nào ở khu vực **{location_query}** với tầm giá từ **{min_p:,.0f}đ đến {max_p:,.0f}đ** ạ!"
+                    ai_reply = f"Dạ tiếc quá, hệ thống chưa tìm thấy phòng nào ở khu vực **{location_search}** với tầm giá từ **{min_p:,.0f}đ đến {max_p:,.0f}đ** ạ!"
                 else:
                     # ... (Đoạn gọi Gemini định dạng danh sách phòng giữ nguyên như cũ) ...
                     # 1. Chuẩn bị Prompt cho Gemini định dạng danh sách phòng
