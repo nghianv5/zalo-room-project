@@ -95,8 +95,14 @@ try:
     qdrant_client.create_payload_index(
         collection_name=COLLECTION_NAME,
         field_name="address",
-        field_schema=qdrant_models.PayloadSchemaType.KEYWORD,
+        field_schema=qdrant_models.TextIndexParams(
+            type="text",
+            tokenizer=qdrant_models.TokenizerType.WORD, # Tách từ để tìm kiếm linh hoạt (MatchText)
+            min_token_len=2,
+            max_token_len=20,
+            lowercase=True, # Không phân biệt hoa/thường
     )
+)
     qdrant_client.create_payload_index(
         collection_name=COLLECTION_NAME,
         field_name="status",
