@@ -1635,6 +1635,7 @@ def parse_price_safe(room: dict) -> float:
     
 def search_rooms_with_filter(
     query_text: str, 
+    location_search: str = None,
     min_price: int = 0, 
     max_price: int = 0,
     top_k: int = 20
@@ -1646,6 +1647,15 @@ def search_rooms_with_filter(
             match=qdrant_models.MatchValue(value="TRỐNG")
         )
     ]
+
+
+    if location_search:
+        must_conditions.append(
+            qdrant_models.FieldCondition(
+                key="address",
+                match=qdrant_models.MatchText(text=location_search) # Tìm tương đối tên đường/quận trong address
+            )
+        )
 
     # 🆕 Bổ sung lọc theo khoảng Giá tối thiểu - Giá tối đa
     price_range = {}
