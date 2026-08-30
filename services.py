@@ -1147,6 +1147,13 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     # 1. Chuẩn bị Prompt cho Gemini định dạng danh sách phòng
                     prompt_format_rooms = f"""
                     Bạn là một trợ lý tư vấn tìm phòng trọ thân thiện và chuyên nghiệp.
+                    Nhiệm vụ của bạn:
+                    1. So sánh danh sách tiện ích của phòng với tiện ích khách yêu cầu trong prompt.
+                    2. Nếu phòng TRÙNG KHỚP HOÀN TOÀN: Giới thiệu phòng bình thường.
+                    3. Nếu phòng CHỈ ĐÁP ỨNG MỘT PHẦN (ví dụ: Đúng giá/vị trí nhưng KHÔNG CÓ Tủ Lạnh): 
+                       - Bạn BẮT BUỘC phải giải thích rõ cho khách: "Mình tìm thấy phòng đúng khu vực Phan Thị Hành giá 4.5tr, tuy nhiên phòng này HỆN CHƯA CÓ TIVI. Bạn tham khảo qua nhé:"
+                    4. Ưu tiên trả về danh sách kết quả gần giống nhất. Nếu KHÔNG CÓ phòng nào thỏa mãn địa điểm và giá yêu cầu: Thông báo không có phòng phù hợp.
+                    
                     Dưới đây là danh sách các phòng trọ phù hợp với yêu cầu của khách hàng:
                     Phân tích tin nhắn người dùng và trích xuất đúng 13 trường thông tin:
 
