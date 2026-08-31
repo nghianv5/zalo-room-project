@@ -622,7 +622,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         return "SUCCESS"
     except Exception as e:
         print("❌ [QDRANT UPSERT EXCEPTION]:", e)
-        return f"❌ [QDRANT UPSERT EXCEPTION]: {e}"
+        raise Exception(f"❌ [QDRANT UPSERT EXCEPTION]: {e}")
 
 def search_rooms_by_vector(query_text: str, top_k: int = 20) -> List[dict]:
     """
