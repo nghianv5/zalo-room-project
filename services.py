@@ -1116,7 +1116,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         
         print(f"landlord_phone: {extracted.get("landlord_phone")}")
         if action == "SEARCH_ROOM":
-            add_chat_history(user_id=user_id, user_message=message_text)
+            add_chat_history(user_id=user_id, user_message=message_text, ai_reply=None)
             is_valid_search = result_data.get("is_valid_search", False)
         
             # 🚨 TRƯỜNG HỢP 1: THIẾU THÔNG TIN BẮT BUỘC
@@ -1232,7 +1232,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                         raise ValueError("Phản hồi từ Gemini bị rỗng sau khi làm sạch.")
                     result_data = json.loads(cleaned_text_search)
                     ai_reply = result_data.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
-    
+                    add_chat_history(user_id=user_id, user_message=None, ai_reply=ai_reply)
                     
                 # Vì là tìm kiếm nên không đính kèm media đăng phòng của người dùng
                 urls_to_send = []
