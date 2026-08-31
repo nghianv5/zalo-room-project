@@ -1258,7 +1258,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     ai_reply = f"❌ Không thể lưu thông tin phòng: {db_message}"
 
         elif action == "ADD_ROOM":
-            add_chat_history(user_id: user_id, user_message: message_text)
+            add_chat_history(user_id=user_id, user_message=message_text)
             
             # ✅ TRƯỜNG HỢP 2: ĐỊA CHỈ ĐÃ ĐỦ RÕ RÀNG -> TIẾN HÀNH LƯU DATABASE
             address = str(extracted.get("address", "")).strip()
