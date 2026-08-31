@@ -1839,11 +1839,11 @@ def find_existing_room_id(address: str, room_name: str = "") -> Optional[str]:
             return None
 
         # Truy vấn Qdrant bằng Filter (Cần Field Index kiểu KEYWORD cho 'address')
-        search_filter = models.Filter(
+        search_filter = qdrant_models.Filter(
             must=[
-                models.FieldCondition(
+                qdrant_models.FieldCondition(
                     key="address",
-                    match=models.MatchValue(value=safe_address)
+                    match=qdrant_models.MatchValue(value=safe_address)
                 )
             ]
         )
@@ -1866,8 +1866,7 @@ def find_existing_room_id(address: str, room_name: str = "") -> Optional[str]:
 
         return None
     except Exception as e:
-        print(f"❌ Lỗi truy vấn Qdrant khi tìm phòng trùng: {e}")
-        return None
+        raise Exception(f"❌ Lỗi truy vấn Qdrant khi tìm phòng trùng: {e}")
     
 # Hàm trợ lý nhỏ để đổi True/False thành văn bản dễ hiểu cho Model Embedding
 def bool_to_text(val, true_str, false_str=""):
