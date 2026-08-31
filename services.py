@@ -498,7 +498,7 @@ def generate_content_with_retry(prompt: str, mime_type: str = "application/json"
     return ""
 
 # --- QDRANT VECTOR & ROOM SERVICES ---
-def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[List[str]] = None, current_excel_row: int = 0) -> Optional[str]:
+def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[List[str]] = None, current_excel_row: int = 0, type_process: str = None) -> Optional[str]:
     try:
         address = str(data.get("address", "")).strip()
         room_name = str(data.get("room_name", "Phòng trọ")).strip()
@@ -509,10 +509,16 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
 
         if existing_id:
             point_id = existing_id
-            return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Phòng đã được bạn hoặc người dùng khác đăng ký."
+            if type_process == "ZALO"
+                return f"Phòng đã được bạn hoặc người dùng khác đăng ký."
+            else:
+                return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Phòng đã được bạn hoặc người dùng khác đăng ký."
         
         if not address:
-            return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Địa chỉ thiếu hoặc địa chỉ không đúng."
+            if type_process == "ZALO"
+                return f"Địa chỉ thiếu hoặc địa chỉ không đúng."
+            else:
+                return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Địa chỉ thiếu hoặc địa chỉ không đúng."
 
         media_list = media_urls if media_urls is not None else data.get("media_urls", [])
         if isinstance(media_list, str):
@@ -554,7 +560,10 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         
         if not vector:
             print(f"❌ [SYSTEM ERROR] Không thể tạo Vector Embedding cho phòng: {data.get('address')}")
-            return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: [SYSTEM ERROR] Không thể tạo Vector Embedding cho phòng."
+            if type_process == "ZALO"
+                return f"Hệ thống AI Vector Embedding đang bận vui lòng thử lại sau"
+            else:
+                return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Hệ thống AI Vector Embedding đang bận vui lòng thử lại sau"
             # Trả về thông báo ngắn gọn cho NGUỜI DÙNG
 
         now_vn = datetime.now(VN_TZ)
@@ -935,7 +944,7 @@ def process_excel_file(file_url: str, sender_id: str) -> str:
                     return (f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Địa chỉ trống hoặc không hợp lệ")
 
                 # upsert_room_to_db trả về None/"" nếu thành công, trả về string lỗi nếu thất bại
-                message = upsert_room_to_db(data=extracted, current_excel_row=current_excel_row)
+                message = upsert_room_to_db(data=extracted, current_excel_row=current_excel_row, type_process = "EXCEL")
                 
                 if message in ("SUCCESS"):
                     success_count += 1
@@ -1250,7 +1259,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                 return
             else:
                 # Thực hiện ghi vào database Qdrant
-                db_message = upsert_room_to_db(data=data_to_save, media_urls=data_to_save.get("media_urls", []), point_id=None)
+                db_message = upsert_room_to_db(data=data_to_save, media_urls=data_to_save.get("media_urls", []), point_id=None, type_process = "ZALO")
                 if db_message == "SUCCESS" or db_message is True:
                     ai_reply = f"🎉 **ĐĂNG KÝ PHÒNG THÀNH CÔNG!**\n\nPhòng trọ tại địa chỉ **{address}** đã được lưu lên hệ thống."
                     clear_pending_room(user_id)  # Xóa cache tạm
@@ -1288,10 +1297,13 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     send_zalo_request(request_phone_message)
                     return {"status": "phone_required"}
 
-                message = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None)
+                message = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None, type_process = "EXCEL")
                 if message in ("SUCCESS"):
                     get_get_and_clear_pending_media(user_id)
-               
+                    ai_reply = "Bạn đã đăng ký phòng thành công"
+                else:
+                    ai_reply = message
+                
         elif action == "UPDATE_STATUS":
             relevant_rooms = search_rooms_by_vector(message_text, top_k=5)
             existing_point_id = relevant_rooms[0].get("id") if (relevant_rooms and len(relevant_rooms) > 0) else None
