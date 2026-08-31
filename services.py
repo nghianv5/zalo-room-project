@@ -506,16 +506,16 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         
         # Nếu tìm thấy thì bản ghi thì k cập nhật mà bỏ qua
         existing_id = find_existing_room_id(address=address, room_name=room_name)
-
+        print(f"existing_id:{existing_id}")
         if existing_id:
             point_id = existing_id
-            if type_process == "ZALO"
+            if type_process == "NOT_EXCEL"
                 return f"Phòng đã được bạn hoặc người dùng khác đăng ký."
             else:
                 return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Phòng đã được bạn hoặc người dùng khác đăng ký."
         
         if not address:
-            if type_process == "ZALO"
+            if type_process == "NOT_EXCEL"
                 return f"Địa chỉ thiếu hoặc địa chỉ không đúng."
             else:
                 return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Địa chỉ thiếu hoặc địa chỉ không đúng."
@@ -560,7 +560,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         
         if not vector:
             print(f"❌ [SYSTEM ERROR] Không thể tạo Vector Embedding cho phòng: {data.get('address')}")
-            if type_process == "ZALO"
+            if type_process == "NOT_EXCEL"
                 return f"Hệ thống AI Vector Embedding đang bận vui lòng thử lại sau"
             else:
                 return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Hệ thống AI Vector Embedding đang bận vui lòng thử lại sau"
@@ -1259,7 +1259,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                 return
             else:
                 # Thực hiện ghi vào database Qdrant
-                db_message = upsert_room_to_db(data=data_to_save, media_urls=data_to_save.get("media_urls", []), point_id=None, type_process = "ZALO")
+                db_message = upsert_room_to_db(data=data_to_save, media_urls=data_to_save.get("media_urls", []), point_id=None, type_process = "NOT_EXCEL")
                 if db_message == "SUCCESS" or db_message is True:
                     ai_reply = f"🎉 **ĐĂNG KÝ PHÒNG THÀNH CÔNG!**\n\nPhòng trọ tại địa chỉ **{address}** đã được lưu lên hệ thống."
                     clear_pending_room(user_id)  # Xóa cache tạm

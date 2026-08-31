@@ -124,7 +124,8 @@ async def save_or_update_room(
         success = upsert_room_to_db(
             data=room_dict, 
             point_id=point_id, 
-            media_urls=room_dict.get("media_urls", [])
+            media_urls=room_dict.get("media_urls", []),
+            type_process = "NOT_EXCEL"
         )
         
         if success == "SUCCESS":
@@ -252,7 +253,7 @@ async def upload_excel_rooms(file: UploadFile = File(...)):
                 }
 
             # Kiểm tra lưu DB (hàm trả về None/"" nếu thành công, trả về string lỗi nếu thất bại)
-            message = upsert_room_to_db(data=extracted, current_excel_row=current_excel_row)
+            message = upsert_room_to_db(data=extracted, current_excel_row=current_excel_row, type_process = "EXCEL")
             if message in ("SUCCESS"):
                 success_count += 1
             else:
