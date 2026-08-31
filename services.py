@@ -619,7 +619,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
             points=[PointStruct(id=new_point_id, vector=vector, payload=payload)],
             wait=True
         )
-        return True
+        return "SUCCESS"
     except Exception as e:
         print("❌ [QDRANT UPSERT EXCEPTION]:", e)
         return f"❌ [QDRANT UPSERT EXCEPTION]: {e}"
@@ -1829,45 +1829,45 @@ def update_tokens_in_db(db: Session, new_access_token: str, new_refresh_token: s
         
         
 def find_existing_room_id(address: str, room_name: str = "") -> Optional[str]:
-    """
-    Tìm ID phòng đã tồn tại bằng cách lọc trực tiếp trên Qdrant theo Address và Room name.
-    """
-    clean_address = str(address).strip()
-    
-    if not clean_address:
-        return None
-
+    """Tìm phòng trùng dựa trên address và room_name"""
     try:
-        must_conditions = [
-            qdrant_models.FieldCondition(
-                key="address", 
-                match=qdrant_models.MatchValue(value=clean_address)
-            )
-        ]
-        
+        # Ép kiểu an toàn 100% để không bao giờ bị dính lỗi Boolean
+        safe_address = str(address or "").strip()
+        safe_room_name = str(room_name or "").strip()
 
-        # Nếu có tên/số phòng -> Thêm điều kiện lọc theo room_name
-        if room_name and room_name.strip():
-            must_conditions.append(
-                qdrant_models.FieldCondition(
-                    key="room_name", 
-                    match=qdrant_models.MatchValue(value=room_name.strip())
+        if not safe_address:
+            return None
+
+        # Truy vấn Qdrant bằng Filter (Cần Field Index kiểu KEYWORD cho 'address')
+        search_filter = models.Filter(
+            must=[
+                models.FieldCondition(
+                    key="address",
+                    match=models.MatchValue(value=safe_address)
                 )
-            )
+            ]
+        )
 
         records, _ = qdrant_client.scroll(
             collection_name=COLLECTION_NAME,
-            scroll_filter=qdrant_models.Filter(must=must_conditions),
-            limit=1
+            scroll_filter=search_filter,
+            limit=10,
+            with_payload=True
         )
-        
-        if records:
-            return records[0].id
 
+        for rec in records:
+            rec_payload = rec.payload or {}
+            # Ép kiểu giá trị trong payload thành string trước khi so sánh
+            existing_room_name = str(rec_payload.get("room_name", "")).strip()
+
+            # Nếu kiểm tra chuỗi trùng khớp
+            if safe_room_name.lower() == existing_room_name.lower():
+                return str(rec.id)
+
+        return None
     except Exception as e:
         print(f"❌ Lỗi truy vấn Qdrant khi tìm phòng trùng: {e}")
-        
-    return None
+        return None
     
 # Hàm trợ lý nhỏ để đổi True/False thành văn bản dễ hiểu cho Model Embedding
 def bool_to_text(val, true_str, false_str=""):
