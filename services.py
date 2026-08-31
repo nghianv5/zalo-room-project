@@ -992,6 +992,11 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
     
     print(f"history_list: {history_list}")
     print(f"history_context_str: {history_context_str}")
+    
+    # Lấy thông tin phòng đang chờ xác nhận (nếu có)
+    pending_room = get_pending_room(user_id)
+    pending_room_str = json.dumps(pending_room, ensure_ascii=False) if pending_room else "Không có phòng nào đang chờ xác nhận."
+    
     # Kiểm tra từ khóa Reset Session từ người dùng
     clean_message = message_text.strip().lower()
     if any(keyword in clean_message for keyword in ["bắt đầu lại", "tìm phòng khác", "xóa lịch sử", "reset", "làm mới"]):
@@ -1006,7 +1011,10 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         system_prompt = f"""
         Bạn là Trợ lý AI Quản lý và Tư vấn Phòng trọ thông minh trên Zalo.
         
-        LỊCH SỬ HỘI THOẠI GẦN ĐÂY CỦA NGUỜI DÙNG:
+        THÔNG TIN PHÒNG ĐANG CHỜ XÁC NHẬN CỦA NGUỜI DÙNG (NẾU CÓ):
+        {pending_room_str}
+
+        LỊCH SỬ HỘI THOẠI GẦN ĐÂY:
         {history_context_str}
         
         Phân tích tin nhắn người dùng và trích xuất đúng 13 trường thông tin:
@@ -1040,6 +1048,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         - "ADD_ROOM": Dùng khi người dùng ĐĂNG PHÒNG MỚI hoặc CẬP NHẬT/SỬA BẤT KỲ THÔNG TIN NÀO CỦA PHÒNG.
         - "UPDATE_STATUS": CHỈ DÙNG khi người dùng báo phòng "ĐÃ CHO THUÊ", "ĐÃ CHỐT" hoặc "ĐỔI SANG TRỐNG".
         - "SEARCH_ROOM": Dùng khi khách có nhu cầu TÌM KIẾM phòng trọ.
+        - "CONFIRM_REGISTER": Chọn action này khi người dùng ĐỒNG Ý đăng ký phòng (Ví dụ: "Đăng PHÒNG", "Lưu phòng").
 
         HƯỚNG DẪN TẠO `ai_reply` CHO TỪNG ACTION:
         1. Nếu action là "ADD_ROOM" hoặc "UPDATE_STATUS": 
@@ -1059,7 +1068,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         
         TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
         {{
-          "action": "ADD_ROOM | SEARCH_ROOM | UPDATE_STATUS",
+          "action": "ADD_ROOM | CONFIRM_REGISTER | SEARCH_ROOM | UPDATE_STATUS",
           "is_valid_search": true/false,
           "extracted_search": {{
             "location_search": "Tên đường hoặc phường/xã trích xuất được (hoặc null)",
@@ -1227,7 +1236,30 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                 # Vì là tìm kiếm nên không đính kèm media đăng phòng của người dùng
                 urls_to_send = []
 
+        elif action == "CONFIRM_REGISTER":
+            # 💡 Người dùng chốt ĐĂNG KÝ -> Lấy thông tin từ Cache ra ghi vào DB
+            data_to_save = pending_room if pending_room else extracted
+            address = str(data_to_save.get("address", "")).strip()
+
+            if not address or address.lower() in ["null", "none", ""]:
+                ai_reply = "Dạ em chưa nhận đủ thông tin phòng. Anh/chị gửi lại thông tin phòng trọ giúp em nhé!"
+            elif not phone:
+                # Yêu cầu gửi SĐT nếu chưa xác thực
+                send_zalo_request_phone(user_id)
+                return
+            else:
+                # Thực hiện ghi vào database Qdrant
+                db_message = upsert_room_to_db(data=data_to_save, media_urls=data_to_save.get("media_urls", []), point_id=None)
+                if db_message == "SUCCESS" or db_message is True:
+                    ai_reply = f"🎉 **ĐĂNG KÝ PHÒNG THÀNH CÔNG!**\n\nPhòng trọ tại địa chỉ **{address}** đã được lưu lên hệ thống."
+                    clear_pending_room(user_id)  # Xóa cache tạm
+                    get_get_and_clear_pending_media(user_id)  # Xóa media tạm
+                else:
+                    ai_reply = f"❌ Không thể lưu thông tin phòng: {db_message}"
+
         elif action == "ADD_ROOM":
+            add_chat_history(user_id: user_id, user_message: message_text)
+            
             # ✅ TRƯỜNG HỢP 2: ĐỊA CHỈ ĐÃ ĐỦ RÕ RÀNG -> TIẾN HÀNH LƯU DATABASE
             address = str(extracted.get("address", "")).strip()
             if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
@@ -1889,3 +1921,23 @@ def clean_json_string(text: str) -> str:
     cleaned = re.sub(r"^```(?:json)?\s*", "", text.strip(), flags=re.IGNORECASE)
     cleaned = re.sub(r"\s*```$", "", cleaned)
     return cleaned.strip()
+    
+    
+# --- QUẢN LÝ TRẠNG THÁI CHỜ XÁC NHẬN ĐĂNG PHÒNG ---
+CONFIRM_CACHE_TTL = 1800  # Lưu phòng chờ xác nhận trong 30 phút
+
+def save_pending_room(user_id: str, room_data: dict):
+    """Lưu dữ liệu phòng đang chờ xác nhận vào Redis"""
+    cache_key = f"pending_room:{user_id}"
+    redis_client.set(cache_key, json.dumps(room_data, ensure_ascii=False), ex=CONFIRM_CACHE_TTL)
+
+def get_pending_room(user_id: str) -> Optional[dict]:
+    """Lấy dữ liệu phòng đang chờ xác nhận"""
+    cache_key = f"pending_room:{user_id}"
+    data = redis_client.get(cache_key)
+    return json.loads(data) if data else None
+
+def clear_pending_room(user_id: str):
+    """Xóa dữ liệu phòng tạm sau khi đã đăng ký xong"""
+    cache_key = f"pending_room:{user_id}"
+    redis_client.delete(cache_key)
