@@ -1843,7 +1843,7 @@ def find_existing_room_id(address: str, room_name: str = "") -> Optional[str]:
             must=[
                 qdrant_models.FieldCondition(
                     key="address",
-                    match=qdrant_models.MatchValue(value=safe_address)
+                    match=qdrant_models.MatchText(text=safe_address)
                 )
             ]
         )
