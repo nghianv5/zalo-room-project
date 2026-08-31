@@ -506,7 +506,6 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         
         # Nếu tìm thấy thì bản ghi thì k cập nhật mà bỏ qua
         existing_id = find_existing_room_id(address=address, room_name=room_name)
-        print(f"existing_id:{existing_id}")
         if existing_id:
             point_id = existing_id
             if type_process == "NOT_EXCEL":
@@ -1297,7 +1296,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     send_zalo_request(request_phone_message)
                     return {"status": "phone_required"}
 
-                message = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None, type_process = "EXCEL")
+                message = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None, type_process = "NOT_EXCEL")
                 if message in ("SUCCESS"):
                     get_get_and_clear_pending_media(user_id)
                     ai_reply = "Bạn đã đăng ký phòng thành công"
