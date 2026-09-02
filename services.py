@@ -510,7 +510,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
             address_clean = re.sub(r'\b(hcm|sg|sai gon)\b', 'Hồ Chí Minh', address_clean)
         room_name = str(data.get("room_name", "Phòng trọ")).strip()
         phone = str(data.get("landlord_phone", "")).strip()
-        if phone =  is None or phone is "":
+        if not phone:
             phone = landlord_phone
         # Nếu tìm thấy thì bản ghi thì k cập nhật mà bỏ qua
         existing_id = find_existing_room_id(address=address_clean, room_name=room_name, landlord_phone=phone)
