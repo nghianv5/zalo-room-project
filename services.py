@@ -896,7 +896,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         
         Phân tích tin nhắn người dùng và trích xuất đúng 13 trường thông tin:
 
-        1. `address`: Địa chỉ đầy đủ gộp lại.
+        1. `address`: Phân tích địa chỉ đầy đủ cụ thể và chính xác so với địa chỉ thật. Nếu người dùng nhập ký tự viết tắt như HN,hn thì đổi lại thành Hà Nội. HCM, hcm thì đổi lại thành Hồ Chí Minh
         2. `room_name`: Tên hoặc số phòng (VD: Phòng 301, Phòng tầng 2...).
         3. `price`: Giá thuê.
         4. `floor`: Tầng bao nhiêu.
