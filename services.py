@@ -293,18 +293,43 @@ def format_national_phone(phone_str: str, default_region: str = "VN") -> str:
         return "0" + clean_digits[2:]
     return clean_digits
 
-def parse_move_in_date(date_str: str) -> float:
+def parse_move_in_date(date_str=None) -> float:
+    """
+    Chuyển move_in_date thành Unix timestamp theo giờ Việt Nam.
+
+    Nếu không có ngày cụ thể:
+    -> sử dụng thời điểm hiện tại.
+    """
     now_vn = datetime.now(VN_TZ)
-    if not date_str or str(date_str).strip().lower() in ["vào ở ngay", "ngay", "chưa rõ", "none", "nan", ""]:
+    # Không có dữ liệu
+    if date_str is None:
         return now_vn.timestamp()
     text = str(date_str).strip()
-    for fmt in ("%d/%m/%Y", "%Y-%m-%d", "%d-%m-%Y"):
+    if text.lower() in [
+        "",
+        "none",
+        "null",
+        "nan",
+        "chưa rõ",
+        "vào ở ngay",
+        "ngay",
+        "ở ngay",
+        "có thể vào ngay"
+    ]:
+        return now_vn.timestamp()
+    # Có ngày cụ thể
+    for fmt in (
+        "%d/%m/%Y",
+        "%Y-%m-%d",
+        "%d-%m-%Y"
+    ):
         try:
             dt = datetime.strptime(text, fmt)
             dt_vn = VN_TZ.localize(dt)
             return dt_vn.timestamp()
         except ValueError:
-            pass
+            continue
+    # Không parse được -> mặc định hiện tại
     return now_vn.timestamp()
   
 
@@ -615,13 +640,22 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
             room_code = generate_unique_room_code()
         else:
             room_code = str(room_code).strip().upper()
-
-        # 1. Lấy giá trị thô từ data
+        
         raw_move_in = data.get("move_in_date")
-        # 2. Chuẩn hóa giá trị hiển thị (Nếu rỗng hoặc None thì mặc định là "Vào ở ngay")
-        move_in_date_str = str(raw_move_in).strip() if raw_move_in and str(raw_move_in).strip().lower() not in ["none", "null"] else "Vào ở ngay"
-        # 3. Ép kiểu timestamp an toàn
-        move_in_timestamp = parse_move_in_date(raw_move_in)
+        invalid_move_in_values = ["","none","null","nan","chưa rõ","vào ở ngay","ngay"]
+        raw_move_in_text = str(raw_move_in or "").strip()
+        if raw_move_in_text.lower() in invalid_move_in_values:
+            move_in_date_str = "Vào ở ngay"
+            move_in_timestamp = datetime.now(VN_TZ).timestamp()
+        else:
+            move_in_date_str = raw_move_in_text
+            move_in_timestamp = parse_move_in_date(raw_move_in_text)
+
+        raw_status = data.get("status")
+        if raw_status is None or str(raw_status).strip().lower() in ["","none","null","chưa rõ","undefined"]:
+            status_str = "TRỐNG"
+        else:
+            status_str = str(raw_status).strip().upper()
 
         payload = {
             "address": address_clean,
@@ -647,7 +681,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
             "media_urls": media_list,
             "move_in_date": move_in_date_str,
             "move_in_timestamp": move_in_timestamp,
-            "status": str(data.get("status", "TRỐNG")),
+            "status": status_str,
             "landlord_phone": format_national_phone(phone),
             "created_at": created_at,
             "updated_at": now_str
