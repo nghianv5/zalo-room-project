@@ -306,6 +306,7 @@ def parse_move_in_date(date_str: str) -> float:
         except ValueError:
             pass
     return now_vn.timestamp()
+  
 
 def parse_price_to_number(price_str: str) -> float:
     if not price_str or str(price_str).strip().lower() in ["chưa rõ", "thỏa thuận", "none", "nan", ""]:
@@ -615,6 +616,13 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         else:
             room_code = str(room_code).strip().upper()
 
+        # 1. Lấy giá trị thô từ data
+        raw_move_in = data.get("move_in_date")
+        # 2. Chuẩn hóa giá trị hiển thị (Nếu rỗng hoặc None thì mặc định là "Vào ở ngay")
+        move_in_date_str = str(raw_move_in).strip() if raw_move_in and str(raw_move_in).strip().lower() not in ["none", "null"] else "Vào ở ngay"
+        # 3. Ép kiểu timestamp an toàn
+        move_in_timestamp = parse_move_in_date(raw_move_in)
+
         payload = {
             "address": address_clean,
             "room_name": room_name,
@@ -637,8 +645,8 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
             "other_amenities": str(data.get("other_amenities", "Chưa rõ")),
             "service_fees": str(data.get("service_fees", "Chưa rõ")),
             "media_urls": media_list,
-            "move_in_date": str(data.get("move_in_date", "Vào ở ngay")),
-            "move_in_timestamp": parse_move_in_date(data.get("move_in_date")),
+            "move_in_date": move_in_date_str,
+            "move_in_timestamp": move_in_timestamp,
             "status": str(data.get("status", "TRỐNG")),
             "landlord_phone": format_national_phone(phone),
             "created_at": created_at,
@@ -960,7 +968,11 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         CÁC QUY TẮC BẮT BUỘC KHI TRÍCH XUẤT ĐỊA CHỈ (address):
         1. GIỮ NGUYÊN 100% TÊN ĐƯỜNG/TÊN PHƯỜNG do người dùng nhập. KHÔNG TỰ Ý SỬA LỖI CHÍNH TẢ TÊN RIÊNG (Ví dụ: "Phan Thị Hành" KHÔNG ĐƯỢC sửa thành "Phan Thị Hạnh").
         2. Chỉ chuẩn hóa từ viết tắt viết tắt tỉnh/thành phố: HN -> Hà Nội, HCM/hcm/sg -> Hồ Chí Minh.
-
+        
+        CÁC QUY TẮC BẮT BUỘC KHI TRÍCH XUẤT NGÀY CÓ THỂ CHUYỂN VÀO PHÒNG ĐỂ Ở (move_in_date):
+        1. Định dạng ngày tháng là %d/%m/%Y
+        2. Nếu không nhắc đến thời gian vào ở được hoặc để trống hoặc vào ở ngày thì mặc định là trả về thời gian hiện tại
+        
         HƯỚNG DẪN TẠO `ai_reply` CHO TỪNG ACTION:
         1. Nếu action là "ADD_ROOM" hoặc "UPDATE_STATUS": 
            - Viết câu xác nhận ngắn gọn, lịch sự cho chủ nhà.
