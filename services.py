@@ -1016,8 +1016,21 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         2. Chỉ chuẩn hóa từ viết tắt viết tắt tỉnh/thành phố: HN -> Hà Nội, HCM/hcm/sg -> Hồ Chí Minh.
         
         CÁC QUY TẮC BẮT BUỘC KHI TRÍCH XUẤT NGÀY CÓ THỂ CHUYỂN VÀO PHÒNG ĐỂ Ở (move_in_date):
-        1. Định dạng ngày tháng là %d/%m/%Y
-        2. Nếu không nhắc đến thời gian vào ở được hoặc để trống hoặc vào ở ngày thì mặc định là trả về thời gian hiện tại
+        1. Nếu người dùng CÓ NÓI RÕ ngày có thể vào ở:
+           - Trả về đúng ngày người dùng cung cấp.
+           - Định dạng: %d/%m/%Y
+        2. Nếu người dùng KHÔNG NÓI ngày có thể vào ở:
+           - BẮT BUỘC trả về chuỗi rỗng: ""
+           - KHÔNG tự suy đoán ngày.
+           - KHÔNG tự tạo ngày hiện tại.
+           - KHÔNG sử dụng ngày từ kiến thức của AI.
+        Ví dụ:
+        Người dùng:
+        "21 Phan Thị Hành giá 5tr, máy lạnh, máy giặt"
+        => "move_in_date": ""
+        Người dùng:
+        "21 Phan Thị Hành giá 5tr, ngày 10/09/2026 vào ở"
+        => "move_in_date": "10/09/2026"
         
         HƯỚNG DẪN TẠO `ai_reply` CHO TỪNG ACTION:
         1. Nếu action là "ADD_ROOM" hoặc "UPDATE_STATUS": 
