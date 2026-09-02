@@ -504,11 +504,10 @@ def generate_content_with_retry(prompt: str, mime_type: str = "application/json"
 def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[List[str]] = None, current_excel_row: int = 0, type_process: str = None) -> Optional[str]:
     try:
         address = str(data.get("address", "")).strip()
-        address_clean = address
+        address_clean = address.lower()
         if address_clean:
-            address_clean = re.sub(r'\b(HN|hn)\b', 'Hà Nội', address_clean)
-            address_clean = re.sub(r'\b(HCM|hcm)\b', 'Hồ Chí Minh', address_clean)
-            address_clean = re.sub(r'\b(SG|sg)\b', 'Sài Gòn', address_clean)
+            address_clean = re.sub(r'\b(hn)\b', 'Hà Nội', address_clean)
+            address_clean = re.sub(r'\b(hcm|sg|sai gon)\b', 'Hồ Chí Minh', address_clean)
         room_name = str(data.get("room_name", "Phòng trọ")).strip()
         phone = str(data.get("landlord_phone", "")).strip()
         
@@ -924,7 +923,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         
         Phân tích tin nhắn người dùng và trích xuất đúng 13 trường thông tin:
 
-        1. `address`: Phân tích địa chỉ đầy đủ cụ thể và chính xác so với địa chỉ thật. Nếu người dùng nhập ký tự viết tắt như HN,hn thì đổi lại thành Hà Nội. HCM, hcm thì đổi lại thành Hồ Chí Minh
+        1. `address`: Phân tích địa chỉ đầy đủ
         2. `room_name`: Tên hoặc số phòng (VD: Phòng 301, Phòng tầng 2...).
         3. `price`: Giá thuê.
         4. `floor`: Tầng bao nhiêu.
@@ -956,6 +955,10 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         - "ADD_ROOM": Dùng khi người dùng ĐĂNG PHÒNG MỚI hoặc CẬP NHẬT/SỬA BẤT KỲ THÔNG TIN NÀO CỦA PHÒNG.
         - "UPDATE_STATUS": CHỈ DÙNG khi người dùng báo phòng "ĐÃ CHO THUÊ", "ĐÃ CHỐT" hoặc "ĐỔI SANG TRỐNG".
         - "SEARCH_ROOM": Dùng khi khách có nhu cầu TÌM KIẾM phòng trọ.
+        
+        CÁC QUY TẮC BẮT BUỘC KHI TRÍCH XUẤT ĐỊA CHỈ (address):
+        1. GIỮ NGUYÊN 100% TÊN ĐƯỜNG/TÊN PHƯỜNG do người dùng nhập. KHÔNG TỰ Ý SỬA LỖI CHÍNH TẢ TÊN RIÊNG (Ví dụ: "Phan Thị Hành" KHÔNG ĐƯỢC sửa thành "Phan Thị Hạnh").
+        2. Chỉ chuẩn hóa từ viết tắt viết tắt tỉnh/thành phố: HN -> Hà Nội, HCM/hcm/sg -> Hồ Chí Minh.
 
         HƯỚNG DẪN TẠO `ai_reply` CHO TỪNG ACTION:
         1. Nếu action là "ADD_ROOM" hoặc "UPDATE_STATUS": 
