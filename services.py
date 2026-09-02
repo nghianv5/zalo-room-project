@@ -209,7 +209,10 @@ class RoomCreateUpdateSchema(BaseModel):
     has_balcony: Optional[str] = "Chưa rõ"            
     has_window: Optional[str] = "Chưa rõ"             
     has_fingerprint_lock: Optional[str] = "Chưa rõ"   
-    parking_info: Optional[str] = "Chưa rõ"          
+    parking_info: Optional[str] = "Chưa rõ"     
+    bed: Optional[str] = "Chưa rõ" 
+    wardrobe: Optional[str] = "Chưa rõ"  
+    room_size: Optional[str] = "Chưa rõ"
     max_occupants: Optional[str] = "Chưa rõ"         
     other_amenities: Optional[str] = "Chưa rõ"       
     service_fees: Optional[str] = "Chưa rõ"           
@@ -527,6 +530,8 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
             bool_to_text(data.get("has_ac"), "Có điều hòa"),
             bool_to_text(data.get("has_heater"), "Có nóng lạnh"),
             bool_to_text(data.get("has_washer"), "Có máy giặt"),
+            bool_to_text(data.get("bed"), "Có giường"),
+            bool_to_text(data.get("wardrobe"), "Có tủ quần áo"),
             bool_to_text(data.get("allow_pets"), "Cho phép nuôi thú cưng / pet"),
             bool_to_text(data.get("has_balcony"), "Có ban công thoáng mát"),
             bool_to_text(data.get("has_window"), "Có cửa sổ thoáng"),
@@ -608,6 +613,9 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
             "has_window": str(data.get("has_window", "Chưa rõ")),
             "has_fingerprint_lock": str(data.get("has_fingerprint_lock", "Chưa rõ")),
             "parking_info": str(data.get("parking_info", "Chưa rõ")),
+            "bed": str(data.get("bed", "Chưa rõ")),
+            "wardrobe": str(data.get("wardrobe", "Chưa rõ")),
+            "room_size": str(data.get("room_size", "Chưa rõ")),
             "max_occupants": str(data.get("max_occupants", "Chưa rõ")),
             "other_amenities": str(data.get("other_amenities", "Chưa rõ")),
             "service_fees": str(data.get("service_fees", "Chưa rõ")),
@@ -701,6 +709,9 @@ def ai_validate_and_extract_room_batch(rows_list: List[dict]) -> List[Optional[d
               "has_window": "",
               "has_fingerprint_lock": "",
               "parking_info": "",
+              "bed": "",
+              "wardrobe": "",
+              "room_size": "",
               "max_occupants": "",
               "other_amenities": "",
               "service_fees": "",
@@ -909,13 +920,16 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         11. `has_window`: Có cửa sổ không?
         12. `has_fingerprint_lock`: Ra vào bằng khoá vân tay có hay không?
         13. `parking_info`: có chỗ để xe không?
-        14. `max_occupants`: số ng ở tối đã
-        15. `other_amenities`: Có thêm tiện ích gì khác
-        16. `service_fees`: Phí dịch vụ (điện, nước, wifi)...
-        17. `status`: Trạng thái phòng ("TRỐNG" hoặc "ĐÃ CHO THUÊ").
-        18. `move_in_date`: Ngày có thể chuyển vào phòng để ở
-        19. `min_price`: Giá thuê thấp nhất
-        20. `max_price`: Giá thuê cao nhất
+		14. `bed`: Có giường không?
+		15. `wardrobe`: Có tủ quần áo không?
+		16. `room_size`: Diện tích phòng bao nhiêu?
+        17. `max_occupants`: số ng ở tối đã
+        18. `other_amenities`: Có thêm tiện ích gì khác
+        19. `service_fees`: Phí dịch vụ (điện, nước, wifi)...
+        20. `status`: Trạng thái phòng ("TRỐNG" hoặc "ĐÃ CHO THUÊ").
+        21. `move_in_date`: Ngày có thể chuyển vào phòng để ở
+        22. `min_price`: Giá thuê thấp nhất
+        23. `max_price`: Giá thuê cao nhất
 
         DỮ LIỆU ĐẦU VÀO:
         - Tin nhắn: "{message_text}"
@@ -964,7 +978,10 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
             "has_balcony": "Có/Không",
             "has_window": "Có/Không",
             "has_fingerprint_lock": "Có/Không",
-            "parking_info": "Thông tin để xe...",
+            "parking_info": "Có/Không",
+            "bed": "Có/Không",
+            "wardrobe": "Có/Không",
+            "room_size": "Diện tích phòng bảo nhiêu m2",
             "max_occupants": "Số người ở tối đa...",
             "other_amenities": "Tiện ích khác...",
             "service_fees": "Phí dịch vụ (điện, nước, wifi)...",
@@ -1056,13 +1073,16 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     11. `has_window`: Có cửa sổ không?
                     12. `has_fingerprint_lock`: Ra vào bằng khoá vân tay có hay không?
                     13. `parking_info`: có chỗ để xe không?
-                    14. `max_occupants`: số ng ở tối đã
-                    15. `other_amenities`: Có thêm tiện ích gì khác
-                    16. `service_fees`: Phí dịch vụ (điện, nước, wifi)...
-                    17. `status`: Trạng thái phòng ("TRỐNG" hoặc "ĐÃ CHO THUÊ").
-                    18. `move_in_date`: Ngày có thể chuyển vào phòng để ở
-                    19. `min_price`: Giá thuê thấp nhất
-                    20. `max_price`: Giá thuê cao nhất
+                    14. `bed`: Có giường không?
+                    15. `wardrobe`: Có tủ quần áo không?
+                    16. `room size`: Diện tích phòng bao nhiêu?
+                    17. `max_occupants`: số ng ở tối đã
+                    18. `other_amenities`: Có thêm tiện ích gì khác
+                    19. `service_fees`: Phí dịch vụ (điện, nước, wifi)...
+                    20. `status`: Trạng thái phòng ("TRỐNG" hoặc "ĐÃ CHO THUÊ").
+                    21. `move_in_date`: Ngày có thể chuyển vào phòng để ở
+                    22. `min_price`: Giá thuê thấp nhất
+                    23. `max_price`: Giá thuê cao nhất
                     
                     Yêu cầu của khách: "{message_text}"
                     Danh sách phòng tìm được: {search_results}
