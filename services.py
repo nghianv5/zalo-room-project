@@ -642,11 +642,23 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
             room_code = str(room_code).strip().upper()
         
         raw_move_in = data.get("move_in_date")
-        invalid_move_in_values = ["","none","null","nan","chưa rõ","vào ở ngay","ngay"]
         raw_move_in_text = str(raw_move_in or "").strip()
+        invalid_move_in_values = [
+            "",
+            "none",
+            "null",
+            "nan",
+            "chưa rõ",
+            "vào ở ngay",
+            "ngay"
+        ]
+        # Nếu không nhập ngày chuyển vào
+        # => lấy đúng thời gian hiện tại Việt Nam
         if raw_move_in_text.lower() in invalid_move_in_values:
+            now_vn = datetime.now(VN_TZ)
             move_in_date_str = "Vào ở ngay"
-            move_in_timestamp = datetime.now(VN_TZ).timestamp()
+            move_in_timestamp = now_vn.timestamp()
+
         else:
             move_in_date_str = raw_move_in_text
             move_in_timestamp = parse_move_in_date(raw_move_in_text)
