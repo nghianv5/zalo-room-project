@@ -1203,20 +1203,6 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     """
                     raw_text_search = generate_content_with_retry(prompt_format_rooms, mime_type="application/json")
                     cleaned_text_search = clean_json_string(raw_text_search)
-                    # 1. Parse JSON
-                    result_data_search = json.loads(cleaned_text_search)
-                    
-                    ai_reply = result_data_search.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
-                    
-                    
-                    raw_text_search = generate_content_with_retry(prompt_format_rooms, mime_type="application/json")
-                    
-                    
-                    if not raw_text_search:
-                        raise Exception("Gemini không phản hồi dữ liệu.")
-                        
-                    # Clean chuỗi trước khi load JSON
-                    cleaned_text_search = clean_json_string(raw_text_search)
                     if not cleaned_text_search:
                         raise ValueError("Phản hồi từ Gemini bị rỗng sau khi làm sạch.")
                     result_data = json.loads(cleaned_text_search)
