@@ -501,7 +501,7 @@ def generate_content_with_retry(prompt: str, mime_type: str = "application/json"
     return ""
 
 # --- QDRANT VECTOR & ROOM SERVICES ---
-def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[List[str]] = None, current_excel_row: int = 0, type_process: str = None) -> Optional[str]:
+def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[List[str]] = None, current_excel_row: int = 0, type_process: str = None,  landlord_phone: str = None) -> Optional[str]:
     try:
         address = str(data.get("address", "")).strip()
         address_clean = address.lower()
@@ -510,7 +510,8 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
             address_clean = re.sub(r'\b(hcm|sg|sai gon)\b', 'Hồ Chí Minh', address_clean)
         room_name = str(data.get("room_name", "Phòng trọ")).strip()
         phone = str(data.get("landlord_phone", "")).strip()
-        
+        if phone =  is None or phone is "":
+            phone = landlord_phone
         # Nếu tìm thấy thì bản ghi thì k cập nhật mà bỏ qua
         existing_id = find_existing_room_id(address=address_clean, room_name=room_name, landlord_phone=phone)
         if existing_id:
@@ -1028,6 +1029,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         extracted = result_data.get("extracted_data", {})
         
         print(f"landlord_phone: {extracted.get("landlord_phone")}")
+        print(f"phone: {extracted.get("phone")}")
         if action == "SEARCH_ROOM":
             add_chat_history(user_id=user_id, user_message=message_text, ai_reply=None)
             is_valid_search = result_data.get("is_valid_search", False)
@@ -1204,7 +1206,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     send_zalo_request(request_phone_message)
                     return {"status": "phone_required"}
 
-                message = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None, type_process = "NOT_EXCEL")
+                message = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None, type_process = "NOT_EXCEL", landlord_phone=phone)
                 if message in ("SUCCESS"):
                     get_get_and_clear_pending_media(user_id)
                     ai_reply = "Bạn đã đăng ký phòng thành công"
