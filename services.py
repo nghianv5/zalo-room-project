@@ -1695,8 +1695,25 @@ def search_rooms_with_filter(
             limit=top_k,
             with_payload=True
         )
-        
-        return [hit.payload | {"id": hit.id} for hit in search_result.points if hit.payload]
+        rooms = [
+            hit.payload | {"id": hit.id}
+            for hit in search_result.points
+            if hit.payload
+        ]
+
+        def get_room_price(room):
+            try:
+                return float(room.get("price") or 0)
+            except (TypeError, ValueError):
+                return parse_price_to_number(room.get("price"))
+
+        # Giá cao xuống thấp
+        rooms.sort(
+            key=get_room_price,
+            reverse=True
+        )
+
+        return rooms[:top_k]
     except Exception as e:
         print("❌ [SEARCH FILTER ERROR]:", e)
         return []
