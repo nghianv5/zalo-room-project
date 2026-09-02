@@ -1029,7 +1029,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         extracted = result_data.get("extracted_data", {})
         
         print(f"landlord_phone: {extracted.get("landlord_phone")}")
-        print(f"phone: {extracted.get("phone")}")
+        print(f"phone: {phone}")
         if action == "SEARCH_ROOM":
             add_chat_history(user_id=user_id, user_message=message_text, ai_reply=None)
             is_valid_search = result_data.get("is_valid_search", False)
