@@ -505,12 +505,10 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         phone = str(data.get("landlord_phone", "")).strip()
         
         # Nếu tìm thấy thì bản ghi thì k cập nhật mà bỏ qua
-        existing_id = find_existing_room_id(address=address, room_name=room_name)
+        existing_id = find_existing_room_id(address=address, room_name=room_name, landlord_phone=phone)
         if existing_id:
             point_id = existing_id
-            if type_process == "NOT_EXCEL":
-                return f"Phòng đã được bạn hoặc người dùng khác đăng ký."
-            else:
+            if type_process == "EXCEL":
                 return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Phòng đã được bạn hoặc người dùng khác đăng ký."
         
         if not address:
@@ -631,135 +629,6 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
     except Exception as e:
         print("❌ [QDRANT UPSERT EXCEPTION]:", e)
         raise Exception(f"❌ [QDRANT UPSERT EXCEPTION]: {e}")
-
-def search_rooms_by_vector(query_text: str, top_k: int = 20) -> List[dict]:
-    """
-    Tìm phòng trống.
-
-    QUAN TRỌNG:
-    - Với truy vấn chung / tìm phòng rẻ:
-      Qdrant ORDER BY price ASC trên toàn bộ collection.
-    - Không fallback sang scroll 200 record vì cách đó
-      KHÔNG đảm bảo tìm được phòng rẻ nhất toàn DB.
-    - Với truy vấn có nội dung cụ thể:
-      dùng vector search.
-    """
-
-    clean_query = query_text.strip().lower() if query_text else ""
-
-    # Giới hạn top_k để tránh request quá lớn
-    top_k = max(1, min(int(top_k), 100))
-
-    # Chỉ tìm phòng còn trống
-    status_filter = qdrant_models.Filter(
-        must=[
-            qdrant_models.FieldCondition(
-                key="status",
-                match=qdrant_models.MatchValue(value="TRỐNG")
-            )
-        ]
-    )
-
-    # Các câu hỏi mang tính tìm phòng chung / tìm phòng rẻ
-    is_general_cheap_search = any(
-        kw in clean_query
-        for kw in [
-            "giá rẻ",
-            "phòng rẻ",
-            "rẻ nhất",
-            "danh sách phòng",
-            "phòng trống",
-            "tìm phòng"
-        ]
-    ) and len(clean_query.split()) <= 5
-
-    # ============================================================
-    # 1. TÌM PHÒNG RẺ NHẤT TOÀN DATABASE
-    # ============================================================
-    if not clean_query or is_general_cheap_search:
-
-        try:
-            search_result = qdrant_client.query_points(
-                collection_name=COLLECTION_NAME,
-
-                # Chỉ lấy phòng TRỐNG
-                query_filter=status_filter,
-
-                # QUAN TRỌNG:
-                # Qdrant tự sắp xếp trên toàn bộ database
-                query=qdrant_models.OrderByQuery(
-                    order_by=qdrant_models.OrderBy(
-                        key="price",
-                        direction=qdrant_models.Direction.ASC
-                    )
-                ),
-
-                # Chỉ lấy đúng số lượng cần
-                limit=top_k,
-
-                with_payload=True
-            )
-
-            results = [
-                hit.payload | {"id": hit.id}
-                for hit in search_result.points
-                if hit.payload
-            ]
-
-            return results
-
-        except Exception as e:
-            # KHÔNG fallback về scroll(200)
-            # vì sẽ có nguy cơ trả kết quả sai.
-            print(
-                "❌ [CHEAPEST SEARCH ERROR] "
-                "Qdrant không thể ORDER BY price:",
-                repr(e)
-            )
-
-            return []
-
-    # ============================================================
-    # 2. TÌM THEO NGỮ NGHĨA / VECTOR
-    # ============================================================
-
-    query_vector = get_text_embedding(query_text)
-
-    if not query_vector:
-        print("⚠️ Không tạo được embedding cho query.")
-        return []
-
-    try:
-        search_result = qdrant_client.query_points(
-            collection_name=COLLECTION_NAME,
-
-            query=query_vector,
-
-            query_filter=status_filter,
-            
-            # Lấy dư một chút để có thêm lựa chọn
-            limit=min(top_k * 3, 300),
-
-            with_payload=True
-        )
-
-        results = [
-            hit.payload | {"id": hit.id}
-            for hit in search_result.points
-            if hit.payload
-        ]
-
-        # Sắp xếp các kết quả tương đồng theo giá tăng dần
-        results.sort(key=parse_price_safe)
-
-        return results[:top_k]
-
-    except Exception as e:
-        print(
-            "❌ [VECTOR SEARCH ERROR]:",
-            repr(e)
-        )
-        return []
 
 def update_room_status_in_db(point_id: str, new_status: str) -> bool:
     if not point_id:
@@ -1056,7 +925,6 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         - "ADD_ROOM": Dùng khi người dùng ĐĂNG PHÒNG MỚI hoặc CẬP NHẬT/SỬA BẤT KỲ THÔNG TIN NÀO CỦA PHÒNG.
         - "UPDATE_STATUS": CHỈ DÙNG khi người dùng báo phòng "ĐÃ CHO THUÊ", "ĐÃ CHỐT" hoặc "ĐỔI SANG TRỐNG".
         - "SEARCH_ROOM": Dùng khi khách có nhu cầu TÌM KIẾM phòng trọ.
-        - "CONFIRM_REGISTER": Chọn action này khi người dùng ĐỒNG Ý đăng ký phòng (Ví dụ: "Đăng PHÒNG", "Lưu phòng").
 
         HƯỚNG DẪN TẠO `ai_reply` CHO TỪNG ACTION:
         1. Nếu action là "ADD_ROOM" hoặc "UPDATE_STATUS": 
@@ -1076,7 +944,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         
         TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
         {{
-          "action": "ADD_ROOM | CONFIRM_REGISTER | SEARCH_ROOM | UPDATE_STATUS",
+          "action": "ADD_ROOM | SEARCH_ROOM | UPDATE_STATUS",
           "is_valid_search": true/false,
           "extracted_search": {{
             "location_search": "Tên đường hoặc phường/xã trích xuất được (hoặc null)",
@@ -1245,27 +1113,27 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                 # Vì là tìm kiếm nên không đính kèm media đăng phòng của người dùng
                 urls_to_send = []
 
-        elif action == "CONFIRM_REGISTER":
-            # 💡 Người dùng chốt ĐĂNG KÝ -> Lấy thông tin từ Cache ra ghi vào DB
-            data_to_save = pending_room if pending_room else extracted
-            address = str(data_to_save.get("address", "")).strip()
-
-            if not address or address.lower() in ["null", "none", ""]:
-                ai_reply = "Dạ em chưa nhận đủ thông tin phòng. Anh/chị gửi lại thông tin phòng trọ giúp em nhé!"
-            elif not phone:
-                # Yêu cầu gửi SĐT nếu chưa xác thực
-                send_zalo_request_phone(user_id)
-                return
-            else:
-                # Thực hiện ghi vào database Qdrant
-                db_message = upsert_room_to_db(data=data_to_save, media_urls=data_to_save.get("media_urls", []), point_id=None, type_process = "NOT_EXCEL")
-                if db_message == "SUCCESS" or db_message is True:
-                    ai_reply = f"🎉 **ĐĂNG KÝ PHÒNG THÀNH CÔNG!**\n\nPhòng trọ tại địa chỉ **{address}** đã được lưu lên hệ thống."
-                    clear_pending_room(user_id)  # Xóa cache tạm
-                    get_get_and_clear_pending_media(user_id)  # Xóa media tạm
-                else:
-                    ai_reply = f"❌ Không thể lưu thông tin phòng: {db_message}"
-
+#        elif action == "CONFIRM_REGISTER":
+#            # 💡 Người dùng chốt ĐĂNG KÝ -> Lấy thông tin từ Cache ra ghi vào DB
+#            data_to_save = pending_room if pending_room else extracted
+#            address = str(data_to_save.get("address", "")).strip()
+#
+#            if not address or address.lower() in ["null", "none", ""]:
+#                ai_reply = "Dạ em chưa nhận đủ thông tin phòng. Anh/chị gửi lại thông tin phòng trọ giúp em nhé!"
+#            elif not phone:
+#                # Yêu cầu gửi SĐT nếu chưa xác thực
+#                send_zalo_request_phone(user_id)
+#                return
+#            else:
+#                # Thực hiện ghi vào database Qdrant
+#                db_message = upsert_room_to_db(data=data_to_save, media_urls=data_to_save.get("media_urls", []), point_id=None, type_process = "NOT_EXCEL")
+#                if db_message == "SUCCESS" or db_message is True:
+#                    ai_reply = f"🎉 **ĐĂNG KÝ PHÒNG THÀNH CÔNG!**\n\nPhòng trọ tại địa chỉ **{address}** đã được lưu lên hệ thống."
+#                    clear_pending_room(user_id)  # Xóa cache tạm
+#                    get_get_and_clear_pending_media(user_id)  # Xóa media tạm
+#                else:
+#                    ai_reply = f"❌ Không thể lưu thông tin phòng: {db_message}"
+#
         elif action == "ADD_ROOM":
             
             # ✅ TRƯỜNG HỢP 2: ĐỊA CHỈ ĐÃ ĐỦ RÕ RÀNG -> TIẾN HÀNH LƯU DATABASE
@@ -1304,11 +1172,10 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     ai_reply = message
                 
         elif action == "UPDATE_STATUS":
-            relevant_rooms = search_rooms_by_vector(message_text, top_k=5)
-            existing_point_id = relevant_rooms[0].get("id") if (relevant_rooms and len(relevant_rooms) > 0) else None
+            existing_point_id = find_existing_room_id(address=address, room_name=room_name, landlord_phone=phone)
             if existing_point_id:
                 new_status = extracted.get("status") or "ĐÃ CHO THUÊ"
-                update_room_status_in_db(point_id=existing_point_id, new_status=new_status, zalo_user_id=user_id)
+                update_room_status_in_db(point_id=existing_point_id, new_status=new_status)
 
     except Exception as err:
         print("❌ [AI Logic Exception]:", err)
@@ -1839,41 +1706,55 @@ def update_tokens_in_db(db: Session, new_access_token: str, new_refresh_token: s
         raise e
         
         
-def find_existing_room_id(address: str, room_name: str = "") -> Optional[str]:
-    """Tìm phòng trùng dựa trên address và room_name"""
+def find_existing_room_id(address: str, room_name: str = "", landlord_phone: str = "") -> Optional[str]:
+    """Tìm phòng trùng dựa trên address, room_name và phone của chủ nhà trực tiếp trong Query Filter"""
     try:
-        # Ép kiểu an toàn 100% để không bao giờ bị dính lỗi Boolean
         safe_address = str(address or "").strip()
         safe_room_name = str(room_name or "").strip()
+        safe_phone = str(landlord_phone or "").strip()
 
         if not safe_address:
             return None
 
-        # Truy vấn Qdrant bằng Filter (Cần Field Index kiểu KEYWORD cho 'address')
-        search_filter = qdrant_models.Filter(
-            must=[
+        # Khởi tạo danh sách các điều kiện lọc bắt buộc (must conditions)
+        must_conditions = [
+            qdrant_models.FieldCondition(
+                key="address",
+                match=qdrant_models.MatchText(text=safe_address)
+            )
+        ]
+
+        # Đưa room_name vào làm điều kiện Query trực tiếp của Qdrant
+        if safe_room_name:
+            must_conditions.append(
                 qdrant_models.FieldCondition(
-                    key="address",
-                    match=qdrant_models.MatchText(text=safe_address)
+                    key="room_name",
+                    match=qdrant_models.MatchValue(value=safe_room_name)
                 )
-            ]
-        )
+            )
+
+        # Đổi lọc theo user_id thành lọc theo số điện thoại (landlord_phone)
+        if safe_phone:
+            must_conditions.append(
+                qdrant_models.FieldCondition(
+                    key="landlord_phone",
+                    match=qdrant_models.MatchValue(value=safe_phone)
+                )
+            )
+
+        # Truy vấn Qdrant
+        search_filter = qdrant_models.Filter(must=must_conditions)
 
         records, _ = qdrant_client.scroll(
             collection_name=COLLECTION_NAME,
             scroll_filter=search_filter,
-            limit=10,
-            with_payload=True
+            limit=1,
+            with_payload=False
         )
 
-        for rec in records:
-            rec_payload = rec.payload or {}
-            # Ép kiểu giá trị trong payload thành string trước khi so sánh
-            existing_room_name = str(rec_payload.get("room_name", "")).strip()
-
-            # Nếu kiểm tra chuỗi trùng khớp
-            if safe_room_name.lower() == existing_room_name.lower():
-                return str(rec.id)
+        # Trả về ID nếu tìm thấy bản ghi trùng khớp
+        if records:
+            return str(records[0].id)
 
         return None
     except Exception as e:
