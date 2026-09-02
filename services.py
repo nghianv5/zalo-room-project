@@ -504,17 +504,22 @@ def generate_content_with_retry(prompt: str, mime_type: str = "application/json"
 def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[List[str]] = None, current_excel_row: int = 0, type_process: str = None) -> Optional[str]:
     try:
         address = str(data.get("address", "")).strip()
+        address_clean = address
+        if address_clean:
+            address_clean = re.sub(r'\b(HN|hn)\b', 'Hà Nội', address_clean)
+            address_clean = re.sub(r'\b(HCM|hcm)\b', 'Hồ Chí Minh', address_clean)
+            address_clean = re.sub(r'\b(SG|sg)\b', 'Sài Gòn', address_clean)
         room_name = str(data.get("room_name", "Phòng trọ")).strip()
         phone = str(data.get("landlord_phone", "")).strip()
         
         # Nếu tìm thấy thì bản ghi thì k cập nhật mà bỏ qua
-        existing_id = find_existing_room_id(address=address, room_name=room_name, landlord_phone=phone)
+        existing_id = find_existing_room_id(address=address_clean, room_name=room_name, landlord_phone=phone)
         if existing_id:
             point_id = existing_id
             if type_process == "EXCEL":
                 return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Phòng đã được bạn hoặc người dùng khác đăng ký."
         
-        if not address:
+        if not address_clean:
             if type_process == "NOT_EXCEL":
                 return f"Địa chỉ thiếu hoặc địa chỉ không đúng."
             else:
@@ -527,34 +532,46 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         # 1. Thu thập và chuẩn hóa dữ liệu tiện ích (Booleans)
         amenities_list = [
             bool_to_text(data.get("is_private_bathroom"), "Vệ sinh khép kín / VS riêng", "Vệ sinh chung"),
-            bool_to_text(data.get("has_ac"), "Có điều hòa"),
-            bool_to_text(data.get("has_heater"), "Có nóng lạnh"),
-            bool_to_text(data.get("has_washer"), "Có máy giặt"),
-            bool_to_text(data.get("bed"), "Có giường"),
-            bool_to_text(data.get("wardrobe"), "Có tủ quần áo"),
-            bool_to_text(data.get("allow_pets"), "Cho phép nuôi thú cưng / pet"),
-            bool_to_text(data.get("has_balcony"), "Có ban công thoáng mát"),
-            bool_to_text(data.get("has_window"), "Có cửa sổ thoáng"),
-            bool_to_text(data.get("has_fingerprint_lock"), "Khóa vân tay ra vào tự do"),
+            bool_to_text(data.get("has_ac"), "Có điều hòa", "Không có điều hòa"),
+            bool_to_text(data.get("has_heater"), "Có nóng lạnh", "Không có nóng lạnh"),
+            bool_to_text(data.get("has_washer"), "Có máy giặt", "Không có máy giặt"),
+            bool_to_text(data.get("bed"), "Có giường", "Không có giường"),
+            bool_to_text(data.get("wardrobe"), "Có tủ quần áo", "Không có tủ quần áo"),
+            bool_to_text(data.get("allow_pets"), "Cho phép nuôi thú cưng / pet", "Không cho nuôi pet"),
+            bool_to_text(data.get("has_balcony"), "Có ban công thoáng mát", "Không có ban công"),
+            bool_to_text(data.get("has_window"), "Có cửa sổ thoáng", "Không có cửa sổ"),
+            bool_to_text(data.get("has_fingerprint_lock"), "Khóa vân tay ra vào tự do", "Không có khóa vân tay"),
         ]
         # Lọc bỏ các giá trị rỗng
         amenities_str = ", ".join([item for item in amenities_list if item])
 
         # 2. Xử lý các trường thông tin bổ sung
-        floor_str = f"Tầng {data.get('floor')}" if data.get('floor') else ""
-        max_occ_str = f"Tối đa {data.get('max_occupants')} người ở" if data.get('max_occupants') else ""
-        move_in_str = f"Vào ở từ ngày: {data.get('move_in_date')}" if data.get('move_in_date') else ""
+        room_name_str = data.get("room_name", "Chưa rõ")
+        price_str = data.get("price", "Chưa rõ")
+        floor_str = f"Tầng {data.get('floor')}" if data.get("floor") else "Chưa rõ tầng"
+        room_size_str = f"{data.get('room_size')} m²" if data.get("room_size") else "Chưa rõ diện tích"
+        max_occ_str = f"Tối đa {data.get('max_occupants')} người ở" if data.get("max_occupants") else "Không giới hạn / Chưa rõ"
+        move_in_str = data.get("move_in_date", "Vào ở ngay")
+        status_str = data.get("status", "TRỐNG")
+        parking_str = data.get("parking_info", "Chưa rõ thông tin xe")
+        other_amenities_str = data.get("other_amenities", "Không có")
+        service_fees_str = data.get("service_fees", "Chưa rõ")
 
         # 3. Ghép thành văn bản hoàn chỉnh để tạo Vector
         text_to_embed = f"""
-        Thông tin phòng trọ:
-        - Địa chỉ: {data.get('address', '')}
-        - Tên phòng: {data.get('room_name', '')} {floor_str}
-        - Giá thuê: {data.get('price', '')}
-        - Tiện nghi: {amenities_str}. {data.get('other_amenities', '')}
-        - Chỗ để xe: {data.get('parking_info', '')}
-        - Quy định: {max_occ_str}. {move_in_str}
-        - Phí dịch vụ: {data.get('service_fees', '')}
+        Thông tin chi tiết phòng trọ:
+        - Địa chỉ: {address_clean}
+        - Tên phòng: {room_name_str}
+        - Giá thuê: {price_str}
+        - Vị trí tầng: {floor_str}
+        - Diện tích phòng: {room_size_str}
+        - Trạng thái phòng: {status_str}
+        - Ngày vào ở: {move_in_str}
+        - Quy định số người: {max_occ_str}
+        - Danh sách tiện nghi: {amenities_str}
+        - Tiện ích bổ sung khác: {other_amenities_str}
+        - Chỗ để xe: {parking_str}
+        - Phí dịch vụ (điện, nước, wifi,...): {service_fees_str}
         """.strip()
 
         # 4. Lấy vector embedding từ chuỗi văn bản trên
@@ -584,7 +601,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
             new_point_id = str(uuid.uuid4())
 
 
-        if not address or address.lower() in ["none", "null"]:
+        if not address_clean or address_clean.lower() in ["none", "null"]:
             raise ValueError("Lỗi: 'address' không được để trống hoặc null!")
             
         price = str(data.get("price", "Chưa rõ"))
@@ -599,7 +616,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
             room_code = str(room_code).strip().upper()
 
         payload = {
-            "address": address,
+            "address": address_clean,
             "room_name": room_name,
             "room_code": room_code,
             "price": parse_price_to_number(data.get("price", "")),
