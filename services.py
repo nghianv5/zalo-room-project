@@ -25,7 +25,7 @@ import string
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 import redis
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, JSON
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.sql import func
 from contextlib import asynccontextmanager
@@ -78,8 +78,8 @@ GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 
 # Bộ nhớ đệm tạm thời
-PENDING_MEDIA_CACHE: Dict[str, dict] = {}
 CACHE_TTL_SECONDS = 600
+MAX_MEDIA_PER_ROOM = int(os.getenv("MAX_MEDIA_PER_ROOM", "10"))
 
 # Initializing Qdrant Collection & Index
 try:
@@ -167,6 +167,25 @@ class ZaloToken(Base):
     access_token = Column(String, nullable=False)
     refresh_token = Column(String, nullable=False)
 
+class RoomRecord(Base):
+    """Bản dữ liệu nghiệp vụ có thể sao lưu; Qdrant tiếp tục làm chỉ mục tìm kiếm."""
+    __tablename__ = "room_records"
+    id = Column(String, primary_key=True)
+    landlord_phone = Column(String, index=True, nullable=False)
+    room_code = Column(String, unique=True, index=True, nullable=False)
+    payload = Column(JSON, nullable=False)
+    created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+class AuditLog(Base):
+    __tablename__ = "audit_logs"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    actor = Column(String, index=True, nullable=False)
+    action = Column(String, index=True, nullable=False)
+    target_id = Column(String, index=True, nullable=True)
+    details = Column(JSON, nullable=True)
+    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+
 Base.metadata.create_all(bind=engine)
 
 # --- PYDANTIC SCHEMAS ---
@@ -216,7 +235,7 @@ class RoomCreateUpdateSchema(BaseModel):
     max_occupants: Optional[str] = "Chưa rõ"         
     other_amenities: Optional[str] = "Chưa rõ"       
     service_fees: Optional[str] = "Chưa rõ"           
-    media_urls: Optional[List[str]] = []
+    media_urls: Optional[List[str]] = Field(default_factory=list)
     move_in_date: Optional[str] = "Vào ở ngay"
     status: Optional[str] = "TRỐNG"
     landlord_phone: Optional[str] = Field(default=None, description="Số điện thoại người đăng / chủ nhà")
@@ -377,22 +396,52 @@ def parse_price_to_number(price_str: str) -> float:
     return 0.0
 
 # 2. Lấy dữ liệu và xóa Cache
-def get_get_and_clear_pending_media(user_id: str) -> list:
+def get_pending_media(user_id: str) -> list:
     cache_key = f"pending_media:{user_id}"
     data = redis_client.get(cache_key)
-    if data:
-        redis_client.delete(cache_key)  # Xóa sau khi lấy thành công
-        return json.loads(data)
-    return []
+    return json.loads(data) if data else []
+
+def get_get_and_clear_pending_media(user_id: str) -> list:
+    urls = get_pending_media(user_id)
+    if urls:
+        redis_client.delete(f"pending_media:{user_id}")
+    return urls
 
 # 1. Lưu Cache với thời hạn tự xóa (ex = CACHE_TTL_SECONDS)
 def add_pending_media(user_id: str, new_urls: list):
     cache_key = f"pending_media:{user_id}"
-    redis_client.set(cache_key, json.dumps(new_urls), ex=CACHE_TTL_SECONDS)
+    existing = get_pending_media(user_id)
+    merged = list(dict.fromkeys(existing + list(new_urls or [])))[:MAX_MEDIA_PER_ROOM]
+    redis_client.set(cache_key, json.dumps(merged), ex=CACHE_TTL_SECONDS)
+    return merged
 
 def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None) -> bool:
+    lock_key = "lock:zalo_token_refresh"
+    try:
+        if not redis_client.set(lock_key, str(os.getpid()), nx=True, ex=300):
+            return
+    except Exception:
+        pass
     db = SessionLocal()
-    data_token =  get_current_tokens_from_db(db)
+    try:
+        data_token = get_current_tokens_from_db(db)
+    finally:
+        db.close()
+
+def write_audit_log(actor: str, action: str, target_id: str = None, details: dict = None) -> None:
+    audit_db = SessionLocal()
+    try:
+        audit_db.add(AuditLog(actor=actor, action=action, target_id=target_id, details=details or {}))
+        audit_db.commit()
+    except Exception as exc:
+        audit_db.rollback()
+        print(f"⚠️ [AUDIT ERROR]: {exc}")
+    finally:
+        audit_db.close()
+        try:
+            redis_client.delete(lock_key)
+        except Exception:
+            pass
     if not data_token:
         print("❌ [ZALO ERROR]: Thiếu ZALO_ACCESS_TOKEN")
         return False
@@ -405,31 +454,7 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None) -> b
 
     try:
         for idx, chunk in enumerate(text_chunks):
-            # Với tin nhắn cuối cùng: nếu có media_urls thì chèn kèm hình ảnh
-            if idx == len(text_chunks) - 1 and media_urls and len(media_urls) > 0:
-                payload = {
-                    "recipient": {"user_id": user_id},
-                    "message": {
-                        "text": chunk,
-                        "attachment": {
-                            "type": "template",
-                            "payload": {
-                                "template_type": "media",
-                                "elements": [
-                                    {
-                                        "media_type": "image",
-                                        "url": media_urls[0]
-                                    }
-                                ]
-                            }
-                        }
-                    }
-                }
-            else:
-                payload = {
-                    "recipient": {"user_id": user_id},
-                    "message": {"text": chunk}
-                }
+            payload = {"recipient": {"user_id": user_id}, "message": {"text": chunk}}
 
             response = requests.post(url, headers=headers, json=payload, timeout=10)
             res_data = response.json()
@@ -443,6 +468,13 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None) -> b
             if len(text_chunks) > 1:
                 time.sleep(0.3)
 
+        # Gửi từng media riêng để không làm mất các ảnh sau ảnh đầu tiên.
+        for media_url in list(dict.fromkeys(media_urls or []))[:MAX_MEDIA_PER_ROOM]:
+            media_type = "video" if re.search(r"\.(mp4|mov|webm)(\?|$)", media_url, re.I) else "image"
+            payload = {"recipient": {"user_id": user_id}, "message": {"attachment": {"type": "template", "payload": {"template_type": "media", "elements": [{"media_type": media_type, "url": media_url}]}}}}
+            response = requests.post(url, headers=headers, json=payload, timeout=10)
+            if response.json().get("error") != 0:
+                return False
         return True
 
     except Exception as e:
@@ -704,6 +736,22 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
             points=[PointStruct(id=new_point_id, vector=vector, payload=payload)],
             wait=True
         )
+        mirror_db = SessionLocal()
+        try:
+            mirror = mirror_db.query(RoomRecord).filter(RoomRecord.id == str(new_point_id)).first()
+            if mirror:
+                mirror.landlord_phone = payload["landlord_phone"]
+                mirror.room_code = payload["room_code"]
+                mirror.payload = payload
+                mirror.updated_at = datetime.utcnow()
+            else:
+                mirror_db.add(RoomRecord(id=str(new_point_id), landlord_phone=payload["landlord_phone"], room_code=payload["room_code"], payload=payload))
+            mirror_db.commit()
+        except Exception as mirror_error:
+            mirror_db.rollback()
+            print(f"⚠️ [ROOM MIRROR ERROR]: {mirror_error}")
+        finally:
+            mirror_db.close()
         return "SUCCESS"
     except Exception as e:
         print("❌ [QDRANT UPSERT EXCEPTION]:", e)
@@ -862,6 +910,13 @@ def process_excel_file(file_url: str, sender_id: str) -> str:
         rows = df.to_dict(orient="records")
 
         success_count = 0
+        owner_db = SessionLocal()
+        try:
+            landlord_phone = get_phone_by_user_id(owner_db, str(sender_id)) or ""
+        finally:
+            owner_db.close()
+        if not landlord_phone:
+            return "Vui lòng chia sẻ số điện thoại với OA trước khi nhập danh sách phòng."
         
         # Danh sách lưu thông tin lỗi theo dạng: [(số_dòng, lý_do)]
         failed_rows_details = []
@@ -882,24 +937,28 @@ def process_excel_file(file_url: str, sender_id: str) -> str:
                     validated_data = validated_data[0]
 
                 if not validated_data or not isinstance(validated_data, dict):
-                    return (f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: AI không phân tích được dữ liệu.")
+                    failed_rows_details.append((current_excel_row, "AI không phân tích được dữ liệu"))
+                    continue
 
                 extracted = validated_data.get("extracted_data", {})
                 if not isinstance(extracted, dict):
-                    return (f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Dữ liệu AI trích xuất không hợp lệ")
+                    failed_rows_details.append((current_excel_row, "Dữ liệu AI trích xuất không hợp lệ"))
+                    continue
 
                 raw_address = str(extracted.get("address") or "").strip()
 
                 if not raw_address or raw_address.lower() in ["[chưa cập nhật]", "none", "null", "chưa rõ", ""]:
-                    return (f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Địa chỉ trống hoặc không hợp lệ")
+                    failed_rows_details.append((current_excel_row, "Địa chỉ trống hoặc không hợp lệ"))
+                    continue
 
                 # upsert_room_to_db trả về None/"" nếu thành công, trả về string lỗi nếu thất bại
-                message = upsert_room_to_db(data=extracted, current_excel_row=current_excel_row, type_process = "EXCEL")
+                extracted["landlord_phone"] = landlord_phone
+                message = upsert_room_to_db(data=extracted, current_excel_row=current_excel_row, type_process="EXCEL", landlord_phone=landlord_phone)
                 
-                if message in ("SUCCESS"):
+                if message == "SUCCESS":
                     success_count += 1
                 else:
-                    return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Lỗi DB - {message}"
+                    failed_rows_details.append((current_excel_row, f"Lỗi DB - {message}"))
 
 
         # Dọn dẹp file tạm
@@ -934,14 +993,15 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         saved_url = save_media_file(item["url"], is_video=item.get("is_video", False))
         if saved_url:
             incoming_media_urls.append(saved_url)
-    if not message_text.strip() and incoming_media_urls:
+    if incoming_media_urls:
         add_pending_media(user_id, incoming_media_urls)
-        total_pending = len(PENDING_MEDIA_CACHE.get(user_id, {}).get("urls", []))
+    if not message_text.strip() and incoming_media_urls:
+        merged_media = get_pending_media(user_id)
+        total_pending = len(merged_media)
         reply = f"📸 Em đã nhận {len(incoming_media_urls)} ảnh/video! (Tổng đã nhận: {total_pending} file)\n\n👉 Anh/Chị gửi thêm thông tin phòng để em tạo bài nhé!"
         send_zalo_message(user_id, reply, media_urls=incoming_media_urls)
         return
-    cached_data = PENDING_MEDIA_CACHE.get(user_id, {})
-    pending_urls = cached_data.get("urls", []) if (time.time() - cached_data.get("timestamp", 0) <= CACHE_TTL_SECONDS) else []
+    pending_urls = get_pending_media(user_id)
     all_current_media = list(dict.fromkeys(pending_urls + incoming_media_urls))
     urls_to_send = all_current_media
     
@@ -1241,6 +1301,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                 #nếu người dùng chưa đăng ký phòng trên zalo hay web thì sẽ tạo mới data cho user
           
                 if not phone:
+                    save_pending_room(user_id, extracted)
                     # 🚨 BẮT BUỘC: Nếu chưa có SĐT -> Chặn lại và yêu cầu chia sẻ SĐT
                     request_phone_message = {
                             "recipient": {"user_id": zalo_user_id},
@@ -1264,8 +1325,9 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     return {"status": "phone_required"}
 
                 message = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None, type_process = "NOT_EXCEL", landlord_phone=phone)
-                if message in ("SUCCESS"):
+                if message == "SUCCESS":
                     get_get_and_clear_pending_media(user_id)
+                    clear_pending_room(user_id)
                     ai_reply = "Bạn đã đăng ký phòng thành công"
                 else:
                     ai_reply = message
@@ -1718,10 +1780,10 @@ def search_rooms_with_filter(
             except (TypeError, ValueError):
                 return parse_price_to_number(room.get("price"))
 
-        # Giá cao xuống thấp
+        # Mặc định ưu tiên giá thấp đến cao để phù hợp hành vi tìm thuê.
         rooms.sort(
             key=get_room_price,
-            reverse=True
+            reverse=False
         )
 
         return rooms[:top_k]

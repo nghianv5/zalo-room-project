@@ -405,6 +405,19 @@
         const API_URL = "/api/rooms";
         let allRoomsData = [];
 
+        async function apiFetch(url, options = {}) {
+            const token = localStorage.getItem("accessToken");
+            const headers = new Headers(options.headers || {});
+            if (token) headers.set("Authorization", `Bearer ${token}`);
+            const response = await window.fetch(url, { ...options, headers });
+            if (response.status === 401 && !url.includes("/api/login")) {
+                localStorage.removeItem("accessToken");
+                localStorage.removeItem("isAdminLoggedIn");
+                checkAuth();
+            }
+            return response;
+        }
+
         function checkAuth() {
 			const isAuth = localStorage.getItem("isAdminLoggedIn");
 			const loginModal = document.getElementById("loginModal");
@@ -459,7 +472,7 @@
 			}
 
 			try {
-				const res = await fetch('/api/user/register', {
+					const res = await apiFetch('/api/user/register', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ phone, otp, password })
@@ -491,7 +504,7 @@
 			}
 
 			try {
-				const res = await fetch('/api/login', {
+					const res = await apiFetch('/api/login', {
 					method: 'POST',
 					headers: { 'Content-Type': 'application/json' },
 					body: JSON.stringify({ phone: username, password: password })
@@ -504,7 +517,8 @@
 					// ✅ ĐÃ SỬA: Lưu đồng bộ các khóa cho checkAuth() kiểm tra khi F5
 					localStorage.setItem("isAdminLoggedIn", "true");
 					localStorage.setItem("adminUsername", loggedInUser);
-					localStorage.setItem("username", loggedInUser);
+						localStorage.setItem("username", loggedInUser);
+						localStorage.setItem("accessToken", data.access_token);
 
 					document.getElementById('loginModal').classList.add('hidden');
 					document.getElementById('adminDashboard').classList.remove('hidden');
@@ -523,7 +537,7 @@
 		async function loadRoomsForUser(username) {
 			try {
 				// Truyền user_phone để Backend lọc đúng danh sách phòng trùng landlord_phone
-				const res = await fetch(`/api/admin/rooms?landlord_phone=${encodeURIComponent(username)}`);
+					const res = await apiFetch(`/api/admin/rooms?username=${encodeURIComponent(username)}`);
 				const data = await res.json();
 
 				if (res.ok) {
@@ -542,7 +556,7 @@
 
 			try {
 				// Gửi tham số user_phone lên API để lấy đúng danh sách phòng của mình
-				const res = await fetch(`/api/rooms?user_phone=${encodeURIComponent(currentUserPhone)}`);
+					const res = await apiFetch(`/api/admin/rooms?username=${encodeURIComponent(currentUserPhone)}`);
 				const result = await res.json();
 
 				if (result.status === 'success') {
@@ -563,7 +577,9 @@
 
         function handleLogout() {
 			localStorage.removeItem("isAdminLoggedIn");
-			localStorage.removeItem("adminUsername"); // 👈 Xóa username khi logout
+				localStorage.removeItem("adminUsername"); // 👈 Xóa username khi logout
+				localStorage.removeItem("username");
+				localStorage.removeItem("accessToken");
 			checkAuth();
 		}
 
@@ -586,7 +602,7 @@
 				if (toDate) url += `to_date=${toDate}&`;
 				if (status) url += `status=${status}&`;
 
-				const res = await fetch(url);
+					const res = await apiFetch(url);
 				const result = await res.json();
 				
 				// Cập nhật mảng dữ liệu và render lại bảng
@@ -731,7 +747,7 @@
             const selectedIds = Array.from(document.querySelectorAll('.room-checkbox:checked')).map(cb => cb.value);
             if (selectedIds.length === 0) return;
             if (confirm(`Xác nhận xóa ${selectedIds.length} phòng đã chọn?`)) {
-                await Promise.all(selectedIds.map(id => fetch(`${API_URL}/${id}`, { method: "DELETE" })));
+                await Promise.all(selectedIds.map(id => apiFetch(`${API_URL}/${id}`, { method: "DELETE" })));
                 loadRooms();
             }
         }
@@ -747,7 +763,7 @@
 			}
 
 			try {
-				const response = await fetch(`/api/rooms?username=${encodeURIComponent(currentUser)}`);
+				const response = await apiFetch(`/api/admin/rooms?username=${encodeURIComponent(currentUser)}`);
 				const result = await response.json();
 
 				if (result.status === "success") {
@@ -792,7 +808,7 @@
 				let url = API_URL;
 				if (id) url += `?point_id=${id}`;
 
-				const res = await fetch(url, {
+				const res = await apiFetch(url, {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify(payload)
@@ -868,7 +884,7 @@
 			// Lấy thông tin username/phone đã lưu khi đăng nhập
 			const username = localStorage.getItem("username") || "";
             try {
-                const res = await fetch("/api/admin/change-password", {
+                const res = await apiFetch("/api/admin/change-password", {
                     method: "POST",
                     headers: { "Content-Type": "application/json" },
                     body: JSON.stringify({ 
@@ -918,7 +934,7 @@
             formData.append("file", fileInput.files[0]);
 
             try {
-                const res = await fetch("/api/rooms/upload-excel", {
+                const res = await apiFetch("/api/rooms/upload-excel", {
                     method: "POST",
                     body: formData
                 });

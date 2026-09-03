@@ -15,6 +15,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from qdrant_client.http import models as qdrant_models
 from services import *
+from security import Principal, create_session_token, enforce_rate_limit, get_current_user, require_admin, verify_zalo_webhook
 import sys
 from apscheduler.schedulers.background import BackgroundScheduler
 import logging
@@ -48,9 +49,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 templates = Jinja2Templates(directory=os.path.join(BASE_DIR, "templates"))
 
 # --- MIDDLEWARE & STATIC FILES ---
+allowed_origins = [x.strip() for x in os.getenv("ALLOWED_ORIGINS", "http://localhost:8000").split(",") if x.strip()]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -59,7 +61,28 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard(request: Request):
-    return templates.TemplateResponse(request=request, name="admin.html")
+    return templates.TemplateResponse(request=request, name="admin.html", context={"ZALO_OA_ID": ZALO_OA_ID or ""})
+
+@app.get("/health")
+def health_check():
+    checks = {"database": False, "redis": False, "qdrant": False}
+    try:
+        with engine.connect() as connection:
+            connection.exec_driver_sql("SELECT 1")
+        checks["database"] = True
+    except Exception:
+        pass
+    try:
+        checks["redis"] = bool(redis_client.ping())
+    except Exception:
+        pass
+    try:
+        checks["qdrant"] = qdrant_client.collection_exists(COLLECTION_NAME)
+    except Exception:
+        pass
+    if not all(checks.values()):
+        raise HTTPException(status_code=503, detail=checks)
+    return {"status": "ok", "checks": checks}
 
 @app.get("/zalo_verifierCjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn.html", response_class=PlainTextResponse)
 async def verify_zalo_specific_file():
@@ -67,7 +90,10 @@ async def verify_zalo_specific_file():
 
 # --- AUTH ROUTES ---
 @app.post("/api/user/register")
-async def register_user(data: RegisterModel, db: Session = Depends(get_db)):
+async def register_user(data: RegisterModel, request: Request, db: Session = Depends(get_db)):
+    enforce_rate_limit(redis_client, f"register:{request.client.host if request.client else 'unknown'}", 10, 3600)
+    if len(data.password) < 8:
+        raise HTTPException(status_code=400, detail="Mật khẩu phải có tối thiểu 8 ký tự.")
     now = datetime.now(timezone.utc)
     clean_phone = format_national_phone(data.phone)
     account = db.query(UserWeb).filter(UserWeb.phone == clean_phone).first()
@@ -99,10 +125,17 @@ async def register_user(data: RegisterModel, db: Session = Depends(get_db)):
     
 # --- ROOM MANAGEMENT ROUTES ---
 @app.delete("/api/rooms/{point_id}")
-def delete_room_from_web(point_id: str):
+def delete_room_from_web(point_id: str, user: Principal = Depends(get_current_user)):
     try:
-        qdrant_client.delete(collection_name=COLLECTION_NAME, points_selector=[point_id], wait=True)
-        return {"status": "success", "message": "Đã xóa!"}
+        records = qdrant_client.retrieve(collection_name=COLLECTION_NAME, ids=[point_id])
+        if not records or not records[0].payload:
+            raise HTTPException(status_code=404, detail="Không tìm thấy phòng.")
+        owner = records[0].payload.get("landlord_phone")
+        if user.role != "SUPER_ADMIN" and owner != user.username:
+            raise HTTPException(status_code=403, detail="Bạn không có quyền xóa phòng này.")
+        qdrant_client.set_payload(collection_name=COLLECTION_NAME, payload={"status": "ĐÃ XÓA", "deleted_at": datetime.now(VN_TZ).isoformat()}, points=[point_id], wait=True)
+        write_audit_log(user.username, "ROOM_SOFT_DELETE", point_id)
+        return {"status": "success", "message": "Đã chuyển phòng vào thùng rác!"}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -110,12 +143,20 @@ def delete_room_from_web(point_id: str):
 @app.post("/api/rooms")
 async def save_or_update_room(
     data: RoomCreateUpdateSchema, 
-    point_id: Optional[str] = None
+    point_id: Optional[str] = None,
+    user: Principal = Depends(get_current_user)
 ):
     try:
         # Chuyển dữ liệu schema sang dict
         room_dict = data.model_dump() if hasattr(data, "model_dump") else data.dict()
         
+        room_dict["landlord_phone"] = user.username
+        if point_id:
+            records = qdrant_client.retrieve(collection_name=COLLECTION_NAME, ids=[point_id])
+            if not records or not records[0].payload:
+                raise HTTPException(status_code=404, detail="Không tìm thấy phòng.")
+            if user.role != "SUPER_ADMIN" and records[0].payload.get("landlord_phone") != user.username:
+                raise HTTPException(status_code=403, detail="Bạn không có quyền sửa phòng này.")
         # Nếu chưa có mã phòng 6 ký tự, tự động tạo mới
         if not room_dict.get("room_code"):
             room_dict["room_code"] = generate_unique_room_code()
@@ -129,6 +170,7 @@ async def save_or_update_room(
         )
         
         if success == "SUCCESS":
+            write_audit_log(user.username, "ROOM_UPDATE" if point_id else "ROOM_CREATE", point_id, {"room_code": room_dict.get("room_code")})
             return {"status": "success", "message": "Lưu thông tin phòng thành công!"}
         else:
             raise HTTPException(status_code=400, detail=f"Không thể ghi dữ liệu: {success}")
@@ -137,7 +179,8 @@ async def save_or_update_room(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/api/login")
-def api_login(data: UnifiedLoginSchema, db: Session = Depends(get_db)):
+def api_login(data: UnifiedLoginSchema, request: Request, db: Session = Depends(get_db)):
+    enforce_rate_limit(redis_client, f"login:{request.client.host if request.client else 'unknown'}", 20, 900)
     phone_val = getattr(data, 'phone', None) or getattr(data, 'username', None)
     if not phone_val:
         raise HTTPException(status_code=400, detail="Vui lòng nhập số điện thoại hoặc tên đăng nhập!")
@@ -145,20 +188,22 @@ def api_login(data: UnifiedLoginSchema, db: Session = Depends(get_db)):
     phone_input = str(phone_val).strip()
     password_input = data.password.strip()
 
-    if phone_input == "adminpro":
-        admin_acc = db.query(UserWeb).filter(UserWeb.phone == "adminpro").first()
+    admin_username = os.getenv("ADMIN_USERNAME", "adminpro")
+    if phone_input == admin_username:
+        admin_acc = db.query(UserWeb).filter(UserWeb.phone == admin_username).first()
         if not admin_acc:
-            if password_input == "123456":
+            initial_password = os.getenv("ADMIN_INITIAL_PASSWORD", "")
+            if initial_password and password_input == initial_password:
                 salt = bcrypt.gensalt()
-                hashed_pw = bcrypt.hashpw("123456".encode('utf-8'), salt).decode('utf-8')
-                new_admin = UserWeb(phone="adminpro", password=hashed_pw, user_id="ADMIN_SUPER")
+                hashed_pw = bcrypt.hashpw(initial_password.encode('utf-8'), salt).decode('utf-8')
+                new_admin = UserWeb(phone=admin_username, password=hashed_pw, user_id="ADMIN_SUPER")
                 db.add(new_admin)
                 db.commit()
-                return {"status": "success", "role": "SUPER_ADMIN", "username": "adminpro"}
+                return {"status": "success", "role": "SUPER_ADMIN", "username": admin_username, "access_token": create_session_token(admin_username, "SUPER_ADMIN")}
             raise HTTPException(status_code=401, detail="Mật khẩu Admin không chính xác!")
 
         if bcrypt.checkpw(password_input.encode('utf-8'), admin_acc.password.encode('utf-8')):
-            return {"status": "success", "role": "SUPER_ADMIN", "username": "adminpro"}
+            return {"status": "success", "role": "SUPER_ADMIN", "username": admin_username, "access_token": create_session_token(admin_username, "SUPER_ADMIN")}
         raise HTTPException(status_code=401, detail="Mật khẩu Admin không chính xác!")
 
     clean_phone = format_national_phone(phone_input)
@@ -170,19 +215,19 @@ def api_login(data: UnifiedLoginSchema, db: Session = Depends(get_db)):
     if not bcrypt.checkpw(password_input.encode('utf-8'), account.password.encode('utf-8')):
         raise HTTPException(status_code=401, detail="Mật khẩu không chính xác!")
 
-    return {"status": "success", "role": "USER", "username": account.phone}
+    return {"status": "success", "role": "USER", "username": account.phone, "access_token": create_session_token(account.phone, "USER")}
 
 
 @app.post("/api/admin/change-password")
-async def change_password(payload: AdminChangePasswordSchema, db: Session = Depends(get_db)):
+async def change_password(payload: AdminChangePasswordSchema, db: Session = Depends(get_db), user: Principal = Depends(get_current_user)):
     old_password = payload.old_password.strip() if payload.old_password else ""
     new_password = payload.new_password.strip() if payload.new_password else ""
-    username = payload.username.strip() if payload.username else ""
+    username = user.username
 
     if not old_password or not new_password or not username:
         raise HTTPException(status_code=400, detail="Vui lòng nhập đầy đủ thông tin!")
 
-    target_username = username if username == "adminpro" else format_national_phone(username)
+    target_username = username if username == os.getenv("ADMIN_USERNAME", "adminpro") else format_national_phone(username)
     user_account = db.query(UserWeb).filter(UserWeb.phone == target_username).first()
 
     if not user_account or not user_account.password:
@@ -195,11 +240,12 @@ async def change_password(payload: AdminChangePasswordSchema, db: Session = Depe
     user_account.password = bcrypt.hashpw(new_password.encode('utf-8'), salt).decode('utf-8')
     user_account.updated_at = datetime.utcnow()
     db.commit()
+    write_audit_log(user.username, "PASSWORD_CHANGE")
 
     return {"status": "success", "message": "Đổi mật khẩu thành công!"}
 
 @app.post("/api/rooms/upload-excel")
-async def upload_excel_rooms(file: UploadFile = File(...)):
+async def upload_excel_rooms(file: UploadFile = File(...), user: Principal = Depends(get_current_user)):
     if not file.filename.endswith((".xlsx", ".xls", ".csv")):
         raise HTTPException(status_code=400, detail="Vui lòng tải lên tệp .xlsx, .xls hoặc .csv!")
 
@@ -209,7 +255,8 @@ async def upload_excel_rooms(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Không thể đọc tệp: {str(e)}")
 
-    success_count= 0
+    success_count = 0
+    failed_rows_details = []
 
     BATCH_SIZE = 15
     rows = df.to_dict(orient="records")
@@ -229,43 +276,36 @@ async def upload_excel_rooms(file: UploadFile = File(...)):
 
             if not validated_data or not isinstance(validated_data, dict):
                 print(f"❌ Dòng {current_excel_row}: AI không phân tích được dữ liệu.")
-                return {
-                    "status": "error",
-                    "message": f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: AI không phân tích được dữ liệu."
-                }
+                failed_rows_details.append({"row": current_excel_row, "reason": "AI không phân tích được dữ liệu"})
+                continue
                 
 
             extracted = validated_data.get("extracted_data", {})
             if not isinstance(extracted, dict):
                 print(f"❌ Dòng {current_excel_row}: Dữ liệu AI trích xuất sai định dạng.")
-                return {
-                    "status": "error",
-                    "message": f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Dữ liệu AI trích xuất sai định dạng."
-                }
+                failed_rows_details.append({"row": current_excel_row, "reason": "Dữ liệu AI sai định dạng"})
+                continue
 
             raw_address = str(extracted.get("address") or "").strip()
 
             if not raw_address or raw_address.lower() in ["[chưa cập nhật]", "none", "null", "chưa rõ", ""]:
                 print(f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Thiếu hoặc sai địa chỉ.")
-                return {
-                    "status": "error",
-                    "message": f"❌ Dòng {current_excel_row}: Thiếu hoặc sai địa chỉ."
-                }
+                failed_rows_details.append({"row": current_excel_row, "reason": "Thiếu hoặc sai địa chỉ"})
+                continue
 
             # Kiểm tra lưu DB (hàm trả về None/"" nếu thành công, trả về string lỗi nếu thất bại)
-            message = upsert_room_to_db(data=extracted, current_excel_row=current_excel_row, type_process = "EXCEL")
-            if message in ("SUCCESS"):
+            extracted["landlord_phone"] = user.username
+            message = upsert_room_to_db(data=extracted, current_excel_row=current_excel_row, type_process = "EXCEL", landlord_phone=user.username)
+            if message == "SUCCESS":
                 success_count += 1
             else:
                 print(f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Lỗi DB - {message}")
-                return {
-                    "status": "error",
-                    "message": f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Lỗi DB - {message}"
-                }
+                failed_rows_details.append({"row": current_excel_row, "reason": str(message)})
 
     return {
         "status": "success",
-        "message": f"AI đã xử lý xong! Thành công: {success_count} phòng."
+        "message": f"AI đã xử lý xong! Thành công: {success_count} phòng; lỗi: {len(failed_rows_details)} dòng.",
+        "errors": failed_rows_details[:100]
     }
 
 @app.get("/api/rooms/download-template")
@@ -286,11 +326,19 @@ async def get_rooms_filter(
     from_date: Optional[str] = None,
     to_date: Optional[str] = None,
     status: Optional[str] = None,
-    username: Optional[str] = None
+    username: Optional[str] = None,
+    limit: int = 50,
+    offset: Optional[str] = None,
+    include_deleted: bool = False,
+    user: Principal = Depends(get_current_user)
 ):
     must_conditions = []
-    if username and username != "adminpro":
-        must_conditions.append(qdrant_models.FieldCondition(key="landlord_phone", match=qdrant_models.MatchValue(value=username)))
+    must_not_conditions = []
+    effective_username = username if user.role == "SUPER_ADMIN" else user.username
+    if effective_username and effective_username != os.getenv("ADMIN_USERNAME", "adminpro"):
+        must_conditions.append(qdrant_models.FieldCondition(key="landlord_phone", match=qdrant_models.MatchValue(value=effective_username)))
+    if not include_deleted:
+        must_not_conditions.append(qdrant_models.FieldCondition(key="status", match=qdrant_models.MatchValue(value="ĐÃ XÓA")))
 
     if status:
         must_conditions.append(qdrant_models.FieldCondition(key="status", match=qdrant_models.MatchValue(value=status)))
@@ -311,8 +359,9 @@ async def get_rooms_filter(
             time_range["lte"] = VN_TZ.localize(dt_to).timestamp()
         must_conditions.append(qdrant_models.FieldCondition(key="move_in_timestamp", range=qdrant_models.Range(**time_range)))
 
-    query_filter = qdrant_models.Filter(must=must_conditions) if must_conditions else None
-    records, _ = qdrant_client.scroll(collection_name=COLLECTION_NAME, scroll_filter=query_filter, limit=200)
+    query_filter = qdrant_models.Filter(must=must_conditions, must_not=must_not_conditions)
+    safe_limit = min(max(limit, 1), 100)
+    records, next_offset = qdrant_client.scroll(collection_name=COLLECTION_NAME, scroll_filter=query_filter, limit=safe_limit, offset=offset)
 
     results = []
     for rec in records:
@@ -321,13 +370,18 @@ async def get_rooms_filter(
             payload_data["id"] = rec.id
             results.append(payload_data)
             
-    return results
+    return {"data": results, "next_offset": str(next_offset) if next_offset else None}
 
 # --- WEBHOOK ZALO ---
 @app.post("/webhook/zalo")
 async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
     try:
+        await verify_zalo_webhook(request)
         data = await request.json()
+        event_id = str(data.get("event_id") or data.get("timestamp") or "")
+        if event_id:
+            if not redis_client.set(f"zalo_event:{event_id}", "1", nx=True, ex=86400):
+                return {"status": "duplicate"}
         event_name = str(data.get("event_name", "")).strip()
         sender_id = data.get("sender", {}).get("id")
 
@@ -367,11 +421,11 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
             if "gửi thông tin cho oa" in clean_message or "số điện thoại:" in clean_message:
                 
                 # 🔍 Trích xuất Số điện thoại bằng Regex từ chuỗi text (Bắt các số 10 chữ số bắt đầu bằng 0 hoặc 84)
-                phone_match = re.search(r'(?:số điện thoại|sđt|phone):\s*(\+?84|0[3|5|7|8|9][0-9]{8})\b', raw_message, re.IGNORECASE)
+                phone_match = re.search(r'(?:số điện thoại|sđt|phone):\s*(\+?84[35789][0-9]{8}|0[35789][0-9]{8})\b', raw_message, re.IGNORECASE)
                 
                 # Dự phòng: Nếu Regex trên trật, lấy luôn chuỗi 10 số bắt đầu bằng 0 trong tin nhắn
                 if not phone_match:
-                    phone_match = re.search(r'\b(0[3|5|7|8|9][0-9]{8})\b', raw_message)
+                    phone_match = re.search(r'\b(0[35789][0-9]{8})\b', raw_message)
 
                 if phone_match:
                     extracted_phone = format_national_phone(phone_match.group(1))
@@ -383,6 +437,13 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                             zalo_user_id=str(sender_id),
                             phone=extracted_phone
                         )
+                        pending_room = get_pending_room(str(sender_id))
+                        if pending_room:
+                            pending_media = get_pending_media(str(sender_id))
+                            result = upsert_room_to_db(pending_room, media_urls=pending_media, type_process="NOT_EXCEL", landlord_phone=extracted_phone)
+                            if result == "SUCCESS":
+                                clear_pending_room(str(sender_id))
+                                get_get_and_clear_pending_media(str(sender_id))
                         print(f"✅ [SUCCESS] Đã bắt thành công SĐT từ text: {extracted_phone} (User ID: {sender_id})")
                         
                         # Phản hồi lại cho khách
@@ -397,7 +458,8 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                         return {"status": "error", "message": str(e)}
                     
             if "otp" in clean_message:
-                phone_match = re.search(r'(0[3|5|7|8|9][0-9]{8})', clean_message)
+                enforce_rate_limit(redis_client, f"otp:{sender_id}", 5, 900)
+                phone_match = re.search(r'(0[35789][0-9]{8})', clean_message)
                 if phone_match:
                     phone_number = format_national_phone(phone_match.group(1))
                     otp = str(random.randint(100000, 999999))
@@ -408,8 +470,8 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                     existing_user_record = db.query(UserWeb).filter(UserWeb.user_id == sender_id).first()
 
                     if existing_phone_record and existing_phone_record.user_id != sender_id:
-                        db.delete(existing_phone_record)
-                        db.commit()
+                        send_zalo_message(sender_id, "Số điện thoại này đã liên kết với một tài khoản khác. Vui lòng liên hệ quản trị viên để xác minh.")
+                        return {"status": "phone_already_linked"}
 
                     if existing_user_record:
                         existing_user_record.phone = phone_number
@@ -469,8 +531,16 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                         "url": media_url,
                         "is_video": (item.get("type") == "video") or ("user_send_video" in event_name)
                     })
-            background_tasks.add_task(process_zalo_ai_logic, text, media_items, sender_id, db)
+            def handle_zalo_message():
+                task_db = SessionLocal()
+                try:
+                    process_zalo_ai_logic(text, media_items, sender_id, task_db)
+                finally:
+                    task_db.close()
+            background_tasks.add_task(handle_zalo_message)
 
+    except HTTPException:
+        raise
     except Exception as e:
         print("❌ [Webhook Exception]:", e)
 
