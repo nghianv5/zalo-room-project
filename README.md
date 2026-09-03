@@ -19,3 +19,5 @@ Chạy `python -m pytest -q`. Endpoint `/health` kiểm tra PostgreSQL, Redis v�
 ## Thay đổi dữ liệu
 
 Hai bảng `room_records` và `audit_logs` được tự tạo khi khởi động. Qdrant vẫn là nguồn tìm kiếm để không thay đổi chức năng cốt lõi; `room_records` là bản sao phục vụ sao lưu và phục hồi. Xóa phòng trên web đổi trạng thái thành `ĐÃ XÓA`, không xóa vật lý.
+
+`landlord_phone` là trường bắt buộc cho mọi lần tạo/cập nhật phòng từ web, Zalo và Excel. Giá trị phải là số điện thoại Việt Nam 10 chữ số hợp lệ. Các bản ghi Qdrant cũ từng thiếu trường này cần được bổ sung trước khi cập nhật lại.

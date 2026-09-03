@@ -238,10 +238,10 @@ class RoomCreateUpdateSchema(BaseModel):
     media_urls: Optional[List[str]] = Field(default_factory=list)
     move_in_date: Optional[str] = "Vào ở ngay"
     status: Optional[str] = "TRỐNG"
-    landlord_phone: Optional[str] = Field(default=None, description="Số điện thoại người đăng / chủ nhà")
+    landlord_phone: str = Field(..., min_length=10, description="Số điện thoại người đăng / chủ nhà (bắt buộc)")
 
 
-    @validator('address', 'price', 'room_code', pre=True)
+    @validator('address', 'price', 'room_code', 'landlord_phone', pre=True)
     def check_not_empty_or_null(cls, value):
         """Validate đảm bảo không nhận giá trị Null/None hoặc chuỗi toàn khoảng trắng."""
         if value is None:
@@ -562,6 +562,11 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         phone = str(data.get("landlord_phone", "")).strip()
         if not phone:
             phone = landlord_phone
+        phone = format_national_phone(phone)
+        if not re.fullmatch(r"0[35789][0-9]{8}", phone or ""):
+            if type_process == "EXCEL":
+                return f"❌ Dòng {current_excel_row}: landlord_phone là trường bắt buộc và phải là số điện thoại Việt Nam hợp lệ."
+            return "landlord_phone là trường bắt buộc và phải là số điện thoại Việt Nam hợp lệ."
         # Nếu tìm thấy thì bản ghi thì k cập nhật mà bỏ qua
         existing_id = find_existing_room_id(address=address_clean, room_name=room_name, landlord_phone=phone)
         if existing_id:
@@ -718,7 +723,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
             "move_in_date": move_in_date_str,
             "move_in_timestamp": move_in_timestamp,
             "status": status_str,
-            "landlord_phone": format_national_phone(phone),
+            "landlord_phone": phone,
             "created_at": created_at,
             "updated_at": now_str
         }

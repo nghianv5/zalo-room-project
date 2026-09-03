@@ -150,7 +150,10 @@ async def save_or_update_room(
         # Chuyển dữ liệu schema sang dict
         room_dict = data.model_dump() if hasattr(data, "model_dump") else data.dict()
         
-        room_dict["landlord_phone"] = user.username
+        if user.role == "SUPER_ADMIN":
+            room_dict["landlord_phone"] = format_national_phone(room_dict.get("landlord_phone"))
+        else:
+            room_dict["landlord_phone"] = user.username
         if point_id:
             records = qdrant_client.retrieve(collection_name=COLLECTION_NAME, ids=[point_id])
             if not records or not records[0].payload:
@@ -294,8 +297,9 @@ async def upload_excel_rooms(file: UploadFile = File(...), user: Principal = Dep
                 continue
 
             # Kiểm tra lưu DB (hàm trả về None/"" nếu thành công, trả về string lỗi nếu thất bại)
-            extracted["landlord_phone"] = user.username
-            message = upsert_room_to_db(data=extracted, current_excel_row=current_excel_row, type_process = "EXCEL", landlord_phone=user.username)
+            excel_owner_phone = extracted.get("landlord_phone") if user.role == "SUPER_ADMIN" else user.username
+            extracted["landlord_phone"] = excel_owner_phone
+            message = upsert_room_to_db(data=extracted, current_excel_row=current_excel_row, type_process="EXCEL", landlord_phone=excel_owner_phone)
             if message == "SUCCESS":
                 success_count += 1
             else:

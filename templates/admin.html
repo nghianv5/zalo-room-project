@@ -304,7 +304,7 @@
                     </div>
                     <div>
                         <label class="block font-bold text-gray-700 mb-1">SĐT Chủ nhà liên hệ:</label>
-                        <input type="text" id="landlord_phone" class="w-full border p-2 rounded" placeholder="VD: 0987654321">
+                        <input type="tel" id="landlord_phone" required pattern="0[35789][0-9]{8}" class="w-full border p-2 rounded" placeholder="VD: 0987654321">
                     </div>
 
                     <div class="md:col-span-3">
@@ -800,7 +800,7 @@
 				service_fees: document.getElementById("service_fees").value,
 				move_in_date: document.getElementById("move_in_date").value,
 				status: document.getElementById("status").value,
-				landlord_phone: localStorage.getItem("username"), // lấy username web làm landlord_phone
+				landlord_phone: document.getElementById("landlord_phone").value.trim(),
 				media_urls: mediaArray
 			};
 
@@ -835,6 +835,8 @@
             document.getElementById("roomForm").reset();
             document.getElementById("roomId").value = "";
             document.getElementById("modalTitle").innerText = "Thêm Phòng Mới";
+            const username = localStorage.getItem("username") || "";
+            document.getElementById("landlord_phone").value = /^0[35789][0-9]{8}$/.test(username) ? username : "";
             document.getElementById("roomModal").classList.remove("hidden");
         }
 
