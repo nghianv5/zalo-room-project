@@ -256,6 +256,14 @@ class RoomCreateUpdateSchema(BaseModel):
 
 def cron_refresh_zalo_job():
     print("🔄 [REFRESH TOKEN ZALO] Bắt đầu tự động...", flush=True) # Thêm flush=True
+    lock_key = "lock:zalo_token_refresh"
+    lock_acquired = False
+    try:
+        lock_acquired = bool(redis_client.set(lock_key, str(os.getpid()), nx=True, ex=300))
+        if not lock_acquired:
+            return
+    except Exception:
+        lock_acquired = False
     db = SessionLocal()
     try:
         refresh_zalo_tokens(db)
@@ -264,6 +272,11 @@ def cron_refresh_zalo_job():
         print(f"❌ [REFRESH TOKEN ZALO ERROR]: {e}", flush=True)
     finally:
         db.close()
+        if lock_acquired:
+            try:
+                redis_client.delete(lock_key)
+            except Exception:
+                pass
     
 # --- DATABASE DEPENDENCY & CURRENT USER HELPER ---
 def get_db():
@@ -416,17 +429,38 @@ def add_pending_media(user_id: str, new_urls: list):
     return merged
 
 def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None) -> bool:
-    lock_key = "lock:zalo_token_refresh"
-    try:
-        if not redis_client.set(lock_key, str(os.getpid()), nx=True, ex=300):
-            return
-    except Exception:
-        pass
     db = SessionLocal()
     try:
         data_token = get_current_tokens_from_db(db)
     finally:
         db.close()
+    if not data_token or not data_token.get("access_token"):
+        print("❌ [ZALO ERROR]: Thiếu ZALO_ACCESS_TOKEN")
+        return False
+
+    url = "https://openapi.zalo.me/v3.0/oa/message/cs"
+    headers = {"Content-Type": "application/json", "access_token": data_token["access_token"]}
+    text_chunks = split_text_by_limit(str(ai_reply or ""), max_length=1800)
+    try:
+        for idx, chunk in enumerate(text_chunks):
+            response = requests.post(url, headers=headers, json={"recipient": {"user_id": user_id}, "message": {"text": chunk}}, timeout=10)
+            res_data = response.json()
+            print(f"📩 [ZALO RES Part {idx+1}/{len(text_chunks)}]: {res_data}")
+            if res_data.get("error") != 0:
+                return False
+            if len(text_chunks) > 1:
+                time.sleep(0.3)
+
+        for media_url in list(dict.fromkeys(media_urls or []))[:MAX_MEDIA_PER_ROOM]:
+            media_type = "video" if re.search(r"\.(mp4|mov|webm)(\?|$)", media_url, re.I) else "image"
+            payload = {"recipient": {"user_id": user_id}, "message": {"attachment": {"type": "template", "payload": {"template_type": "media", "elements": [{"media_type": media_type, "url": media_url}]}}}}
+            if requests.post(url, headers=headers, json=payload, timeout=10).json().get("error") != 0:
+                return False
+        return True
+    except Exception as e:
+        print("❌ [ZALO REQUEST EXCEPTION]:", e)
+        return False
+
 
 def write_audit_log(actor: str, action: str, target_id: str = None, details: dict = None) -> None:
     audit_db = SessionLocal()
@@ -438,48 +472,6 @@ def write_audit_log(actor: str, action: str, target_id: str = None, details: dic
         print(f"⚠️ [AUDIT ERROR]: {exc}")
     finally:
         audit_db.close()
-        try:
-            redis_client.delete(lock_key)
-        except Exception:
-            pass
-    if not data_token:
-        print("❌ [ZALO ERROR]: Thiếu ZALO_ACCESS_TOKEN")
-        return False
-        
-    url = "https://openapi.zalo.me/v3.0/oa/message/cs"
-    headers = {"Content-Type": "application/json", "access_token": data_token["access_token"]}
-
-    # 1. Chia nhỏ ai_reply thành các đoạn dưới 1800 ký tự
-    text_chunks = split_text_by_limit(ai_reply, max_length=1800)
-
-    try:
-        for idx, chunk in enumerate(text_chunks):
-            payload = {"recipient": {"user_id": user_id}, "message": {"text": chunk}}
-
-            response = requests.post(url, headers=headers, json=payload, timeout=10)
-            res_data = response.json()
-            print(f"📩 [ZALO RES Part {idx+1}/{len(text_chunks)}]: {res_data}")
-
-            if res_data.get("error") != 0:
-                print(f"❌ [ZALO FAIL]: Code {res_data.get('error')} - {res_data.get('message')}")
-                return False
-            
-            # Tạm dừng 0.3s để tránh bị rate limit khi gửi liên tiếp nhiều tin
-            if len(text_chunks) > 1:
-                time.sleep(0.3)
-
-        # Gửi từng media riêng để không làm mất các ảnh sau ảnh đầu tiên.
-        for media_url in list(dict.fromkeys(media_urls or []))[:MAX_MEDIA_PER_ROOM]:
-            media_type = "video" if re.search(r"\.(mp4|mov|webm)(\?|$)", media_url, re.I) else "image"
-            payload = {"recipient": {"user_id": user_id}, "message": {"attachment": {"type": "template", "payload": {"template_type": "media", "elements": [{"media_type": media_type, "url": media_url}]}}}}
-            response = requests.post(url, headers=headers, json=payload, timeout=10)
-            if response.json().get("error") != 0:
-                return False
-        return True
-
-    except Exception as e:
-        print("❌ [ZALO REQUEST EXCEPTION]:", e)
-        return False
 
 def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
     if not zalo_media_url:
