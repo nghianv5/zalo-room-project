@@ -1301,7 +1301,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     save_pending_room(user_id, extracted)
                     # 🚨 BẮT BUỘC: Nếu chưa có SĐT -> Chặn lại và yêu cầu chia sẻ SĐT
                     request_phone_message = {
-                            "recipient": {"user_id": zalo_user_id},
+                            "recipient": {"user_id": user_id},
                             "message": {
                                 "text": "⚠️ Để đăng bài cho thuê phòng, bạn vui lòng bấm nút bên dưới để chia sẻ Số điện thoại liên hệ nhé!",
                                 "attachment": {
