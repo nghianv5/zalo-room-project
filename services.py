@@ -1318,7 +1318,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                             }
                         }
                     # Gọi Zalo Open API gửi yêu cầu xin SĐT
-                    send_zalo_request(request_phone_message)
+                    send_zalo_request_phone(request_phone_message)
                     return {"status": "phone_required"}
 
                 message = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None, type_process = "NOT_EXCEL", landlord_phone=phone)
