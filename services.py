@@ -428,6 +428,58 @@ def add_pending_media(user_id: str, new_urls: list):
     redis_client.set(cache_key, json.dumps(merged), ex=CACHE_TTL_SECONDS)
     return merged
 
+
+def _refresh_zalo_token_after_invalid() -> str:
+    """Refresh đồng bộ một lần khi Zalo trả -216 và trả về access token mới."""
+    lock_key = "lock:zalo_token_refresh"
+    lock_acquired = False
+    try:
+        try:
+            lock_acquired = bool(redis_client.set(lock_key, str(os.getpid()), nx=True, ex=60))
+        except Exception:
+            lock_acquired = True
+
+        if not lock_acquired:
+            time.sleep(1)
+            db = SessionLocal()
+            try:
+                return str(get_current_tokens_from_db(db).get("access_token") or "")
+            finally:
+                db.close()
+
+        db = SessionLocal()
+        try:
+            refresh_zalo_tokens(db)
+            db.expire_all()
+            return str(get_current_tokens_from_db(db).get("access_token") or "")
+        finally:
+            db.close()
+    except Exception as exc:
+        print(f"❌ [ZALO TOKEN RECOVERY ERROR]: {exc}", flush=True)
+        return ""
+    finally:
+        if lock_acquired:
+            try:
+                redis_client.delete(lock_key)
+            except Exception:
+                pass
+
+
+def _post_zalo_with_token_retry(url: str, payload: dict, access_token: str) -> tuple:
+    """Gửi request và chỉ retry một lần nếu access token không hợp lệ."""
+    headers = {"Content-Type": "application/json", "access_token": access_token}
+    response = requests.post(url, headers=headers, json=payload, timeout=10)
+    result = response.json()
+    if result.get("error") != -216:
+        return result, access_token
+
+    refreshed_token = _refresh_zalo_token_after_invalid()
+    if not refreshed_token:
+        return result, access_token
+    retry_headers = {"Content-Type": "application/json", "access_token": refreshed_token}
+    retry_response = requests.post(url, headers=retry_headers, json=payload, timeout=10)
+    return retry_response.json(), refreshed_token
+
 def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None) -> bool:
     db = SessionLocal()
     try:
@@ -439,12 +491,12 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None) -> b
         return False
 
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
-    headers = {"Content-Type": "application/json", "access_token": data_token["access_token"]}
+    access_token = data_token["access_token"]
     text_chunks = split_text_by_limit(str(ai_reply or ""), max_length=1800)
     try:
         for idx, chunk in enumerate(text_chunks):
-            response = requests.post(url, headers=headers, json={"recipient": {"user_id": user_id}, "message": {"text": chunk}}, timeout=10)
-            res_data = response.json()
+            payload = {"recipient": {"user_id": user_id}, "message": {"text": chunk}}
+            res_data, access_token = _post_zalo_with_token_retry(url, payload, access_token)
             print(f"📩 [ZALO RES Part {idx+1}/{len(text_chunks)}]: {res_data}")
             if res_data.get("error") != 0:
                 return False
@@ -454,7 +506,8 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None) -> b
         for media_url in list(dict.fromkeys(media_urls or []))[:MAX_MEDIA_PER_ROOM]:
             media_type = "video" if re.search(r"\.(mp4|mov|webm)(\?|$)", media_url, re.I) else "image"
             payload = {"recipient": {"user_id": user_id}, "message": {"attachment": {"type": "template", "payload": {"template_type": "media", "elements": [{"media_type": media_type, "url": media_url}]}}}}
-            if requests.post(url, headers=headers, json=payload, timeout=10).json().get("error") != 0:
+            res_data, access_token = _post_zalo_with_token_retry(url, payload, access_token)
+            if res_data.get("error") != 0:
                 return False
         return True
     except Exception as e:
@@ -1278,7 +1331,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
 #                ai_reply = "Dạ em chưa nhận đủ thông tin phòng. Anh/chị gửi lại thông tin phòng trọ giúp em nhé!"
 #            elif not phone:
 #                # Yêu cầu gửi SĐT nếu chưa xác thực
-#                send_zalo_request_phone(user_id)
+#                send_zalo_request(request_phone_message)
 #                return
 #            else:
 #                # Thực hiện ghi vào database Qdrant
@@ -1301,7 +1354,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     save_pending_room(user_id, extracted)
                     # 🚨 BẮT BUỘC: Nếu chưa có SĐT -> Chặn lại và yêu cầu chia sẻ SĐT
                     request_phone_message = {
-                            "recipient": {"user_id": user_id},
+                            "recipient": {"user_id": zalo_user_id},
                             "message": {
                                 "text": "⚠️ Để đăng bài cho thuê phòng, bạn vui lòng bấm nút bên dưới để chia sẻ Số điện thoại liên hệ nhé!",
                                 "attachment": {
@@ -1318,7 +1371,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                             }
                         }
                     # Gọi Zalo Open API gửi yêu cầu xin SĐT
-                    send_zalo_request_phone(request_phone_message)
+                    send_zalo_request(request_phone_message)
                     return {"status": "phone_required"}
 
                 message = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None, type_process = "NOT_EXCEL", landlord_phone=phone)
@@ -1541,56 +1594,36 @@ def save_or_update_user_web(
         raise e
         
         
-def send_zalo_request_phone(tenant_zalo_id: str) -> bool:
-    if not tenant_zalo_id or str(tenant_zalo_id).strip() in ["ADMIN_WEB", "SYSTEM", "None", ""]:
-        print("⚠️ Zalo User ID không hợp lệ, không thể gửi yêu cầu SĐT.")
+def send_zalo_request(payload: dict) -> bool:
+    """Gửi payload tùy chỉnh tới Zalo OA bằng token trong DB và tự retry lỗi -216."""
+    recipient_id = str((payload or {}).get("recipient", {}).get("user_id") or "").strip()
+    if recipient_id in ["", "ADMIN_WEB", "SYSTEM", "None"]:
+        print("⚠️ Zalo User ID không hợp lệ, không thể gửi request.")
+        return False
+    if not isinstance(payload.get("message"), dict):
+        print("⚠️ Payload Zalo thiếu message hợp lệ.")
         return False
 
-    # ✅ SỬA TẠI ĐÂY: URL không chứa token
-    url = "https://openapi.zalo.me/v3.0/oa/message/cs"
-    
-    # ✅ SỬA TẠI ĐÂY: Đặt access_token vào Header
-    headers = {
-        "Content-Type": "application/json",
-        "access_token": ZALO_ACCESS_TOKEN
-    }
-
-    payload = {
-        "recipient": {
-            "user_id": str(tenant_zalo_id)
-        },
-        "message": {
-            "attachment": {
-                "type": "template",
-                "payload": {
-                    "template_type": "request_user_info",
-                    "elements": [
-                        {
-                            "title": "Xác thực số điện thoại",
-                            "subtitle": "Vui lòng chia sẻ Số điện thoại Zalo của bạn để hoàn tất đăng ký/đặt phòng.",
-                            "image_url": "https://zalo-room-project-jjsx.onrender.com/static/icon_zalo_room.png"
-                        }
-                    ]
-                }
-            }
-        }
-    }
+    db = SessionLocal()
+    try:
+        token_data = get_current_tokens_from_db(db)
+    finally:
+        db.close()
+    access_token = str((token_data or {}).get("access_token") or "")
+    if not access_token:
+        print("❌ [ZALO REQUEST]: Thiếu access token.")
+        return False
 
     try:
-        # Dùng json=payload thay vì data=json.dumps(payload) cho gọn nhẹ
-        response = requests.post(url, headers=headers, json=payload, timeout=10)
-        res_data = response.json()
-
-        if res_data.get("error") == 0:
-            print(f"✅ Đã gửi yêu cầu SĐT thành công tới Zalo ID: {tenant_zalo_id}")
-            
+        url = "https://openapi.zalo.me/v3.0/oa/message/cs"
+        result, _ = _post_zalo_with_token_retry(url, payload, access_token)
+        if result.get("error") == 0:
+            print(f"✅ Đã gửi Zalo request thành công tới: {recipient_id}")
             return True
-        else:
-            print(f"❌ Lỗi từ Zalo API ({res_data.get('error')}): {res_data.get('message')}")
-            return False
-
-    except Exception as e:
-        print(f"❌ Lỗi kết nối khi gửi yêu cầu SĐT tới Zalo: {e}")
+        print(f"❌ Lỗi Zalo request ({result.get('error')}): {result.get('message')}")
+        return False
+    except Exception as exc:
+        print(f"❌ Lỗi kết nối khi gửi Zalo request: {exc}")
         return False
         
 def is_phone_already_ordered(db: Session, tenant_phone: str, room_code: str = None) -> bool:
@@ -1823,7 +1856,6 @@ def refresh_zalo_tokens(db):
         print("🎉 [ZALO OAUTH] Tự động Refresh Token và lưu DB thành công!", flush=True)
     else:
         print(f"❌ [ZALO Refresh access token False: ]: {res_json}", flush=True)
-        send_zalo_message(os.environ.get("ZALO_ADMIN_ID"), "⚠️ Refresh Token Zalo đã hết hạn hẳn! Vui lòng đăng nhập cấp lại quyền.")
         raise Exception(f"Zalo OAuth Error: {res_json.get('error_description', res_json)}")
 
 def get_current_tokens_from_db(db: Session) -> dict:
