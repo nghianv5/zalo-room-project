@@ -613,9 +613,12 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
             address_clean = re.sub(r'\b(hcm|sg|sai gon)\b', 'Hồ Chí Minh', address_clean)
         room_name = str(data.get("room_name", "Phòng trọ")).strip()
         phone = str(data.get("landlord_phone", "")).strip()
+        print(f"data.get: {data.get("landlord_phone", "")}")
         if not phone:
             phone = landlord_phone
+        print(f"phone trước: {phone}")
         phone = format_national_phone(phone)
+        print(f"phone sau: {phone}")
         if not re.fullmatch(r"0[35789][0-9]{8}", phone or ""):
             if type_process == "EXCEL":
                 return f"❌ Dòng {current_excel_row}: landlord_phone là trường bắt buộc và phải là số điện thoại Việt Nam hợp lệ."
