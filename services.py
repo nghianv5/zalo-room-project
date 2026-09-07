@@ -615,6 +615,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         phone = str(data.get("landlord_phone", "")).strip()
         print(f"data.get: {data.get("landlord_phone", "")}")
         if not phone:
+            print(f"landlord_phone trước: {landlord_phone}")
             phone = landlord_phone
         print(f"phone trước: {phone}")
         phone = format_national_phone(phone)
