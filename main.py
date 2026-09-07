@@ -453,7 +453,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                         # Phản hồi lại cho khách
                         send_zalo_message(
                             str(sender_id),
-                            f"✅ Cảm ơn bạn! Hệ thống đã ghi nhận thành công Số điện thoại: {extracted_phone}."
+                            f"✅ Cảm ơn bạn! Hệ thống đã ghi nhận thành công Số điện thoại: {extracted_phone}. Mời bạn đăng thông tin phòng."
                         )
                         return {"status": "success", "phone": extracted_phone}
                     
