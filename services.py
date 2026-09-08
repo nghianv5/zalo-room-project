@@ -613,7 +613,7 @@ def format_room_search_message(room: dict, position: int) -> str:
     else:
         lines.append("📸 Ảnh/video ngay bên dưới thuộc phòng này")
         lines.append("👉 Nhắn OA để được tư vấn phòng này.")
-            )
+            
 
     return "\n -----------------------".join(lines)
 
