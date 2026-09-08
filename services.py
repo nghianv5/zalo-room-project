@@ -84,8 +84,8 @@ gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 CACHE_TTL_SECONDS = 600
 MAX_MEDIA_PER_ROOM = int(os.getenv("MAX_MEDIA_PER_ROOM", "10"))
 MAX_SEARCH_MEDIA = int(os.getenv("MAX_SEARCH_MEDIA", "10"))
-MAX_SEARCH_ROOMS = max(1, int(os.getenv("MAX_SEARCH_ROOMS", "20")))
-MAX_SEARCH_MEDIA_PER_ROOM = max(1, int(os.getenv("MAX_SEARCH_MEDIA_PER_ROOM", "10")))
+MAX_SEARCH_ROOMS = max(1, int(os.getenv("MAX_SEARCH_ROOMS", "5")))
+MAX_SEARCH_MEDIA_PER_ROOM = max(1, int(os.getenv("MAX_SEARCH_MEDIA_PER_ROOM", "3")))
 
 # Initializing Qdrant Collection & Index
 try:
@@ -473,35 +473,19 @@ def _has_meaningful_room_value(value) -> bool:
     }
 
 
-
 def _is_enabled_amenity(value) -> bool:
-    """
-    Nhận cả boolean và chuỗi tiếng Việt thường được lưu trong dữ liệu cũ.
-    """
+    """Nhận cả boolean và chuỗi tiếng Việt thường được lưu trong dữ liệu cũ."""
     if value is True:
         return True
-
     if value is False or value is None:
         return False
-
     normalized = str(value).strip().lower()
+    return normalized in {"có", "co", "yes", "true", "1", "x"}
 
-    return normalized in {
-        "có",
-        "co",
-        "yes",
-        "true",
-        "1",
-        "x"
-    }
 
 def format_room_search_message(room: dict, position: int) -> str:
-    """
-    Tạo nội dung phòng từ dữ liệu DB.
-    Các giá trị None, null, chưa rõ sẽ không được hiển thị.
-    """
+    """Tạo nội dung ổn định từ DB để ghép đúng với ảnh của từng phòng."""
     lines = [f"🏠 PHÒNG {position}"]
-
     room_name = room.get("room_name")
     room_code = room.get("room_code")
     address = room.get("address")
@@ -509,21 +493,13 @@ def format_room_search_message(room: dict, position: int) -> str:
 
     if _has_meaningful_room_value(room_name):
         lines.append(f"🛏️ {room_name}")
-
     if _has_meaningful_room_value(room_code):
         lines.append(f"🔖 Mã phòng: {room_code}")
-
     if _has_meaningful_room_value(address):
         lines.append(f"📍 Địa chỉ: {address}")
-
     if _has_meaningful_room_value(price):
         numeric_price = parse_price_safe({"price": price})
-
-        if numeric_price > 0:
-            price_text = f"{numeric_price:,.0f}đ/tháng"
-        else:
-            price_text = str(price)
-
+        price_text = f"{numeric_price:,.0f}đ/tháng" if numeric_price > 0 else str(price)
         lines.append(f"💰 Giá: {price_text}")
 
     optional_fields = [
@@ -534,32 +510,16 @@ def format_room_search_message(room: dict, position: int) -> str:
         ("parking_info", "🛵 Chỗ để xe", ""),
         ("service_fees", "🧾 Phí dịch vụ", ""),
     ]
-
     for key, label, suffix in optional_fields:
         value = room.get(key)
-
         if _has_meaningful_room_value(value):
             value_text = str(value).strip()
             display_suffix = suffix
-
-            # Tránh hiển thị thành "20m2 m²"
-            if key == "room_size" and re.search(
-                r"m\s*(?:2|²)\b",
-                value_text,
-                re.IGNORECASE
-            ):
+            if key == "room_size" and re.search(r"m\s*(?:2|²)\b", value_text, re.I):
                 display_suffix = ""
-
-            # Tránh hiển thị thành "2 người người"
-            elif (
-                key == "max_occupants"
-                and "người" in value_text.lower()
-            ):
+            elif key == "max_occupants" and "người" in value_text.lower():
                 display_suffix = ""
-
-            lines.append(
-                f"{label}: {value_text}{display_suffix}"
-            )
+            lines.append(f"{label}: {value_text}{display_suffix}")
 
     amenity_labels = [
         ("is_private_bathroom", "VS khép kín"),
@@ -573,49 +533,23 @@ def format_room_search_message(room: dict, position: int) -> str:
         ("has_fingerprint_lock", "Khóa vân tay"),
         ("allow_pets", "Cho nuôi thú cưng"),
     ]
-
-    # Quan trọng: nhận cả boolean True và chuỗi "Có"
-    amenities = [
-        label
-        for key, label in amenity_labels
-        if _is_enabled_amenity(room.get(key))
-    ]
-
-    # Đưa other_amenities như "tủ lạnh" vào cùng danh sách tiện nghi
+    amenities = [label for key, label in amenity_labels if _is_enabled_amenity(room.get(key))]
     other_amenities = room.get("other_amenities")
-
     if _has_meaningful_room_value(other_amenities):
-        for item in re.split(
-            r"[,;\n]+",
-            str(other_amenities)
-        ):
+        for item in re.split(r"[,;\n]+", str(other_amenities)):
             clean_item = item.strip()
-
-            existing_amenities = {
-                value.lower()
-                for value in amenities
-            }
-
-            if (
-                clean_item
-                and clean_item.lower() not in existing_amenities
-            ):
+            if clean_item and clean_item.lower() not in {value.lower() for value in amenities}:
                 amenities.append(clean_item)
-
     if amenities:
-        lines.append(
-            f"✅ Tiện nghi: {', '.join(amenities)}"
-        )
+        lines.append(f"✅ Tiện nghi: {', '.join(amenities)}")
 
     if room_code:
-        lines.append(f"📸 Ảnh/video ngay bên dưới thuộc phòng {room_code}")
         lines.append(f"👉 Đặt lịch: nhắn “Đặt lịch {room_code}”")
     else:
-        lines.append("📸 Ảnh/video ngay bên dưới thuộc phòng này")
         lines.append("👉 Nhắn OA để được tư vấn phòng này.")
-            
-
-    return "\n -----------------------".join(lines)
+    message = "\n".join(lines)
+    # Loại bỏ các đường gạch dài bị chèn trước emoji khi format/paste source.
+    return re.sub(r"(?m)^\s*[-–—_]{5,}\s*", "", message).strip()
 
 
 def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
@@ -630,25 +564,19 @@ def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
 
     total_media_sent = 0
     for position, room in enumerate(rooms, start=1):
-        room_message = format_room_search_message(
-            room=room,
-            position=position
+        remaining_media = max(0, MAX_SEARCH_MEDIA - total_media_sent)
+        room_media = (
+            _normalise_room_media(room, min(MAX_SEARCH_MEDIA_PER_ROOM, remaining_media))
+            if remaining_media else []
         )
-
-        room_media = _normalise_room_media(
-            room,
-            limit=MAX_SEARCH_MEDIA_PER_ROOM
-        )
-
-        # Gửi thông tin phòng trước
         if not send_zalo_message(
-            user_id=user_id,
-            ai_reply=room_message,
-            media_urls=room_media
+            user_id,
+            format_room_search_message(room, position),
+            media_urls=room_media,
+            combine_first_media=True,
         ):
             return False
-
-        # Tạo khoảng cách trước khi gửi phòng tiếp theo
+        total_media_sent += len(room_media)
         time.sleep(0.3)
     return True
 
@@ -704,7 +632,12 @@ def _post_zalo_with_token_retry(url: str, payload: dict, access_token: str) -> t
     retry_response = requests.post(url, headers=retry_headers, json=payload, timeout=10)
     return retry_response.json(), refreshed_token
 
-def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None) -> bool:
+def send_zalo_message(
+    user_id: str,
+    ai_reply: str,
+    media_urls: list = None,
+    combine_first_media: bool = False,
+) -> bool:
     db = SessionLocal()
     try:
         data_token = get_current_tokens_from_db(db)
@@ -716,18 +649,40 @@ def send_zalo_message(user_id: str, ai_reply: str, media_urls: list = None) -> b
 
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
     access_token = data_token["access_token"]
-    text_chunks = split_text_by_limit(str(ai_reply or ""), max_length=1800)
+    clean_reply = re.sub(r"(?m)^\s*[-–—_]{5,}\s*", "", str(ai_reply or "")).strip()
+    text_chunks = split_text_by_limit(clean_reply, max_length=1800)
+    unique_media = list(dict.fromkeys(media_urls or []))[:MAX_MEDIA_PER_ROOM]
     try:
         for idx, chunk in enumerate(text_chunks):
-            payload = {"recipient": {"user_id": user_id}, "message": {"text": chunk}}
+            message_payload = {"text": chunk}
+            # Kết quả tìm phòng: ghép nội dung và ảnh đầu tiên trong cùng request Zalo.
+            if combine_first_media and idx == 0 and unique_media:
+                first_media = unique_media[0]
+                first_media_type = "video" if re.search(
+                    r"\.(mp4|mov|webm)(\?|$)", first_media, re.I
+                ) else "image"
+                message_payload["attachment"] = {
+                    "type": "template",
+                    "payload": {
+                        "template_type": "media",
+                        "elements": [{"media_type": first_media_type, "url": first_media}],
+                    },
+                }
+            payload = {"recipient": {"user_id": user_id}, "message": message_payload}
             res_data, access_token = _post_zalo_with_token_retry(url, payload, access_token)
             print(f"📩 [ZALO RES Part {idx+1}/{len(text_chunks)}]: {res_data}")
+            # Một số phiên bản OA không nhận text + media chung: tự fallback an toàn.
+            if res_data.get("error") != 0 and "attachment" in message_payload:
+                payload = {"recipient": {"user_id": user_id}, "message": {"text": chunk}}
+                res_data, access_token = _post_zalo_with_token_retry(url, payload, access_token)
+                combine_first_media = False
             if res_data.get("error") != 0:
                 return False
             if len(text_chunks) > 1:
                 time.sleep(0.3)
 
-        for media_url in list(dict.fromkeys(media_urls or []))[:MAX_MEDIA_PER_ROOM]:
+        media_to_send = unique_media[1:] if combine_first_media and unique_media else unique_media
+        for media_url in media_to_send:
             media_type = "video" if re.search(r"\.(mp4|mov|webm)(\?|$)", media_url, re.I) else "image"
             payload = {"recipient": {"user_id": user_id}, "message": {"attachment": {"type": "template", "payload": {"template_type": "media", "elements": [{"media_type": media_type, "url": media_url}]}}}}
             res_data, access_token = _post_zalo_with_token_retry(url, payload, access_token)

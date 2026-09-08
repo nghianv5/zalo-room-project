@@ -22,6 +22,6 @@ Hai bảng `room_records` và `audit_logs` được tự tạo khi khởi độn
 
 `landlord_phone` là trường bắt buộc cho mọi lần tạo/cập nhật phòng từ web, Zalo và Excel. Giá trị phải là số điện thoại Việt Nam 10 chữ số hợp lệ. Các bản ghi Qdrant cũ từng thiếu trường này cần được bổ sung trước khi cập nhật lại.
 
-Khi tìm phòng, hệ thống không in đường dẫn `media_urls` trong tin nhắn. Mỗi phòng được gửi thành một cụm riêng theo đúng thứ tự: nội dung chi tiết phòng rồi đến ảnh/video thuộc chính phòng đó. Media được loại trùng trước khi gửi. `MAX_SEARCH_ROOMS` giới hạn số phòng hiển thị (mặc định 5), `MAX_SEARCH_MEDIA_PER_ROOM` giới hạn media mỗi phòng (mặc định 3), và `MAX_SEARCH_MEDIA` giới hạn tổng media của một lượt (mặc định 10).
+Khi tìm phòng, hệ thống không in đường dẫn `media_urls` trong tin nhắn. Mỗi phòng được gửi thành một cụm riêng; ảnh đầu tiên được ghép cùng request với nội dung phòng, các ảnh tiếp theo nằm ngay sau đó. Nếu OA không hỗ trợ payload kết hợp, hệ thống tự fallback sang nội dung rồi ảnh để không làm gián đoạn phản hồi. Các đường gạch dài thừa cũng được tự loại bỏ. `MAX_SEARCH_ROOMS` giới hạn số phòng hiển thị (mặc định 5), `MAX_SEARCH_MEDIA_PER_ROOM` giới hạn media mỗi phòng (mặc định 3), và `MAX_SEARCH_MEDIA` giới hạn tổng media của một lượt (mặc định 10).
 
 Tìm kiếm Qdrant dùng timeout 30 giây và retry 3 lần theo mặc định. Nếu vector search vẫn lỗi hoặc timeout, hệ thống fallback sang `scroll` với cùng bộ lọc trạng thái, địa chỉ và giá. Có thể chỉnh bằng `QDRANT_TIMEOUT_SECONDS` và `QDRANT_SEARCH_RETRIES`.
