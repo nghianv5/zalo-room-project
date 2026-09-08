@@ -473,9 +473,35 @@ def _has_meaningful_room_value(value) -> bool:
     }
 
 
+
+def _is_enabled_amenity(value) -> bool:
+    """
+    Nhận cả boolean và chuỗi tiếng Việt thường được lưu trong dữ liệu cũ.
+    """
+    if value is True:
+        return True
+
+    if value is False or value is None:
+        return False
+
+    normalized = str(value).strip().lower()
+
+    return normalized in {
+        "có",
+        "co",
+        "yes",
+        "true",
+        "1",
+        "x"
+    }
+
 def format_room_search_message(room: dict, position: int) -> str:
-    """Tạo nội dung ổn định từ DB để ghép đúng với ảnh của từng phòng."""
+    """
+    Tạo nội dung phòng từ dữ liệu DB.
+    Các giá trị None, null, chưa rõ sẽ không được hiển thị.
+    """
     lines = [f"🏠 PHÒNG {position}"]
+
     room_name = room.get("room_name")
     room_code = room.get("room_code")
     address = room.get("address")
@@ -483,13 +509,21 @@ def format_room_search_message(room: dict, position: int) -> str:
 
     if _has_meaningful_room_value(room_name):
         lines.append(f"🛏️ {room_name}")
+
     if _has_meaningful_room_value(room_code):
         lines.append(f"🔖 Mã phòng: {room_code}")
+
     if _has_meaningful_room_value(address):
         lines.append(f"📍 Địa chỉ: {address}")
+
     if _has_meaningful_room_value(price):
         numeric_price = parse_price_safe({"price": price})
-        price_text = f"{numeric_price:,.0f}đ/tháng" if numeric_price > 0 else str(price)
+
+        if numeric_price > 0:
+            price_text = f"{numeric_price:,.0f}đ/tháng"
+        else:
+            price_text = str(price)
+
         lines.append(f"💰 Giá: {price_text}")
 
     optional_fields = [
@@ -499,12 +533,33 @@ def format_room_search_message(room: dict, position: int) -> str:
         ("move_in_date", "📅 Có thể vào ở", ""),
         ("parking_info", "🛵 Chỗ để xe", ""),
         ("service_fees", "🧾 Phí dịch vụ", ""),
-        ("other_amenities", "✨ Tiện ích khác", ""),
     ]
+
     for key, label, suffix in optional_fields:
         value = room.get(key)
+
         if _has_meaningful_room_value(value):
-            lines.append(f"{label}: {value}{suffix}")
+            value_text = str(value).strip()
+            display_suffix = suffix
+
+            # Tránh hiển thị thành "20m2 m²"
+            if key == "room_size" and re.search(
+                r"m\s*(?:2|²)\b",
+                value_text,
+                re.IGNORECASE
+            ):
+                display_suffix = ""
+
+            # Tránh hiển thị thành "2 người người"
+            elif (
+                key == "max_occupants"
+                and "người" in value_text.lower()
+            ):
+                display_suffix = ""
+
+            lines.append(
+                f"{label}: {value_text}{display_suffix}"
+            )
 
     amenity_labels = [
         ("is_private_bathroom", "VS khép kín"),
@@ -518,14 +573,49 @@ def format_room_search_message(room: dict, position: int) -> str:
         ("has_fingerprint_lock", "Khóa vân tay"),
         ("allow_pets", "Cho nuôi thú cưng"),
     ]
-    amenities = [label for key, label in amenity_labels if room.get(key) is True]
+
+    # Quan trọng: nhận cả boolean True và chuỗi "Có"
+    amenities = [
+        label
+        for key, label in amenity_labels
+        if _is_enabled_amenity(room.get(key))
+    ]
+
+    # Đưa other_amenities như "tủ lạnh" vào cùng danh sách tiện nghi
+    other_amenities = room.get("other_amenities")
+
+    if _has_meaningful_room_value(other_amenities):
+        for item in re.split(
+            r"[,;\n]+",
+            str(other_amenities)
+        ):
+            clean_item = item.strip()
+
+            existing_amenities = {
+                value.lower()
+                for value in amenities
+            }
+
+            if (
+                clean_item
+                and clean_item.lower() not in existing_amenities
+            ):
+                amenities.append(clean_item)
+
     if amenities:
-        lines.append(f"✅ Tiện nghi: {', '.join(amenities)}")
+        lines.append(
+            f"✅ Tiện nghi: {', '.join(amenities)}"
+        )
 
     if room_code:
-        lines.append(f"👉 Đặt lịch: nhắn “Đặt lịch {room_code}”")
+        lines.append(
+            f"👉 Đặt lịch: nhắn “Đặt lịch {room_code}”"
+        )
     else:
-        lines.append("👉 Nhắn OA để được tư vấn phòng này.")
+        lines.append(
+            "👉 Nhắn OA để được tư vấn phòng này."
+        )
+
     return "\n".join(lines)
 
 
