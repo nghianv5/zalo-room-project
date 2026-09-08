@@ -608,15 +608,14 @@ def format_room_search_message(room: dict, position: int) -> str:
         )
 
     if room_code:
-        lines.append(
-            f"👉 Đặt lịch: nhắn “Đặt lịch {room_code}”"
-        )
+        lines.append(f"📸 Ảnh/video ngay bên dưới thuộc phòng {room_code}")
+        lines.append(f"👉 Đặt lịch: nhắn “Đặt lịch {room_code}”")
     else:
-        lines.append(
-            "👉 Nhắn OA để được tư vấn phòng này."
-        )
+        lines.append("📸 Ảnh/video ngay bên dưới thuộc phòng này")
+        lines.append("👉 Nhắn OA để được tư vấn phòng này.")
+            )
 
-    return "\n".join(lines)
+    return "\n -----------------------".join(lines)
 
 
 def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
@@ -631,18 +630,25 @@ def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
 
     total_media_sent = 0
     for position, room in enumerate(rooms, start=1):
-        remaining_media = max(0, MAX_SEARCH_MEDIA - total_media_sent)
-        room_media = (
-            _normalise_room_media(room, min(MAX_SEARCH_MEDIA_PER_ROOM, remaining_media))
-            if remaining_media else []
+        room_message = format_room_search_message(
+            room=room,
+            position=position
         )
+
+        room_media = _normalise_room_media(
+            room,
+            limit=MAX_SEARCH_MEDIA_PER_ROOM
+        )
+
+        # Gửi thông tin phòng trước
         if not send_zalo_message(
-            user_id,
-            format_room_search_message(room, position),
-            media_urls=room_media,
+            user_id=user_id,
+            ai_reply=room_message,
+            media_urls=room_media
         ):
             return False
-        total_media_sent += len(room_media)
+
+        # Tạo khoảng cách trước khi gửi phòng tiếp theo
         time.sleep(0.3)
     return True
 
