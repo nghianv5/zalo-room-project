@@ -80,6 +80,7 @@ gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 # Bộ nhớ đệm tạm thời
 CACHE_TTL_SECONDS = 600
 MAX_MEDIA_PER_ROOM = int(os.getenv("MAX_MEDIA_PER_ROOM", "10"))
+MAX_SEARCH_MEDIA = int(os.getenv("MAX_SEARCH_MEDIA", "10"))
 
 # Initializing Qdrant Collection & Index
 try:
@@ -427,6 +428,22 @@ def add_pending_media(user_id: str, new_urls: list):
     merged = list(dict.fromkeys(existing + list(new_urls or [])))[:MAX_MEDIA_PER_ROOM]
     redis_client.set(cache_key, json.dumps(merged), ex=CACHE_TTL_SECONDS)
     return merged
+
+
+def collect_search_media_urls(search_results: List[dict], limit: int = MAX_SEARCH_MEDIA) -> List[str]:
+    """Lấy media từ kết quả tìm phòng, giữ thứ tự và loại bỏ URL trùng."""
+    collected = []
+    for room in search_results or []:
+        room_media = room.get("media_urls") or []
+        if isinstance(room_media, str):
+            room_media = [item.strip() for item in room_media.split(",")]
+        for media_url in room_media:
+            clean_url = str(media_url or "").strip()
+            if clean_url.startswith(("https://", "http://")) and clean_url not in collected:
+                collected.append(clean_url)
+                if len(collected) >= max(0, limit):
+                    return collected
+    return collected
 
 
 def _refresh_zalo_token_after_invalid() -> str:
@@ -1248,7 +1265,14 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                 print(f"search_result : {search_results}")
                 if not search_results:
                     ai_reply = f"Dạ tiếc quá, hệ thống chưa tìm thấy phòng nào ở khu vực **{location_search}** với tầm giá từ **{min_p:,.0f}đ đến {max_p:,.0f}đ** ạ!"
+                    urls_to_send = []
                 else:
+                    # Gửi media bằng attachment Zalo, không đưa URL thô vào nội dung AI.
+                    urls_to_send = collect_search_media_urls(search_results)
+                    rooms_for_prompt = [
+                        {key: value for key, value in room.items() if key != "media_urls"}
+                        for room in search_results
+                    ]
                     # ... (Đoạn gọi Gemini định dạng danh sách phòng giữ nguyên như cũ) ...
                     # 1. Chuẩn bị Prompt cho Gemini định dạng danh sách phòng
                     prompt_format_rooms = f"""
@@ -1288,7 +1312,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     23. `max_price`: Giá thuê cao nhất
                     
                     Yêu cầu của khách: "{message_text}"
-                    Danh sách phòng tìm được: {search_results}
+                    Danh sách phòng tìm được: {rooms_for_prompt}
                     
                     HƯỚNG DẪN TẠO `ai_reply`:
                     - Liệt kê các phòng rõ ràng, dễ đọc (tên/mã phòng, địa chỉ, giá tiền, tiện ích nổi bật).
@@ -1298,12 +1322,12 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     - Nếu CÓ PHÒNG: Định dạng ngay danh sách phòng thành 1 tin nhắn phản hồi đẹp mắt trên Zalo:
                         + Đánh số thứ tự (1, 2, 3...).
                         + Tuyệt đối KHÔNG hiển thị các trường ghi "[Chưa cập nhật]", "Không", "Chưa rõ", "null", hoặc rỗng.
-                        + Bắt buộc hiển thị: Mã phòng, Tên phòng, Địa chỉ, Giá thuê, Media URLs (nếu có).
+                        + Bắt buộc hiển thị: Mã phòng, Tên phòng, Địa chỉ và Giá thuê.
                         + Dùng emoji sinh động. KHÔNG tự chèn đường link ảnh vào văn bản.
                         + Mỗi phòng liệt kê ngắn gọn: Tên/Số phòng, Địa chỉ, Giá thuê, và danh sách tiện ích có sẵn.
                         + Dùng icon/emoji sinh động. KHÔNG chèn bất kỳ đường link ảnh nào.
                         + Phải có thông tin mã phòng để người dùng đặt phòng
-                        + Nếu đường link media media_urls tồn tại thì phải hiển thị
+                        + Tuyệt đối không hiển thị URL ảnh/video trong văn bản; hệ thống sẽ gửi media riêng.
                         
                     TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
                     {{
@@ -1319,8 +1343,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     ai_reply = result_data.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
                     add_chat_history(user_id=user_id, user_message=None, ai_reply=ai_reply)
                     
-                # Vì là tìm kiếm nên không đính kèm media đăng phòng của người dùng
-                urls_to_send = []
+                # urls_to_send đã chứa media của kết quả tìm kiếm để Zalo hiển thị trực tiếp.
 
 #        elif action == "CONFIRM_REGISTER":
 #            # 💡 Người dùng chốt ĐĂNG KÝ -> Lấy thông tin từ Cache ra ghi vào DB
