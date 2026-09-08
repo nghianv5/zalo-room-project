@@ -67,7 +67,7 @@ Base = declarative_base()
 # External Clients
 qdrant_client = QdrantClient(
     url=os.environ.get("QDRANT_URL"),
-    api_key=os.environ.get("QDRANT_API_KEY")
+    api_key=os.environ.get("QDRANT_API_KEY"),
     timeout=30.0  # 👈 Thêm dòng này (đơn vị: giây)
 )
 
