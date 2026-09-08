@@ -65,10 +65,12 @@ Base = declarative_base()
 
 
 # External Clients
+QDRANT_TIMEOUT_SECONDS = float(os.getenv("QDRANT_TIMEOUT_SECONDS", "30"))
+QDRANT_SEARCH_RETRIES = max(1, int(os.getenv("QDRANT_SEARCH_RETRIES", "3")))
 qdrant_client = QdrantClient(
     url=os.environ.get("QDRANT_URL"),
     api_key=os.environ.get("QDRANT_API_KEY"),
-    timeout=30.0  # 👈 Thêm dòng này (đơn vị: giây)
+    timeout=QDRANT_TIMEOUT_SECONDS
 )
 
 CLOUDINARY_URL = os.environ.get("CLOUDINARY_URL")
@@ -82,6 +84,8 @@ gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 CACHE_TTL_SECONDS = 600
 MAX_MEDIA_PER_ROOM = int(os.getenv("MAX_MEDIA_PER_ROOM", "10"))
 MAX_SEARCH_MEDIA = int(os.getenv("MAX_SEARCH_MEDIA", "10"))
+MAX_SEARCH_ROOMS = max(1, int(os.getenv("MAX_SEARCH_ROOMS", "5")))
+MAX_SEARCH_MEDIA_PER_ROOM = max(1, int(os.getenv("MAX_SEARCH_MEDIA_PER_ROOM", "3")))
 
 # Initializing Qdrant Collection & Index
 try:
@@ -445,6 +449,112 @@ def collect_search_media_urls(search_results: List[dict], limit: int = MAX_SEARC
                 if len(collected) >= max(0, limit):
                     return collected
     return collected
+
+
+def _normalise_room_media(room: dict, limit: int = MAX_SEARCH_MEDIA_PER_ROOM) -> List[str]:
+    """Chuẩn hóa media của đúng một phòng và loại URL không hợp lệ/trùng lặp."""
+    room_media = room.get("media_urls") or []
+    if isinstance(room_media, str):
+        room_media = [item.strip() for item in room_media.split(",")]
+
+    valid_media = []
+    for item in room_media:
+        clean_url = str(item or "").strip()
+        if clean_url.startswith(("https://", "http://")) and clean_url not in valid_media:
+            valid_media.append(clean_url)
+            if len(valid_media) >= max(0, limit):
+                break
+    return valid_media
+
+
+def _has_meaningful_room_value(value) -> bool:
+    return str(value or "").strip().lower() not in {
+        "", "none", "null", "nan", "chưa rõ", "chưa cập nhật", "không có"
+    }
+
+
+def format_room_search_message(room: dict, position: int) -> str:
+    """Tạo nội dung ổn định từ DB để ghép đúng với ảnh của từng phòng."""
+    lines = [f"🏠 PHÒNG {position}"]
+    room_name = room.get("room_name")
+    room_code = room.get("room_code")
+    address = room.get("address")
+    price = room.get("price")
+
+    if _has_meaningful_room_value(room_name):
+        lines.append(f"🛏️ {room_name}")
+    if _has_meaningful_room_value(room_code):
+        lines.append(f"🔖 Mã phòng: {room_code}")
+    if _has_meaningful_room_value(address):
+        lines.append(f"📍 Địa chỉ: {address}")
+    if _has_meaningful_room_value(price):
+        numeric_price = parse_price_safe({"price": price})
+        price_text = f"{numeric_price:,.0f}đ/tháng" if numeric_price > 0 else str(price)
+        lines.append(f"💰 Giá: {price_text}")
+
+    optional_fields = [
+        ("room_size", "📐 Diện tích", " m²"),
+        ("floor", "🏢 Tầng", ""),
+        ("max_occupants", "👥 Tối đa", " người"),
+        ("move_in_date", "📅 Có thể vào ở", ""),
+        ("parking_info", "🛵 Chỗ để xe", ""),
+        ("service_fees", "🧾 Phí dịch vụ", ""),
+        ("other_amenities", "✨ Tiện ích khác", ""),
+    ]
+    for key, label, suffix in optional_fields:
+        value = room.get(key)
+        if _has_meaningful_room_value(value):
+            lines.append(f"{label}: {value}{suffix}")
+
+    amenity_labels = [
+        ("is_private_bathroom", "VS khép kín"),
+        ("has_ac", "Điều hòa"),
+        ("has_heater", "Nóng lạnh"),
+        ("has_washer", "Máy giặt"),
+        ("bed", "Giường"),
+        ("wardrobe", "Tủ quần áo"),
+        ("has_balcony", "Ban công"),
+        ("has_window", "Cửa sổ"),
+        ("has_fingerprint_lock", "Khóa vân tay"),
+        ("allow_pets", "Cho nuôi thú cưng"),
+    ]
+    amenities = [label for key, label in amenity_labels if room.get(key) is True]
+    if amenities:
+        lines.append(f"✅ Tiện nghi: {', '.join(amenities)}")
+
+    if room_code:
+        lines.append(f"👉 Đặt lịch: nhắn “Đặt lịch {room_code}”")
+    else:
+        lines.append("👉 Nhắn OA để được tư vấn phòng này.")
+    return "\n".join(lines)
+
+
+def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
+    """Gửi từng phòng theo cặp: nội dung phòng rồi đến media của chính phòng đó."""
+    rooms = list(search_results or [])[:MAX_SEARCH_ROOMS]
+    if not rooms:
+        return False
+
+    intro = f"🔎 Tìm thấy {len(search_results)} phòng phù hợp. Dưới đây là các phòng nổi bật:"
+    if not send_zalo_message(user_id, intro):
+        return False
+
+    total_media_sent = 0
+    for position, room in enumerate(rooms, start=1):
+        remaining_media = max(0, MAX_SEARCH_MEDIA - total_media_sent)
+        room_media = (
+            _normalise_room_media(room, min(MAX_SEARCH_MEDIA_PER_ROOM, remaining_media))
+            if remaining_media else []
+        )
+        if not send_zalo_message(
+            user_id,
+            format_room_search_message(room, position),
+            media_urls=room_media,
+        ):
+            return False
+        total_media_sent += len(room_media)
+        time.sleep(0.3)
+    return True
 
 
 def _refresh_zalo_token_after_invalid() -> str:
@@ -1072,6 +1182,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
     pending_urls = get_pending_media(user_id)
     all_current_media = list(dict.fromkeys(pending_urls + incoming_media_urls))
     urls_to_send = all_current_media
+    search_results_to_send = None
     
     # 1. Lấy lịch sử chat của User từ Redis
     history_list = get_chat_history(user_id)
@@ -1268,8 +1379,9 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     ai_reply = f"Dạ tiếc quá, hệ thống chưa tìm thấy phòng nào ở khu vực **{location_search}** với tầm giá từ **{min_p:,.0f}đ đến {max_p:,.0f}đ** ạ!"
                     urls_to_send = []
                 else:
-                    # Gửi media bằng attachment Zalo, không đưa URL thô vào nội dung AI.
-                    urls_to_send = collect_search_media_urls(search_results)
+                    # Cuối luồng sẽ gửi từng phòng kèm đúng media của phòng đó.
+                    search_results_to_send = search_results
+                    urls_to_send = []
                     rooms_for_prompt = [
                         {key: value for key, value in room.items() if key != "media_urls"}
                         for room in search_results
@@ -1415,7 +1527,10 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
     except Exception as err:
         print("❌ [AI Logic Exception]:", err)
         ai_reply = "Dạ hệ thống đang bận một chút, anh/chị chờ em vài giây rồi nhắn lại giúp em nhé!"
-    send_zalo_message(user_id, ai_reply, media_urls=urls_to_send)
+    if search_results_to_send:
+        send_zalo_search_results(user_id, search_results_to_send)
+    else:
+        send_zalo_message(user_id, ai_reply, media_urls=urls_to_send)
     
     
 # --- HÀM TẠO MÃ PHÓNG RANDOM 6 KÝ TỰ ---
@@ -1814,36 +1929,53 @@ def search_rooms_with_filter(
     status_filter = qdrant_models.Filter(must=must_conditions)
     query_vector = get_text_embedding(query_text)
     print(f"query_text : {query_text}")
-    try:
-        search_result = qdrant_client.query_points(
-            collection_name=COLLECTION_NAME,
-            query=query_vector if query_vector else None,
-            query_filter=status_filter,
-            limit=top_k,
-            with_payload=True
-        )
-        rooms = [
-            hit.payload | {"id": hit.id}
-            for hit in search_result.points
-            if hit.payload
-        ]
+    safe_top_k = min(max(int(top_k or 20), 1), 100)
+    rooms = []
 
-        def get_room_price(room):
+    if query_vector:
+        for attempt in range(1, QDRANT_SEARCH_RETRIES + 1):
             try:
-                return float(room.get("price") or 0)
-            except (TypeError, ValueError):
-                return parse_price_to_number(room.get("price"))
+                search_result = qdrant_client.query_points(
+                    collection_name=COLLECTION_NAME,
+                    query=query_vector,
+                    query_filter=status_filter,
+                    limit=safe_top_k,
+                    with_payload=True
+                )
+                rooms = [
+                    hit.payload | {"id": str(hit.id)}
+                    for hit in search_result.points
+                    if hit.payload
+                ]
+                break
+            except Exception as exc:
+                print(f"⚠️ [QDRANT VECTOR SEARCH {attempt}/{QDRANT_SEARCH_RETRIES}]: {exc}")
+                if attempt < QDRANT_SEARCH_RETRIES:
+                    time.sleep(min(2 ** (attempt - 1), 4))
 
-        # Mặc định ưu tiên giá thấp đến cao để phù hợp hành vi tìm thuê.
-        rooms.sort(
-            key=get_room_price,
-            reverse=False
-        )
+    # Fallback không dùng vector nhưng vẫn giữ nguyên lọc địa chỉ, giá và trạng thái.
+    if not rooms:
+        try:
+            records, _ = qdrant_client.scroll(
+                collection_name=COLLECTION_NAME,
+                scroll_filter=status_filter,
+                limit=safe_top_k,
+                with_payload=True,
+                with_vectors=False
+            )
+            rooms = [
+                record.payload | {"id": str(record.id)}
+                for record in records
+                if record.payload
+            ]
+            if rooms:
+                print(f"✅ [QDRANT FALLBACK]: Tìm thấy {len(rooms)} phòng bằng bộ lọc.")
+        except Exception as exc:
+            print(f"❌ [SEARCH FILTER ERROR]: {type(exc).__name__}: {exc}")
+            return []
 
-        return rooms[:top_k]
-    except Exception as e:
-        print("❌ [SEARCH FILTER ERROR]:", e)
-        return []
+    rooms.sort(key=parse_price_safe)
+    return rooms[:safe_top_k]
         
 
 
