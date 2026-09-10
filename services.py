@@ -544,7 +544,7 @@ def format_room_search_message(room: dict, position: int) -> str:
         lines.append(f"✅ Tiện nghi: {', '.join(amenities)}")
 
     if room_code:
-        lines.append(f"👉 Đặt lịch: nhắn “Đặt lịch {room_code}”")
+        lines.append(f"👉 Đặt lịch xem phòng: nhắn “Đặt lịch {room_code}”")
     else:
         lines.append("👉 Nhắn OA để được tư vấn phòng này.")
     message = "\n".join(lines)
