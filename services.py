@@ -83,7 +83,7 @@ gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 # Bộ nhớ đệm tạm thời
 CACHE_TTL_SECONDS = 600
 MAX_MEDIA_PER_ROOM = int(os.getenv("MAX_MEDIA_PER_ROOM", "10"))
-MAX_SEARCH_MEDIA = int(os.getenv("MAX_SEARCH_MEDIA", "20"))
+MAX_SEARCH_MEDIA = int(os.getenv("MAX_SEARCH_MEDIA", "10"))
 MAX_SEARCH_ROOMS = max(1, int(os.getenv("MAX_SEARCH_ROOMS", "20")))
 MAX_SEARCH_MEDIA_PER_ROOM = max(1, int(os.getenv("MAX_SEARCH_MEDIA_PER_ROOM", "10")))
 
@@ -258,6 +258,43 @@ class RoomCreateUpdateSchema(BaseModel):
             raise ValueError("Giá trị không được để trống hoặc invalid!")
             
         return val_str
+
+
+class OrderRoomCreateUpdateSchema(BaseModel):
+    tenant_zalo_id: Optional[str] = None
+    tenant_phone: str = Field(..., min_length=10, description="Số điện thoại người thuê")
+    landlord_zalo_id: Optional[str] = None
+    landlord_phone: Optional[str] = None
+    room_code: str = Field(..., min_length=6, max_length=6, description="Mã phòng 6 ký tự")
+    viewing_time: Optional[datetime] = None
+
+    @validator("tenant_phone", pre=True)
+    def validate_tenant_phone(cls, value):
+        phone = format_national_phone(str(value or "").strip())
+        if not re.fullmatch(r"0[35789][0-9]{8}", phone):
+            raise ValueError("Số điện thoại người thuê không hợp lệ.")
+        return phone
+
+    @validator("landlord_phone", pre=True)
+    def validate_landlord_phone(cls, value):
+        if value is None or not str(value).strip():
+            return None
+        phone = format_national_phone(str(value).strip())
+        if not re.fullmatch(r"0[35789][0-9]{8}", phone):
+            raise ValueError("Số điện thoại chủ nhà không hợp lệ.")
+        return phone
+
+    @validator("room_code", pre=True)
+    def normalize_room_code(cls, value):
+        code = str(value or "").strip().upper()
+        if not re.fullmatch(r"[A-Z0-9]{6}", code):
+            raise ValueError("Mã phòng phải gồm đúng 6 chữ cái hoặc chữ số.")
+        return code
+
+    @validator("tenant_zalo_id", "landlord_zalo_id", pre=True)
+    def normalize_optional_id(cls, value):
+        clean_value = str(value or "").strip()
+        return clean_value or None
 
 
 def cron_refresh_zalo_job():

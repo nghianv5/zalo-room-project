@@ -136,6 +136,8 @@ def delete_room_from_web(point_id: str, user: Principal = Depends(get_current_us
         qdrant_client.set_payload(collection_name=COLLECTION_NAME, payload={"status": "ĐÃ XÓA", "deleted_at": datetime.now(VN_TZ).isoformat()}, points=[point_id], wait=True)
         write_audit_log(user.username, "ROOM_SOFT_DELETE", point_id)
         return {"status": "success", "message": "Đã chuyển phòng vào thùng rác!"}
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -178,6 +180,8 @@ async def save_or_update_room(
         else:
             raise HTTPException(status_code=400, detail=f"Không thể ghi dữ liệu: {success}")
             
+    except HTTPException:
+        raise
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -355,12 +359,15 @@ async def get_rooms_filter(
 
     if from_date or to_date:
         time_range = {}
-        if from_date:
-            dt_from = datetime.strptime(from_date, "%Y-%m-%d")
-            time_range["gte"] = VN_TZ.localize(dt_from).timestamp()
-        if to_date:
-            dt_to = datetime.strptime(to_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
-            time_range["lte"] = VN_TZ.localize(dt_to).timestamp()
+        try:
+            if from_date:
+                dt_from = datetime.strptime(from_date, "%Y-%m-%d")
+                time_range["gte"] = VN_TZ.localize(dt_from).timestamp()
+            if to_date:
+                dt_to = datetime.strptime(to_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
+                time_range["lte"] = VN_TZ.localize(dt_to).timestamp()
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail="Ngày lọc phải có định dạng YYYY-MM-DD.") from exc
         must_conditions.append(qdrant_models.FieldCondition(key="move_in_timestamp", range=qdrant_models.Range(**time_range)))
 
     query_filter = qdrant_models.Filter(must=must_conditions, must_not=must_not_conditions)
@@ -370,11 +377,153 @@ async def get_rooms_filter(
     results = []
     for rec in records:
         if rec.payload:
-            payload_data = rec.payload
-            payload_data["id"] = rec.id
+            payload_data = dict(rec.payload)
+            payload_data["id"] = str(rec.id)
             results.append(payload_data)
             
     return {"data": results, "next_offset": str(next_offset) if next_offset else None}
+
+
+def _serialize_order(order: OrderRoom) -> dict:
+    return {
+        "id": order.id,
+        "tenant_zalo_id": order.tenant_zalo_id,
+        "tenant_phone": order.tenant_phone,
+        "landlord_zalo_id": order.landlord_zalo_id,
+        "landlord_phone": order.landlord_phone,
+        "room_code": order.room_code,
+        "viewing_time": order.viewing_time.isoformat() if order.viewing_time else None,
+        "created_at": order.created_at.isoformat() if order.created_at else None,
+    }
+
+
+def _get_room_by_code(room_code: str) -> dict:
+    try:
+        records, _ = qdrant_client.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=qdrant_models.Filter(
+                must=[qdrant_models.FieldCondition(
+                    key="room_code",
+                    match=qdrant_models.MatchValue(value=room_code),
+                )]
+            ),
+            limit=1,
+            with_payload=True,
+            with_vectors=False,
+        )
+    except Exception as exc:
+        raise HTTPException(status_code=503, detail=f"Không thể kiểm tra mã phòng: {exc}") from exc
+    if not records or not records[0].payload:
+        raise HTTPException(status_code=400, detail="Mã phòng không tồn tại.")
+    return records[0].payload
+
+
+def _prepare_order_data(data: OrderRoomCreateUpdateSchema, db: Session) -> dict:
+    order_data = data.model_dump() if hasattr(data, "model_dump") else data.dict()
+    room_data = _get_room_by_code(order_data["room_code"])
+    order_data["tenant_zalo_id"] = order_data.get("tenant_zalo_id") or get_user_id_by_phone(db, order_data["tenant_phone"])
+    order_data["landlord_phone"] = order_data.get("landlord_phone") or room_data.get("landlord_phone")
+    order_data["landlord_zalo_id"] = order_data.get("landlord_zalo_id") or get_user_id_by_phone(db, order_data.get("landlord_phone"))
+    return order_data
+
+
+@app.get("/api/admin/orders")
+def get_admin_orders(
+    room_code: Optional[str] = None,
+    tenant_phone: Optional[str] = None,
+    landlord_phone: Optional[str] = None,
+    limit: int = 100,
+    offset: int = 0,
+    db: Session = Depends(get_db),
+    user: Principal = Depends(require_admin),
+):
+    query = db.query(OrderRoom)
+    if room_code:
+        query = query.filter(OrderRoom.room_code.ilike(f"%{room_code.strip()}%"))
+    if tenant_phone:
+        query = query.filter(OrderRoom.tenant_phone.ilike(f"%{tenant_phone.strip()}%"))
+    if landlord_phone:
+        query = query.filter(OrderRoom.landlord_phone.ilike(f"%{landlord_phone.strip()}%"))
+    safe_limit = min(max(limit, 1), 200)
+    safe_offset = max(offset, 0)
+    total = query.count()
+    orders = query.order_by(OrderRoom.created_at.desc()).offset(safe_offset).limit(safe_limit).all()
+    return {"data": [_serialize_order(item) for item in orders], "total": total, "limit": safe_limit, "offset": safe_offset}
+
+
+@app.post("/api/admin/orders")
+def create_admin_order(
+    data: OrderRoomCreateUpdateSchema,
+    db: Session = Depends(get_db),
+    user: Principal = Depends(require_admin),
+):
+    order_data = _prepare_order_data(data, db)
+    duplicate = db.query(OrderRoom).filter(
+        OrderRoom.tenant_phone == order_data["tenant_phone"],
+        OrderRoom.room_code == order_data["room_code"],
+    ).first()
+    if duplicate:
+        raise HTTPException(status_code=409, detail="Số điện thoại này đã đặt phòng này.")
+    order = OrderRoom(id=str(uuid.uuid4()), **order_data, created_at=datetime.utcnow())
+    try:
+        db.add(order)
+        db.commit()
+        db.refresh(order)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Không thể thêm đơn đặt phòng.") from exc
+    write_audit_log(user.username, "ORDER_CREATE", order.id, {"room_code": order.room_code})
+    return {"status": "success", "message": "Thêm đơn đặt phòng thành công.", "data": _serialize_order(order)}
+
+
+@app.put("/api/admin/orders/{order_id}")
+def update_admin_order(
+    order_id: str,
+    data: OrderRoomCreateUpdateSchema,
+    db: Session = Depends(get_db),
+    user: Principal = Depends(require_admin),
+):
+    order = db.query(OrderRoom).filter(OrderRoom.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Không tìm thấy đơn đặt phòng.")
+    order_data = _prepare_order_data(data, db)
+    duplicate = db.query(OrderRoom).filter(
+        OrderRoom.tenant_phone == order_data["tenant_phone"],
+        OrderRoom.room_code == order_data["room_code"],
+        OrderRoom.id != order_id,
+    ).first()
+    if duplicate:
+        raise HTTPException(status_code=409, detail="Số điện thoại này đã đặt phòng này.")
+    for key, value in order_data.items():
+        setattr(order, key, value)
+    try:
+        db.commit()
+        db.refresh(order)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Không thể cập nhật đơn đặt phòng.") from exc
+    write_audit_log(user.username, "ORDER_UPDATE", order.id, {"room_code": order.room_code})
+    return {"status": "success", "message": "Cập nhật đơn đặt phòng thành công.", "data": _serialize_order(order)}
+
+
+@app.delete("/api/admin/orders/{order_id}")
+def delete_admin_order(
+    order_id: str,
+    db: Session = Depends(get_db),
+    user: Principal = Depends(require_admin),
+):
+    order = db.query(OrderRoom).filter(OrderRoom.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Không tìm thấy đơn đặt phòng.")
+    room_code = order.room_code
+    try:
+        db.delete(order)
+        db.commit()
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Không thể xóa đơn đặt phòng.") from exc
+    write_audit_log(user.username, "ORDER_DELETE", order_id, {"room_code": room_code})
+    return {"status": "success", "message": "Đã xóa đơn đặt phòng."}
 
 # --- WEBHOOK ZALO ---
 @app.post("/webhook/zalo")

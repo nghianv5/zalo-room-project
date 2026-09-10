@@ -1,969 +1,752 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="vi">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Quản Lý Phòng Trọ - Admin Dashboard</title>
-	<link rel="shortcut icon" href="data:image/x-icon;," type="image/x-icon">
-    <!-- Tailwind CSS CDN -->
-    <script src="https://cdn.tailwindcss.com"></script>
-</head>
-<body class="bg-gray-100 min-h-screen">
-
-    <!-- 2. GIAO DIỆN ADMIN MAIN DASHBOARD -->
-    <div id="adminDashboard" class="hidden p-4 md:p-6 max-w-[98%] mx-auto">
-        <div class="bg-white p-4 md:p-6 rounded-lg shadow-md">
-            <!-- HEADER -->
-            <div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 mb-6">
-                <div>
-                    <h1 class="text-2xl font-bold text-gray-800">📋 Quản Lý Danh Sách Phòng Trọ</h1>
-                    <p class="text-xs text-gray-500 mt-1">Chuẩn hóa dữ liệu theo 8 mục chi tiết & Đồng bộ Realtime</p>
-                </div>
-                <div class="flex flex-wrap gap-2 items-center">
-                    <button id="btnDeleteSelected" onclick="deleteSelectedRooms()" class="hidden bg-red-600 text-white px-3 py-2 rounded hover:bg-red-700 font-medium text-xs flex items-center gap-1 transition-all">
-                        🗑️ Xóa phòng đã chọn (<span id="selectedCount">0</span>)
-                    </button>
-                    <button onclick="openExcelModal()" class="bg-emerald-600 text-white px-3 py-2 rounded hover:bg-emerald-700 font-medium text-xs flex items-center gap-1">
-                        📊 Nhập Excel / CSV
-                    </button>
-                    <button onclick="openModal()" class="bg-blue-600 text-white px-3 py-2 rounded hover:bg-blue-700 font-medium text-xs flex items-center gap-1">
-                        + Thêm Phòng Mới
-                    </button>
-                    <button onclick="openChangePasswordModal()" class="bg-amber-600 text-white px-3 py-2 rounded hover:bg-amber-700 font-medium text-xs flex items-center gap-1">
-                        🔑 Đổi mật khẩu
-                    </button>
-                    <button onclick="handleLogout()" class="bg-gray-800 text-white px-3 py-2 rounded hover:bg-gray-900 font-medium text-xs flex items-center gap-1">
-                        🚪 Đăng xuất
-                    </button>
-                </div>
-            </div>
-
-            <!-- BỘ LỌC DỮ LIỆU -->
-            <div class="bg-gray-50 p-4 rounded-lg border mb-6 text-xs">
-                <div class="flex justify-between items-center mb-3">
-                    <h3 class="font-bold text-gray-700 text-sm flex items-center gap-1">
-                        🔍 BỘ LỌC TÌM KIẾM NÂNG CAO
-                    </h3>
-                    <div class="flex gap-2">
-                        <button onclick="resetFilters()" class="text-blue-600 hover:underline font-semibold">🔄 Xóa bộ lọc</button>
-                    </div>
-                </div>
-
-                <div id="filterPanel" class="space-y-4">
-                    <div class="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-                        <div>
-                            <label class="block font-semibold text-gray-600 mb-1">1. Địa chỉ:</label>
-                            <input type="text" id="filterAddress" oninput="applyFilters()" placeholder="Nhập địa chỉ..." class="w-full border p-2 rounded bg-white">
-                        </div>
-                        <div>
-                            <label class="block font-semibold text-gray-600 mb-1">2. Tên / Số phòng:</label>
-                            <input type="text" id="filterRoomName" oninput="applyFilters()" placeholder="VD: Phòng 302..." class="w-full border p-2 rounded bg-white">
-                        </div>
-                        
-                        <div class="col-span-1 sm:col-span-2 bg-blue-50/50 p-2 rounded border border-blue-100">
-                            <label class="block font-semibold text-blue-900 mb-1">3. Khoảng Giá Thuê (VNĐ):</label>
-                            <div class="flex items-center gap-2">
-                                <input type="number" id="filterMinPrice" onchange="loadRooms()" placeholder="Giá từ (VD: 2000000)" class="w-full border p-2 rounded bg-white">
-                                <span>-</span>
-                                <input type="number" id="filterMaxPrice" onchange="loadRooms()" placeholder="Giá đến (VD: 5000000)" class="w-full border p-2 rounded bg-white">
-                            </div>
-                        </div>
-
-                        <div class="col-span-1 sm:col-span-2 bg-amber-50/50 p-2 rounded border border-amber-100">
-                            <label class="block font-semibold text-amber-900 mb-1">7. Khoảng Thời Gian Phòng Trống:</label>
-                            <div class="flex items-center gap-2">
-                                <input type="date" id="filterFromDate" onchange="loadRooms()" class="w-full border p-2 rounded bg-white">
-                                <span>tới</span>
-                                <input type="date" id="filterToDate" onchange="loadRooms()" class="w-full border p-2 rounded bg-white">
-                            </div>
-                        </div>
-
-                        <div>
-                            <label class="block font-semibold text-gray-600 mb-1">8. Trạng thái phòng:</label>
-                            <select id="filterStatus" onchange="loadRooms()" class="w-full border p-2 rounded bg-white font-semibold">
-                                <option value="">-- Tất cả --</option>
-                                <option value="TRỐNG">🟢 TRỐNG</option>
-                                <option value="ĐÃ CHO THUÊ">🔴 ĐÃ CHO THUÊ</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block font-semibold text-gray-600 mb-1">WC Khép kín:</label>
-                            <select id="filterBathroom" onchange="applyFilters()" class="w-full border p-2 rounded bg-white">
-                                <option value="">-- Tất cả --</option>
-                                <option value="Có">Có khép kín</option>
-                                <option value="Không">Chung WC</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block font-semibold text-gray-600 mb-1">Điều hòa:</label>
-                            <select id="filterAC" onchange="applyFilters()" class="w-full border p-2 rounded bg-white">
-                                <option value="">-- Tất cả --</option>
-                                <option value="Có">Có điều hòa</option>
-                                <option value="Không">Không</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block font-semibold text-gray-600 mb-1">Cho nuôi chó mèo:</label>
-                            <select id="filterPets" onchange="applyFilters()" class="w-full border p-2 rounded bg-white">
-                                <option value="">-- Tất cả --</option>
-                                <option value="Có">Cho nuôi</option>
-                                <option value="Không">Không cho</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block font-semibold text-gray-600 mb-1">SĐT Chủ nhà:</label>
-                            <input type="text" id="filterPhone" oninput="applyFilters()" placeholder="Nhập SĐT..." class="w-full border p-2 rounded bg-white">
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-
-            <!-- BẢNG DANH SÁCH PHÒNG (CỐ ĐỊNH KÍCH THƯỚC TRÁNH VỠ) -->
-            <div class="overflow-x-auto rounded-lg border border-gray-200">
-                <table class="w-full table-fixed border-collapse text-xs text-left">
-                    <thead>
-                        <tr class="bg-gray-100 text-gray-700 uppercase font-semibold">
-                            <th class="p-2 border text-center w-10">
-                                <input type="checkbox" id="selectAll" onchange="toggleSelectAll(this)" class="w-4 h-4 cursor-pointer">
-                            </th>
-                            <th class="p-2 border w-48">1. Địa chỉ & 2. Tên phòng</th>
-                            <th class="p-2 border w-24">3. Giá thuê</th>
-                            <th class="p-2 border w-64">4. Thông tin phòng chi tiết</th>
-                            <th class="p-2 border w-36">5. Phí dịch vụ</th>
-                            <th class="p-2 border w-28">6. Media</th>
-                            <th class="p-2 border w-24">7. Ngày ở</th>
-                            <th class="p-2 border w-28 text-center">8. Trạng thái</th>
-                            <th class="p-2 border w-32">Quản lý</th>
-                            <th class="p-2 border w-24 text-center">Hành động</th>
-                        </tr>
-                    </thead>
-                    <tbody id="roomTableBody" class="divide-y divide-gray-200 bg-white">
-                        <!-- Render Javascript -->
-                    </tbody>
-                </table>
-            </div>
-        </div>
-    </div>
-	
-	<!-- ================= 1. MODAL ĐĂNG NHẬP (Cập nhật thêm nút chuyển sang Đăng ký) ================= -->
-	<div id="loginModal" class="fixed inset-0 bg-black/60 flex items-center justify-center z-50">
-	  <div class="bg-white p-6 rounded-xl shadow-2xl w-96 max-w-full">
-		<h2 class="text-xl font-bold mb-4 text-center text-gray-800">ĐĂNG NHẬP HỆ THỐNG</h2>
-		
-		<div class="mb-3">
-		  <label class="block text-sm font-medium text-gray-700 mb-1">Số điện thoại / Admin</label>
-		  <input type="text" id="loginUsername" class="w-full border rounded p-2 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Nhập SĐT hoặc adminsuper">
-		</div>
-
-		<div class="mb-4">
-		  <label class="block text-sm font-medium text-gray-700 mb-1">Mật khẩu</label>
-		  <input type="password" id="loginPassword" class="w-full border rounded p-2 focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Nhập mật khẩu">
-		</div>
-
-		<button onclick="handleLogin(event)" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-2 rounded mb-3">
-		  Đăng nhập
-		</button>
-
-		<!-- Nút chuyển sang Modal Đăng ký -->
-		<div class="text-center text-sm text-gray-600">
-		  Chưa có tài khoản? 
-		  <button onclick="switchToRegister()" class="text-blue-600 font-bold hover:underline">
-			Đăng ký ngay
-		  </button>
-		</div>
-	  </div>
-	</div>
-
-
-	
-    <!-- MODAL FORM THÊM / SỬA PHÒNG -->
-    <div id="roomModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-        <div class="bg-white rounded-lg p-6 w-full max-w-4xl max-h-[90vh] overflow-y-auto">
-            <h2 id="modalTitle" class="text-xl font-bold mb-4 text-gray-800">Thêm Phòng Mới</h2>
-            <form id="roomForm" onsubmit="saveRoom(event)">
-                <input type="hidden" id="roomId">
-                
-                <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mb-3 text-xs">
-                    <div class="md:col-span-2">
-                        <label class="block font-bold text-gray-700 mb-1">1. Địa chỉ (*):</label>
-                        <input type="text" id="address" required class="w-full border p-2 rounded" placeholder="VD: Số 123 Nguyễn Trãi, Thanh Xuân, Hà Nội">
-                    </div>
-                    <div>
-                        <label class="block font-bold text-gray-700 mb-1">2. Tên / Số phòng (*):</label>
-                        <input type="text" id="room_name" required class="w-full border p-2 rounded" placeholder="VD: Phòng 302">
-                    </div>
-                    <div>
-                        <label class="block font-bold text-gray-700 mb-1">3. Giá thuê (*):</label>
-                        <input type="text" id="price" required class="w-full border p-2 rounded" placeholder="VD: 3.5 triệu/tháng">
-                    </div>
-                    <div>
-                        <label class="block font-bold text-gray-700 mb-1">7. Thời gian khách vào ở được:</label>
-                        <input type="text" id="move_in_date" class="w-full border p-2 rounded" placeholder="VD: Vào ở ngay / 2026-09-01">
-                    </div>
-                    <div>
-                        <label class="block font-bold text-gray-700 mb-1">8. Trạng thái phòng:</label>
-                        <select id="status" class="w-full border p-2 rounded font-bold bg-yellow-50">
-                            <option value="TRỐNG">🟢 TRỐNG (Đang tìm khách)</option>
-                            <option value="ĐÃ CHO THUÊ">🔴 ĐÃ CHO THUÊ (Khách đã chốt)</option>
-                        </select>
-                    </div>
-
-                    <!-- THÔNG TIN PHÒNG CHI TIẾT -->
-                    <div class="md:col-span-3 bg-blue-50 p-3 rounded-md border border-blue-200 grid grid-cols-2 md:grid-cols-4 gap-3">
-                        <div class="col-span-full font-bold text-blue-900 border-b border-blue-200 pb-1">
-                            4. Thông tin phòng chi tiết:
-                        </div>
-                        <div>
-                            <label class="block font-semibold text-gray-700 mb-1">Tầng bao nhiêu?</label>
-                            <input type="text" id="floor" class="w-full border p-2 rounded bg-white" placeholder="VD: Tầng 3">
-                        </div>
-                        <div>
-                            <label class="block font-semibold text-gray-700 mb-1">Phòng khép kín (WC)?</label>
-                            <select id="is_private_bathroom" class="w-full border p-2 rounded bg-white">
-                                <option value="Có">Có (WC khép kín)</option>
-                                <option value="Không">Không (WC chung)</option>
-                                <option value="Chưa rõ">Chưa rõ</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block font-semibold text-gray-700 mb-1">Có điều hòa không?</label>
-                            <select id="has_ac" class="w-full border p-2 rounded bg-white">
-                                <option value="Có">Có điều hòa</option>
-                                <option value="Không">Không</option>
-                                <option value="Chưa rõ">Chưa rõ</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block font-semibold text-gray-700 mb-1">Có nóng lạnh không?</label>
-                            <select id="has_heater" class="w-full border p-2 rounded bg-white">
-                                <option value="Có">Có nóng lạnh</option>
-                                <option value="Không">Không</option>
-                                <option value="Chưa rõ">Chưa rõ</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block font-semibold text-gray-700 mb-1">Có máy giặt không?</label>
-                            <select id="has_washer" class="w-full border p-2 rounded bg-white">
-                                <option value="Có">Có máy giặt riêng</option>
-                                <option value="Dùng chung">Máy giặt chung</option>
-                                <option value="Không">Không</option>
-                                <option value="Chưa rõ">Chưa rõ</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block font-semibold text-gray-700 mb-1">Có nuôi chó mèo?</label>
-                            <select id="allow_pets" class="w-full border p-2 rounded bg-white">
-                                <option value="Có">Được nuôi chó mèo</option>
-                                <option value="Không">Không cho nuôi</option>
-                                <option value="Chưa rõ">Chưa rõ</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block font-semibold text-gray-700 mb-1">Có ban công không?</label>
-                            <select id="has_balcony" class="w-full border p-2 rounded bg-white">
-                                <option value="Có">Có ban công</option>
-                                <option value="Không">Không ban công</option>
-                                <option value="Chưa rõ">Chưa rõ</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block font-semibold text-gray-700 mb-1">Có cửa sổ không?</label>
-                            <select id="has_window" class="w-full border p-2 rounded bg-white">
-                                <option value="Có">Có cửa sổ</option>
-                                <option value="Không">Không</option>
-                                <option value="Chưa rõ">Chưa rõ</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block font-semibold text-gray-700 mb-1">Có khóa vân tay?</label>
-                            <select id="has_fingerprint_lock" class="w-full border p-2 rounded bg-white">
-                                <option value="Có">Có khóa vân tay</option>
-                                <option value="Không">Không</option>
-                                <option value="Chưa rõ">Chưa rõ</option>
-                            </select>
-                        </div>
-                        <div>
-                            <label class="block font-semibold text-gray-700 mb-1">Chỗ để xe máy / ô tô?</label>
-                            <input type="text" id="parking_info" class="w-full border p-2 rounded bg-white" placeholder="VD: Xe máy Tầng 1, Ô tô gửi ngoài">
-                        </div>
-                        <div>
-                            <label class="block font-semibold text-gray-700 mb-1">Ở tối đa bao người?</label>
-                            <input type="text" id="max_occupants" class="w-full border p-2 rounded bg-white" placeholder="VD: Tối đa 3 người">
-                        </div>
-                        <div>
-                            <label class="block font-semibold text-gray-700 mb-1">Nội thất / Khác (.....):</label>
-                            <input type="text" id="other_amenities" class="w-full border p-2 rounded bg-white" placeholder="Giường, tủ, kệ bếp...">
-                        </div>
-                    </div>
-
-                    <div class="md:col-span-2">
-                        <label class="block font-bold text-gray-700 mb-1">5. Phí dịch vụ (Điện, nước, internet...):</label>
-                        <input type="text" id="service_fees" class="w-full border p-2 rounded" placeholder="VD: Điện 3.8k/số, Nước 100k/người, Mạng 100k/phòng">
-                    </div>
-                    <div>
-                        <label class="block font-bold text-gray-700 mb-1">SĐT Chủ nhà liên hệ:</label>
-                        <input type="tel" id="landlord_phone" required pattern="0[35789][0-9]{8}" class="w-full border p-2 rounded" placeholder="VD: 0987654321">
-                    </div>
-
-                    <div class="md:col-span-3">
-                        <label class="block font-bold text-gray-700 mb-1">6. Ảnh, Video phòng (URLs phân cách bằng dấu phẩy):</label>
-                        <textarea id="media_urls" rows="2" class="w-full border p-2 rounded" placeholder="https://res.cloudinary.com/.../img1.jpg, https://res.cloudinary.com/.../video.mp4"></textarea>
-                    </div>
-                </div>
-
-                <div class="flex justify-end gap-2 mt-4 pt-3 border-t">
-                    <button type="button" onclick="closeModal()" class="px-4 py-2 border rounded text-sm hover:bg-gray-100">Hủy</button>
-                    <button type="submit" class="px-4 py-2 bg-blue-600 text-white rounded text-sm font-medium hover:bg-blue-700">Lưu Dữ Liệu</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-	<div id="registerModal" class="hidden fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-        <div class="bg-white p-6 rounded-lg w-96 max-w-full shadow-lg max-h-[90vh] overflow-y-auto">
-            <h2 class="text-xl font-bold mb-2">Đăng ký tài khoản User</h2>
-            <p class="text-xs text-gray-500 mb-4">Nhập số điện thoại để nhận mã xác thực OTP từ Zalo OA</p>
-            
-            <label class="block mb-1 text-sm font-medium">1. Số điện thoại đăng ký</label>
-            <div class="flex gap-2 mb-3">
-                <input type="text" id="regPhone" class="w-full border p-2 rounded text-sm focus:ring-2 focus:ring-blue-500 outline-none" placeholder="VD: 0912345678">
-            </div>
-
-            <div class="mb-4 bg-blue-50 p-3 rounded-md border border-blue-100 text-center flex flex-col items-center">
-                <p class="text-xs text-blue-800 font-medium mb-2">Quét mã để gửi yêu cầu lấy OTP Zalo với cú pháp "OTP sdt"</p>
-                <img id="zaloQRCode" src="" alt="Mã QR Zalo OA" class="w-28 h-28 mb-2 bg-white p-1 border rounded shadow-sm">
-            </div>
-
-            <label class="block mb-1 text-sm font-medium">2. Mã OTP nhận từ Zalo</label>
-            <input type="text" id="regOTP" class="w-full border p-2 rounded mb-3 text-sm" placeholder="Nhập 6 số OTP">
-
-            <label class="block mb-1 text-sm font-medium">3. Mật khẩu mới</label>
-            <input type="password" id="regPassword" class="w-full border p-2 rounded mb-4 text-sm" placeholder="Nhập mật khẩu">
-
-            <div class="flex justify-between items-center pt-2 border-t">
-                <button onclick="switchToLogin()" class="text-xs text-gray-500 hover:underline">Quay lại Đăng nhập</button>
-                <div class="flex gap-2">
-                    <button onclick="closeRegisterModal()" class="px-3 py-1.5 border rounded text-xs">Hủy</button>
-                    <button onclick="handleRegister()" class="px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white font-bold rounded text-xs">Xác nhận Đăng ký</button>
-                </div>
-            </div>
-        </div>
-    </div>
-
-    <!-- MODAL ĐỔI MẬT KHẨU KHU VỰC -->
-    <div id="changePasswordModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-        <div class="bg-white rounded-lg p-6 w-full max-w-md">
-            <h2 class="text-lg font-bold mb-4 text-gray-800">🔑 Đổi Mật Khẩu Admin</h2>
-            <form onsubmit="handleChangePassword(event)">
-                <div class="mb-4">
-                    <label class="block text-xs font-semibold text-gray-700 mb-1">Mật khẩu hiện tại</label>
-                    <input type="password" id="oldPass" required class="w-full border p-2 rounded text-sm">
-                </div>
-                <div class="mb-6">
-                    <label class="block text-xs font-semibold text-gray-700 mb-1">Mật khẩu mới</label>
-                    <input type="password" id="newPass" required class="w-full border p-2 rounded text-sm">
-                </div>
-                <div id="changePassMsg" class="hidden text-xs p-2 rounded mb-4 text-center"></div>
-                <div class="flex justify-end gap-2">
-                    <button type="button" onclick="closeChangePasswordModal()" class="px-4 py-2 border rounded text-sm">Hủy</button>
-                    <button type="submit" class="px-4 py-2 bg-amber-600 text-white rounded text-sm font-medium hover:bg-amber-700">Cập nhật</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- MODAL UPLOAD EXCEL / CSV -->
-    <div id="excelModal" class="hidden fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
-        <div class="bg-white rounded-lg p-6 w-full max-w-md">
-            <div class="flex justify-between items-center mb-2">
-                <h2 class="text-lg font-bold text-gray-800">📊 Nhập Danh Sách Phòng</h2>
-                <a href="/api/rooms/download-template" download class="text-xs bg-blue-50 text-blue-600 border border-blue-200 px-2 py-1 rounded hover:bg-blue-100 font-semibold flex items-center gap-1">
-                    📥 Tải File Mẫu
-                </a>
-            </div>
-            <p class="text-xs text-gray-500 mb-4">
-                Tải tệp mẫu về điền thông tin hoặc chọn tệp Excel/CSV có sẵn để AI kiểm tra và nhập vào hệ thống.
-            </p>
-            
-            <form onsubmit="handleUploadExcel(event)">
-                <div class="mb-4">
-                    <input type="file" id="excelFileInput" accept=".xlsx, .xls, .csv" required class="w-full border p-2 rounded text-sm">
-                </div>
-                <div id="uploadMsg" class="hidden text-xs p-2 rounded mb-4 text-center"></div>
-                <div class="flex justify-end gap-2">
-                    <button type="button" onclick="closeExcelModal()" class="px-4 py-2 border rounded text-sm">Hủy</button>
-                    <button type="submit" id="btnSubmitExcel" class="px-4 py-2 bg-emerald-600 text-white rounded text-sm font-medium hover:bg-emerald-700">Tải Lên & Nhập</button>
-                </div>
-            </form>
-        </div>
-    </div>
-
-    <!-- JAVASCRIPT LOGIC -->
-    <script>
-        const API_URL = "/api/rooms";
-        let allRoomsData = [];
-
-        async function apiFetch(url, options = {}) {
-            const token = localStorage.getItem("accessToken");
-            const headers = new Headers(options.headers || {});
-            if (token) headers.set("Authorization", `Bearer ${token}`);
-            const response = await window.fetch(url, { ...options, headers });
-            if (response.status === 401 && !url.includes("/api/login")) {
-                localStorage.removeItem("accessToken");
-                localStorage.removeItem("isAdminLoggedIn");
-                checkAuth();
-            }
-            return response;
-        }
-
-        function checkAuth() {
-			const isAuth = localStorage.getItem("isAdminLoggedIn");
-			const loginModal = document.getElementById("loginModal");
-			const adminDashboard = document.getElementById("adminDashboard");
-
-			if (isAuth === "true") {
-				// Đã đăng nhập: Ẩn Modal Login & Hiện Dashboard
-				if (loginModal) loginModal.classList.add("hidden");
-				if (adminDashboard) adminDashboard.classList.remove("hidden");
-				
-				// Tải danh sách phòng theo user đã đăng nhập
-				const username = localStorage.getItem("adminUsername");
-				if (username && typeof loadRoomsForUser === "function") {
-					loadRoomsForUser(username);
-				} else if (typeof loadRooms === "function") {
-					loadRooms();
-				}
-			} else {
-				// Chưa đăng nhập: Hiện Modal Login & Ẩn Dashboard
-				if (loginModal) loginModal.classList.remove("hidden");
-				if (adminDashboard) adminDashboard.classList.add("hidden");
-			}
-		}
-		
-		const ZALO_OA_ID = "{{ ZALO_OA_ID }}";
-		// 2. Cập nhật hàm mở Modal Đăng ký
-		function switchToRegister() {
-			document.getElementById('loginModal').classList.add('hidden');
-			document.getElementById('registerModal').classList.remove('hidden');
-			
-			// Tạo link Zalo OA
-			const zaloUrl = `https://zalo.me/${ZALO_OA_ID}`;
-			
-			// Đưa link Zalo vào API tạo QR (dùng encodeURIComponent đúng cách)
-			document.getElementById('zaloQRCode').src = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(zaloUrl)}`;
-		}
-		
-		function switchToLogin() {
-			document.getElementById('registerModal').classList.add('hidden');
-			document.getElementById('loginModal').classList.remove('hidden');
-		}
-		
-		// 2. Xác nhận Đăng ký
-		async function handleRegister() {
-			const phone = document.getElementById('regPhone').value.trim();
-			const otp = document.getElementById('regOTP').value.trim();
-			const password = document.getElementById('regPassword').value.trim();
-
-			if (!phone || !otp || !password) {
-				alert("Vui lòng điền đầy đủ SĐT, Mã OTP và Mật khẩu!");
-				return;
-			}
-
-			try {
-					const res = await apiFetch('/api/user/register', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ phone, otp, password })
-				});
-				const data = await res.json();
-
-				if (res.ok) {
-					alert("Đăng ký tài khoản thành công! Vui lòng đăng nhập.");
-					switchToLogin();
-					document.getElementById('loginUsername').value = phone;
-				} else {
-					alert(data.detail || "Đăng ký thất bại!");
-				}
-			} catch (err) {
-				alert("Lỗi kết nối khi đăng ký!");
-			}
-		}
-
-		// 3. Đăng nhập & Tải dữ liệu phòng theo Landlord Phone
-		async function handleLogin(e) {
-			if (e && typeof e.preventDefault === 'function') e.preventDefault();
-			
-			const username = document.getElementById('loginUsername').value.trim();
-			const password = document.getElementById('loginPassword').value.trim();
-
-			if (!username || !password) {
-				alert("Vui lòng nhập tài khoản và mật khẩu!");
-				return;
-			}
-
-			try {
-					const res = await apiFetch('/api/login', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json' },
-					body: JSON.stringify({ phone: username, password: password })
-				});
-				const data = await res.json();
-
-				if (res.ok) {
-					const loggedInUser = data.username || username;
-					
-					// ✅ ĐÃ SỬA: Lưu đồng bộ các khóa cho checkAuth() kiểm tra khi F5
-					localStorage.setItem("isAdminLoggedIn", "true");
-					localStorage.setItem("adminUsername", loggedInUser);
-						localStorage.setItem("username", loggedInUser);
-						localStorage.setItem("accessToken", data.access_token);
-
-					document.getElementById('loginModal').classList.add('hidden');
-					document.getElementById('adminDashboard').classList.remove('hidden');
-
-					// ✅ Tải phòng ngay sau khi đăng nhập
-					loadRooms();
-				} else {
-					alert(data.detail || "Tài khoản hoặc mật khẩu không chính xác!");
-				}
-			} catch (err) {
-				alert("Lỗi kết nối khi đăng nhập!");
-			}
-		}
-
-		// 4. Lấy phòng hiển thị trên Bảng
-		async function loadRoomsForUser(username) {
-			try {
-				// Truyền user_phone để Backend lọc đúng danh sách phòng trùng landlord_phone
-					const res = await apiFetch(`/api/admin/rooms?username=${encodeURIComponent(username)}`);
-				const data = await res.json();
-
-				if (res.ok) {
-					renderRoomTable(data.rooms || data); // Render dữ liệu phòng ra giao diện
-				}
-			} catch (err) {
-				console.error("Lỗi tải phòng:", err);
-			}
-		}
-
-		
-		// --- 3. HÀM TẢI DANH SÁCH PHÒNG LỌC THEO LANDLORD_PHONE ---
-		async function loadRoomsForCurrentUser() {
-			const currentUserPhone = localStorage.getItem('currentUserPhone');
-			if (!currentUserPhone) return;
-
-			try {
-				// Gửi tham số user_phone lên API để lấy đúng danh sách phòng của mình
-					const res = await apiFetch(`/api/admin/rooms?username=${encodeURIComponent(currentUserPhone)}`);
-				const result = await res.json();
-
-				if (result.status === 'success') {
-					renderRoomTable(result.data); // Hàm hiển thị bảng phòng trọ của bạn
-				}
-			} catch (err) {
-				console.error("Lỗi tải danh sách phòng:", err);
-			}
-		}
-
-		// Tự động tải phòng khi vừa load lại trang nếu đã đăng nhập
-		document.addEventListener("DOMContentLoaded", () => {
-			if (localStorage.getItem('isLoggedIn') === 'true') {
-				loadRoomsForCurrentUser();
-			}
-		});
-
-
-        function handleLogout() {
-			localStorage.removeItem("isAdminLoggedIn");
-				localStorage.removeItem("adminUsername"); // 👈 Xóa username khi logout
-				localStorage.removeItem("username");
-				localStorage.removeItem("accessToken");
-			checkAuth();
-		}
-
-        // TẢI PHÒNG KÈM BỘ LỌC TỪ API SERVER
-        async function loadRooms() {
-			try {
-				const minPrice = document.getElementById("filterMinPrice")?.value || "";
-				const maxPrice = document.getElementById("filterMaxPrice")?.value || "";
-				const fromDate = document.getElementById("filterFromDate")?.value || "";
-				const toDate = document.getElementById("filterToDate")?.value || "";
-				const status = document.getElementById("filterStatus")?.value || "";
-				
-				// ✅ Lấy đúng key adminUsername
-				const username = localStorage.getItem("adminUsername") || "";
-
-				let url = `/api/admin/rooms?username=${encodeURIComponent(username)}&`;
-				if (minPrice) url += `min_price=${minPrice}&`;
-				if (maxPrice) url += `max_price=${maxPrice}&`;
-				if (fromDate) url += `from_date=${fromDate}&`;
-				if (toDate) url += `to_date=${toDate}&`;
-				if (status) url += `status=${status}&`;
-
-					const res = await apiFetch(url);
-				const result = await res.json();
-				
-				// Cập nhật mảng dữ liệu và render lại bảng
-				allRoomsData = result.data || result || [];
-				renderRoomTable(allRoomsData);
-			} catch (err) {
-				console.error("Lỗi nạp dữ liệu:", err);
-			}
-		}
-
-        // HÀM RENDER DỮ LIỆU ĐÃ ĐƯỢC TỐI ƯU TRÁNH VỠ BẢNG
-        function renderRoomTable(rooms) {
-            const tbody = document.getElementById("roomTableBody");
-            if (!tbody) return;
-            tbody.innerHTML = "";
-            document.getElementById("selectAll").checked = false;
-            updateDeleteButton();
-
-            if (!rooms || rooms.length === 0) {
-                tbody.innerHTML = `<tr><td colspan="10" class="p-4 text-center text-gray-500">Không tìm thấy phòng phù hợp.</td></tr>`;
-                return;
-            }
-
-            let rowsHtml = "";
-            rooms.forEach(r => {
-                const mediaImgs = (r.media_urls || []).map(url => 
-                    `<a href="${url}" target="_blank" class="inline-block"><img src="${url}" class="w-8 h-8 object-cover rounded border m-0.5 hover:opacity-80" /></a>`
-                ).join("");
-
-                rowsHtml += `
-                    <tr class="hover:bg-gray-50 transition-colors">
-                        <td class="p-2 border text-center">
-                            <input type="checkbox" value="${r.id}" class="room-checkbox w-4 h-4 cursor-pointer" onchange="updateDeleteButton()">
-                        </td>
-                        <td class="p-2 border break-words">
-                            <div class="font-bold text-gray-800">${r.address || '-'}</div>
-                            <div class="text-blue-600 font-semibold">${r.room_name || '-'}</div>
-                            <div class="text-[10px] text-gray-400">ID: ${r.id}</div>
-                        </td>
-                        <td class="p-2 border font-bold text-green-700">${r.price || '-'}</td>
-                        <td class="p-2 border leading-relaxed break-words">
-                            <div>• Tầng: <b>${r.floor || '-'}</b> | WC riêng: <b>${r.is_private_bathroom || '-'}</b></div>
-                            <div>• ĐH: <b>${r.has_ac || '-'}</b> | NL: <b>${r.has_heater || '-'}</b> | Giặt: <b>${r.has_washer || '-'}</b></div>
-                            <div>• Ban công: <b>${r.has_balcony || '-'}</b> | Cửa sổ: <b>${r.has_window || '-'}</b></div>
-                            <div>• Chó mèo: <b>${r.allow_pets || '-'}</b> | Vân tay: <b>${r.has_fingerprint_lock || '-'}</b></div>
-                            <div>• Để xe: ${r.parking_info || '-'} | Tối đa: ${r.max_occupants || '-'} người</div>
-                            <div class="text-gray-500 italic">Khác: ${r.other_amenities || '-'}</div>
-                        </td>
-                        <td class="p-2 border text-gray-600 break-words">${r.service_fees || '-'}</td>
-                        <td class="p-2 border">${mediaImgs || '<span class="text-gray-400">Không có</span>'}</td>
-                        <td class="p-2 border text-blue-700 font-medium">${r.move_in_date || '-'}</td>
-                        <td class="p-2 border text-center">
-                            <span class="px-2 py-1 text-[11px] rounded font-bold inline-block ${
-                                r.status === 'TRỐNG' ? 'bg-green-100 text-green-800' : 'bg-red-100 text-red-800'
-                            }">
-                                ${r.status || 'TRỐNG'}
-                            </span>
-                        </td>
-                        <td class="p-2 border text-[11px] break-words">
-                            <div>📞 ${r.landlord_phone || '-'}</div>
-                            <div class="text-gray-500">👤 ${r.zalo_user_id || '-'}</div>
-                        </td>
-                        <td class="p-2 border text-center space-x-1 whitespace-nowrap">
-                            <button onclick="onEditClick('${r.id}')" class="px-2 py-1 bg-blue-50 text-blue-600 rounded hover:bg-blue-100 font-medium">Sửa</button>
-                            <button onclick="deleteRoom('${r.id}')" class="px-2 py-1 bg-red-50 text-red-600 rounded hover:bg-red-100 font-medium">Xóa</button>
-                        </td>
-                    </tr>
-                `;
-            });
-
-            tbody.innerHTML = rowsHtml;
-        }
-
-        function onEditClick(id) {
-            const room = allRoomsData.find(item => item.id === id);
-            if (room) editRoom(room);
-        }
-
-        function applyFilters() {
-            const vAddress = document.getElementById("filterAddress").value.toLowerCase().trim();
-            const vRoomName = document.getElementById("filterRoomName").value.toLowerCase().trim();
-            const vBathroom = document.getElementById("filterBathroom").value;
-            const vAC = document.getElementById("filterAC").value;
-            const vPets = document.getElementById("filterPets").value;
-            const vPhone = document.getElementById("filterPhone").value.trim();
-
-            const filtered = allRoomsData.filter(r => {
-                const matchAddress = !vAddress || (r.address && r.address.toLowerCase().includes(vAddress));
-                const matchRoomName = !vRoomName || (r.room_name && r.room_name.toLowerCase().includes(vRoomName));
-                const matchBathroom = !vBathroom || r.is_private_bathroom === vBathroom;
-                const matchAC = !vAC || r.has_ac === vAC;
-                const matchPets = !vPets || r.allow_pets === vPets;
-                const matchPhone = !vPhone || (r.landlord_phone && r.landlord_phone.includes(vPhone));
-
-                return matchAddress && matchRoomName && matchBathroom && matchAC && matchPets && matchPhone;
-            });
-
-            renderRoomTable(filtered);
-        }
-
-        function resetFilters() {
-            document.getElementById("filterAddress").value = "";
-            document.getElementById("filterRoomName").value = "";
-            document.getElementById("filterMinPrice").value = "";
-            document.getElementById("filterMaxPrice").value = "";
-            document.getElementById("filterFromDate").value = "";
-            document.getElementById("filterToDate").value = "";
-            document.getElementById("filterStatus").value = "";
-            document.getElementById("filterBathroom").value = "";
-            document.getElementById("filterAC").value = "";
-            document.getElementById("filterPets").value = "";
-            document.getElementById("filterPhone").value = "";
-            loadRooms();
-        }
-
-        function toggleFilterPanel() {
-            const panel = document.getElementById("filterPanel");
-            const btn = document.getElementById("btnToggleFilter");
-            panel.classList.toggle("hidden");
-            btn.innerText = panel.classList.contains("hidden") ? "▲ Mở rộng" : "▼ Thu gọn";
-        }
-
-        function updateDeleteButton() {
-            const checkboxes = document.querySelectorAll('.room-checkbox:checked');
-            const btnDelete = document.getElementById('btnDeleteSelected');
-            const countSpan = document.getElementById('selectedCount');
-            if (checkboxes.length > 0) {
-                countSpan.innerText = checkboxes.length;
-                btnDelete.classList.remove('hidden');
-            } else {
-                btnDelete.classList.add('hidden');
-            }
-        }
-
-        function toggleSelectAll(selectAllCheckbox) {
-            const checkboxes = document.querySelectorAll('.room-checkbox');
-            checkboxes.forEach(cb => cb.checked = selectAllCheckbox.checked);
-            updateDeleteButton();
-        }
-
-        async function deleteSelectedRooms() {
-            const selectedIds = Array.from(document.querySelectorAll('.room-checkbox:checked')).map(cb => cb.value);
-            if (selectedIds.length === 0) return;
-            if (confirm(`Xác nhận xóa ${selectedIds.length} phòng đã chọn?`)) {
-                await Promise.all(selectedIds.map(id => apiFetch(`${API_URL}/${id}`, { method: "DELETE" })));
-                loadRooms();
-            }
-        }
-		
-		// Gọi API Lấy Danh Sách Phòng
-		async function fetchRooms() {
-			// Lấy user đang đăng nhập từ LocalStorage
-			const currentUser = localStorage.getItem("currentUser"); // Có thể là "adminpro" hoặc "0333593681"
-
-			if (!currentUser) {
-				alert("Vui lòng đăng nhập!");
-				return;
-			}
-
-			try {
-				const response = await apiFetch(`/api/admin/rooms?username=${encodeURIComponent(currentUser)}`);
-				const result = await response.json();
-
-				if (result.status === "success") {
-					console.log("Danh sách phòng nhận được:", result.data);
-					// Render bảng tại đây...
-				}
-			} catch (error) {
-				console.error("Lỗi khi tải dữ liệu:", error);
-			}
-		}
-
-        async function saveRoom(e) {
-			e.preventDefault();
-			const id = document.getElementById("roomId").value;
-			const rawMedia = document.getElementById("media_urls").value;
-			const mediaArray = rawMedia ? rawMedia.split(",").map(item => item.trim()).filter(Boolean) : [];
-
-			const payload = {
-				address: document.getElementById("address").value,
-				room_name: document.getElementById("room_name").value,
-				price: document.getElementById("price").value,
-				floor: document.getElementById("floor").value,
-				is_private_bathroom: document.getElementById("is_private_bathroom").value,
-				has_ac: document.getElementById("has_ac").value,
-				has_heater: document.getElementById("has_heater").value,
-				has_washer: document.getElementById("has_washer").value,
-				allow_pets: document.getElementById("allow_pets").value,
-				has_balcony: document.getElementById("has_balcony").value,
-				has_window: document.getElementById("has_window").value,
-				has_fingerprint_lock: document.getElementById("has_fingerprint_lock").value,
-				parking_info: document.getElementById("parking_info").value,
-				max_occupants: document.getElementById("max_occupants").value,
-				other_amenities: document.getElementById("other_amenities").value,
-				service_fees: document.getElementById("service_fees").value,
-				move_in_date: document.getElementById("move_in_date").value,
-				status: document.getElementById("status").value,
-				landlord_phone: document.getElementById("landlord_phone").value.trim(),
-				media_urls: mediaArray
-			};
-
-			try {
-				let url = API_URL;
-				if (id) url += `?point_id=${id}`;
-
-				const res = await apiFetch(url, {
-					method: "POST",
-					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify(payload)
-				});
-
-				const result = await res.json();
-
-				if (res.ok) {
-					alert("✅ Lưu thông tin thành công!");
-					closeModal();
-					loadRooms();
-				} else {
-					// Lấy chi tiết lỗi từ backend nếu có
-					const detailMsg = result.detail ? (typeof result.detail === 'object' ? JSON.stringify(result.detail) : result.detail) : "Lưu thất bại!";
-					alert("❌ Lỗi: " + detailMsg);
-				}
-			} catch (err) {
-				console.error("Lỗi khi lưu phòng:", err);
-				alert("❌ Lỗi kết nối máy chủ!");
-			}
-		}
-
-        function openModal() {
-            document.getElementById("roomForm").reset();
-            document.getElementById("roomId").value = "";
-            document.getElementById("modalTitle").innerText = "Thêm Phòng Mới";
-            const username = localStorage.getItem("username") || "";
-            document.getElementById("landlord_phone").value = /^0[35789][0-9]{8}$/.test(username) ? username : "";
-            document.getElementById("roomModal").classList.remove("hidden");
-        }
-
-        function closeModal() { document.getElementById("roomModal").classList.add("hidden"); }
-
-        function editRoom(r) {
-            document.getElementById("roomId").value = r.id;
-            document.getElementById("address").value = r.address || "";
-            document.getElementById("room_name").value = r.room_name || "";
-            document.getElementById("price").value = r.price || "";
-            document.getElementById("floor").value = r.floor || "";
-            document.getElementById("is_private_bathroom").value = r.is_private_bathroom || "Chưa rõ";
-            document.getElementById("has_ac").value = r.has_ac || "Chưa rõ";
-            document.getElementById("has_heater").value = r.has_heater || "Chưa rõ";
-            document.getElementById("has_washer").value = r.has_washer || "Chưa rõ";
-            document.getElementById("allow_pets").value = r.allow_pets || "Chưa rõ";
-            document.getElementById("has_balcony").value = r.has_balcony || "Chưa rõ";
-            document.getElementById("has_window").value = r.has_window || "Chưa rõ";
-            document.getElementById("has_fingerprint_lock").value = r.has_fingerprint_lock || "Chưa rõ";
-            document.getElementById("parking_info").value = r.parking_info || "";
-            document.getElementById("max_occupants").value = r.max_occupants || "";
-            document.getElementById("other_amenities").value = r.other_amenities || "";
-            document.getElementById("service_fees").value = r.service_fees || "";
-            document.getElementById("move_in_date").value = r.move_in_date || "";
-            document.getElementById("status").value = r.status || "TRỐNG";
-            document.getElementById("landlord_phone").value = r.landlord_phone || "";
-            document.getElementById("media_urls").value = (r.media_urls || []).join(", ");
-            
-            document.getElementById("modalTitle").innerText = "Cập Nhật Thông Tin Phòng";
-            document.getElementById("roomModal").classList.remove("hidden");
-        }
-
-        function openChangePasswordModal() {
-            document.getElementById("oldPass").value = "";
-            document.getElementById("newPass").value = "";
-            document.getElementById("changePassMsg").classList.add("hidden");
-            document.getElementById("changePasswordModal").classList.remove("hidden");
-        }
-        function closeChangePasswordModal() {
-            document.getElementById("changePasswordModal").classList.add("hidden");
-        }
-        async function handleChangePassword(e) {
-            e.preventDefault();
-            const old_password = document.getElementById("oldPass").value;
-            const new_password = document.getElementById("newPass").value;
-            const msgBox = document.getElementById("changePassMsg");
-			// Lấy thông tin username/phone đã lưu khi đăng nhập
-			const username = localStorage.getItem("username") || "";
-            try {
-                const res = await apiFetch("/api/admin/change-password", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ 
-						username: username, 
-						old_password: old_password, 
-						new_password: new_password 
-					})
-                });
-
-                const data = await res.json();
-                msgBox.classList.remove("hidden");
-                if (res.ok) {
-                    msgBox.className = "text-xs p-2 rounded mb-4 text-center bg-green-100 text-green-800";
-                    msgBox.innerText = "✅ " + data.message;
-                    setTimeout(closeChangePasswordModal, 1500);
-                } else {
-                    msgBox.className = "text-xs p-2 rounded mb-4 text-center bg-red-100 text-red-800";
-                    msgBox.innerText = "❌ " + (data.detail || "Đổi mật khẩu thất bại!");
-                }
-            } catch (err) {
-                console.error("Lỗi đổi mật khẩu:", err);
-            }
-        }
-
-        function openExcelModal() {
-            document.getElementById("excelFileInput").value = "";
-            document.getElementById("uploadMsg").classList.add("hidden");
-            document.getElementById("excelModal").classList.remove("hidden");
-        }
-        function closeExcelModal() {
-            document.getElementById("excelModal").classList.add("hidden");
-        }
-        async function handleUploadExcel(e) {
-            e.preventDefault();
-            const fileInput = document.getElementById("excelFileInput");
-            if (!fileInput.files || fileInput.files.length === 0) return;
-
-            const msgBox = document.getElementById("uploadMsg");
-            const btn = document.getElementById("btnSubmitExcel");
-            
-            msgBox.className = "text-xs p-2 rounded mb-4 text-center bg-blue-100 text-blue-800";
-            msgBox.innerText = "⏳ Đang tải lên và xử lý dữ liệu...";
-            msgBox.classList.remove("hidden");
-            btn.disabled = true;
-
-            const formData = new FormData();
-            formData.append("file", fileInput.files[0]);
-
-            try {
-                const res = await apiFetch("/api/rooms/upload-excel", {
-                    method: "POST",
-                    body: formData
-                });
-                const data = await res.json();
-                if (res.ok) {
-                    msgBox.className = "text-xs p-2 rounded mb-4 text-center bg-green-100 text-green-800";
-                    msgBox.innerText = "✅ " + data.message;
-                    setTimeout(() => {
-                        closeExcelModal();
-                        loadRooms();
-                    }, 2000);
-                } else {
-                    msgBox.className = "text-xs p-2 rounded mb-4 text-center bg-red-100 text-red-800";
-                    msgBox.innerText = "❌ " + (data.detail || "Tải lên tệp thất bại!");
-                }
-            } catch (err) {
-                console.error("Lỗi upload Excel:", err);
-                msgBox.className = "text-xs p-2 rounded mb-4 text-center bg-red-100 text-red-800";
-                msgBox.innerText = "❌ Đã có lỗi xảy ra trong quá trình xử lý tệp!";
-            } finally {
-                btn.disabled = false;
-            }
-        }
-
-        // Tự động kiểm tra đăng nhập khi mở trang
-        document.addEventListener("DOMContentLoaded", checkAuth);
-		
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>
+      Quản lý phòng trọ
+    </title>
+    <script src="https://cdn.tailwindcss.com">
     </script>
-</body>
+  </head>
+  <body class="min-h-screen bg-slate-100 text-slate-800">
+    <div id="loginModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+      <form onsubmit="login(event)" class="w-full max-w-sm rounded-2xl bg-white p-6 shadow-2xl">
+        <h1 class="mb-5 text-center text-xl font-bold">
+          ĐĂNG NHẬP HỆ THỐNG
+        </h1>
+        <label class="text-sm font-semibold">
+          Số điện thoại / Admin
+          <input id="loginUsername" required class="mb-3 mt-1 w-full rounded border p-2">
+        </label>
+        <label class="text-sm font-semibold">
+          Mật khẩu
+          <input id="loginPassword" type="password" required class="mb-4 mt-1 w-full rounded border p-2">
+        </label>
+        <button class="w-full rounded bg-blue-600 p-2 font-bold text-white">
+          Đăng nhập
+        </button>
+        <button type="button" onclick="showRegister()" class="mt-3 w-full text-sm font-semibold text-blue-600">
+          Đăng ký tài khoản
+        </button>
+      </form>
+    </div>
+    <main id="dashboard" class="mx-auto hidden max-w-[1800px] p-3 md:p-6">
+      <header class="mb-4 rounded-2xl bg-white p-4 shadow">
+        <div class="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 class="text-2xl font-bold">
+              📋 Quản lý phòng trọ
+            </h1>
+            <p id="loginInfo" class="text-xs text-slate-500">
+            </p>
+          </div>
+          <div class="flex flex-wrap gap-2">
+            <button onclick="showPage('rooms')" class="rounded bg-blue-600 px-3 py-2 text-xs font-bold text-white">
+              🏠 Phòng
+            </button>
+            <button id="ordersTab" onclick="showPage('orders')" class="hidden rounded bg-violet-600 px-3 py-2 text-xs font-bold text-white">
+              📅 Đặt phòng
+            </button>
+            <button onclick="modal('excelModal',true)" class="rounded bg-emerald-600 px-3 py-2 text-xs font-bold text-white">
+              📊 Nhập Excel
+            </button>
+            <button onclick="modal('passwordModal',true)" class="rounded bg-amber-500 px-3 py-2 text-xs font-bold text-white">
+              🔑 Đổi mật khẩu
+            </button>
+            <button onclick="logout()" class="rounded bg-slate-800 px-3 py-2 text-xs font-bold text-white">
+              Đăng xuất
+            </button>
+          </div>
+        </div>
+      </header>
+      <section id="roomsPage">
+        <div class="mb-4 rounded-2xl bg-white p-4 shadow">
+          <div class="mb-3 flex justify-between">
+            <b>
+              Bộ lọc phòng
+            </b>
+            <div>
+              <button id="deleteSelectedBtn" onclick="deleteSelected()" class="mr-2 hidden rounded bg-red-600 px-3 py-2 text-xs font-bold text-white">
+                Xóa đã chọn (
+                <span id="selectedCount">
+                  0
+                </span>
+                )
+              </button>
+              <button onclick="openRoom()" class="rounded bg-blue-600 px-3 py-2 text-xs font-bold text-white">
+                + Thêm phòng
+              </button>
+            </div>
+          </div>
+          <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
+            <input id="fAddress" oninput="filterRooms()" class="rounded border p-2" placeholder="Địa chỉ">
+            <input id="fName" oninput="filterRooms()" class="rounded border p-2" placeholder="Tên / mã phòng">
+            <input id="fMin" type="number" onchange="loadRooms()" class="rounded border p-2" placeholder="Giá từ">
+            <input id="fMax" type="number" onchange="loadRooms()" class="rounded border p-2" placeholder="Giá đến">
+            <select id="fStatus" onchange="loadRooms()" class="rounded border p-2">
+              <option value="">
+                Mọi trạng thái
+              </option>
+              <option>
+                TRỐNG
+              </option>
+              <option>
+                ĐÃ CHO THUÊ
+              </option>
+              <option>
+                ĐÃ XÓA
+              </option>
+            </select>
+            <input id="fFrom" type="date" onchange="loadRooms()" class="rounded border p-2">
+            <input id="fTo" type="date" onchange="loadRooms()" class="rounded border p-2">
+            <input id="fPhone" oninput="filterRooms()" class="rounded border p-2" placeholder="SĐT chủ nhà">
+            <select id="fAC" onchange="filterRooms()" class="rounded border p-2">
+              <option value="">
+                Điều hòa: tất cả
+              </option>
+              <option>
+                Có
+              </option>
+              <option>
+                Không
+              </option>
+              <option>
+                Chưa rõ
+              </option>
+            </select>
+            <button onclick="resetFilters()" class="rounded border p-2">
+              Xóa bộ lọc
+            </button>
+          </div>
+        </div>
+        <div class="overflow-x-auto rounded-2xl bg-white shadow">
+          <table class="w-full min-w-[1250px] text-left text-xs">
+            <thead class="bg-slate-800 text-white">
+              <tr>
+                <th class="p-3">
+                  <input id="selectAll" type="checkbox" onchange="selectAll(this)">
+                </th>
+                <th class="p-3">
+                  Phòng
+                </th>
+                <th class="p-3">
+                  Toàn bộ dữ liệu RoomCreateUpdateSchema
+                </th>
+                <th class="p-3">
+                  Media / hệ thống
+                </th>
+                <th class="p-3">
+                  Thao tác
+                </th>
+              </tr>
+            </thead>
+            <tbody id="roomBody">
+            </tbody>
+          </table>
+        </div>
+      </section>
+      <section id="ordersPage" class="hidden">
+        <div class="mb-4 rounded-2xl bg-white p-4 shadow">
+          <div class="mb-3 flex justify-between">
+            <b>
+              Quản lý đặt phòng
+            </b>
+            <button onclick="openOrder()" class="rounded bg-violet-600 px-3 py-2 text-xs font-bold text-white">
+              + Thêm đơn
+            </button>
+          </div>
+          <div class="grid gap-2 md:grid-cols-4">
+            <input id="ofCode" class="rounded border p-2" placeholder="Mã phòng">
+            <input id="ofTenant" class="rounded border p-2" placeholder="SĐT người thuê">
+            <input id="ofLandlord" class="rounded border p-2" placeholder="SĐT chủ nhà">
+            <button onclick="loadOrders()" class="rounded bg-violet-600 p-2 font-bold text-white">
+              Tìm kiếm
+            </button>
+          </div>
+        </div>
+        <div class="overflow-x-auto rounded-2xl bg-white shadow">
+          <table class="w-full min-w-[1050px] text-left text-xs">
+            <thead class="bg-violet-800 text-white">
+              <tr>
+                <th class="p-3">
+                  Mã phòng
+                </th>
+                <th class="p-3">
+                  Người thuê
+                </th>
+                <th class="p-3">
+                  Chủ nhà
+                </th>
+                <th class="p-3">
+                  Lịch xem
+                </th>
+                <th class="p-3">
+                  Hệ thống
+                </th>
+                <th class="p-3">
+                  Thao tác
+                </th>
+              </tr>
+            </thead>
+            <tbody id="orderBody">
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </main>
+    <div id="roomModal" class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60 p-3">
+      <div class="max-h-[94vh] w-full max-w-5xl overflow-y-auto rounded-2xl bg-white p-5">
+        <h2 id="roomTitle" class="mb-4 text-xl font-bold">
+        </h2>
+        <form onsubmit="saveRoom(event)">
+          <input id="roomId" type="hidden">
+          <div id="roomForm" class="grid gap-3 text-sm md:grid-cols-3">
+            <label>
+              Mã phòng
+              <input id="room_code" maxlength="6" pattern="[A-Za-z0-9]{6}" class="input uppercase" placeholder="Để trống sẽ tự tạo">
+            </label>
+            <label class="md:col-span-2">
+              Địa chỉ (*)
+              <input id="address" required class="input">
+            </label>
+            <label>
+              Tên/Số phòng
+              <input id="room_name" class="input">
+            </label>
+            <label>
+              Giá thuê (*)
+              <input id="price" required class="input">
+            </label>
+            <label>
+              Tầng
+              <input id="floor" class="input">
+            </label>
+            <label>
+              Diện tích
+              <input id="room_size" class="input">
+            </label>
+            <label>
+              Số người tối đa
+              <input id="max_occupants" class="input">
+            </label>
+            <label>
+              Ngày vào ở
+              <input id="move_in_date" class="input">
+            </label>
+            <label>
+              Trạng thái
+              <select id="status" class="input">
+                <option>
+                  TRỐNG
+                </option>
+                <option>
+                  ĐÃ CHO THUÊ
+                </option>
+                <option>
+                  ĐÃ XÓA
+                </option>
+              </select>
+            </label>
+            <label>
+              SĐT chủ nhà (*)
+              <input id="landlord_phone" required pattern="0[35789][0-9]{8}" class="input">
+            </label>
+            <label>
+              WC khép kín
+              <select id="is_private_bathroom" class="input choice">
+              </select>
+            </label>
+            <label>
+              Điều hòa
+              <select id="has_ac" class="input choice">
+              </select>
+            </label>
+            <label>
+              Nóng lạnh
+              <select id="has_heater" class="input choice">
+              </select>
+            </label>
+            <label>
+              Máy giặt
+              <select id="has_washer" class="input choice washer">
+              </select>
+            </label>
+            <label>
+              Cho nuôi thú cưng
+              <select id="allow_pets" class="input choice">
+              </select>
+            </label>
+            <label>
+              Ban công
+              <select id="has_balcony" class="input choice">
+              </select>
+            </label>
+            <label>
+              Cửa sổ
+              <select id="has_window" class="input choice">
+              </select>
+            </label>
+            <label>
+              Khóa vân tay
+              <select id="has_fingerprint_lock" class="input choice">
+              </select>
+            </label>
+            <label>
+              Giường
+              <select id="bed" class="input choice">
+              </select>
+            </label>
+            <label>
+              Tủ quần áo
+              <select id="wardrobe" class="input choice">
+              </select>
+            </label>
+            <label>
+              Chỗ để xe
+              <input id="parking_info" class="input">
+            </label>
+            <label class="md:col-span-2">
+              Tiện ích khác
+              <input id="other_amenities" class="input">
+            </label>
+            <label class="md:col-span-3">
+              Phí dịch vụ
+              <input id="service_fees" class="input">
+            </label>
+            <label class="md:col-span-3">
+              URL ảnh/video, cách nhau bằng dấu phẩy
+              <textarea id="media_urls" rows="3" class="input">
+              </textarea>
+            </label>
+          </div>
+          <div class="mt-5 flex justify-end gap-2">
+            <button type="button" onclick="modal('roomModal',false)" class="rounded border px-4 py-2">
+              Hủy
+            </button>
+            <button id="roomSave" class="rounded bg-blue-600 px-4 py-2 font-bold text-white">
+              Lưu
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+    <div id="orderModal" class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60 p-3">
+      <form onsubmit="saveOrder(event)" class="w-full max-w-2xl rounded-2xl bg-white p-5">
+        <h2 id="orderTitle" class="mb-4 text-xl font-bold">
+        </h2>
+        <input id="orderId" type="hidden">
+        <div class="grid gap-3 text-sm md:grid-cols-2">
+          <label>
+            Mã phòng (*)
+            <input id="oCode" required maxlength="6" pattern="[A-Za-z0-9]{6}" class="input uppercase">
+          </label>
+          <label>
+            SĐT người thuê (*)
+            <input id="oTenantPhone" required pattern="0[35789][0-9]{8}" class="input">
+          </label>
+          <label>
+            Zalo ID người thuê
+            <input id="oTenantZalo" class="input">
+          </label>
+          <label>
+            SĐT chủ nhà
+            <input id="oLandlordPhone" pattern="0[35789][0-9]{8}" class="input" placeholder="Để trống lấy từ phòng">
+          </label>
+          <label>
+            Zalo ID chủ nhà
+            <input id="oLandlordZalo" class="input">
+          </label>
+          <label>
+            Thời gian xem
+            <input id="oViewing" type="datetime-local" class="input">
+          </label>
+        </div>
+        <div class="mt-5 flex justify-end gap-2">
+          <button type="button" onclick="modal('orderModal',false)" class="rounded border px-4 py-2">
+            Hủy
+          </button>
+          <button id="orderSave" class="rounded bg-violet-600 px-4 py-2 font-bold text-white">
+            Lưu
+          </button>
+        </div>
+      </form>
+    </div>
+    <div id="passwordModal" class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60 p-3">
+      <form onsubmit="changePassword(event)" class="w-full max-w-sm rounded-2xl bg-white p-5">
+        <h2 class="mb-4 text-lg font-bold">
+          Đổi mật khẩu
+        </h2>
+        <input id="oldPass" type="password" required class="input mb-3" placeholder="Mật khẩu hiện tại">
+        <input id="newPass" type="password" minlength="8" required class="input mb-4" placeholder="Mật khẩu mới tối thiểu 8 ký tự">
+        <div class="flex justify-end gap-2">
+          <button type="button" onclick="modal('passwordModal',false)" class="rounded border px-4 py-2">
+            Hủy
+          </button>
+          <button class="rounded bg-amber-500 px-4 py-2 font-bold text-white">
+            Cập nhật
+          </button>
+        </div>
+      </form>
+    </div>
+    <div id="excelModal" class="fixed inset-0 z-40 hidden items-center justify-center bg-black/60 p-3">
+      <form onsubmit="uploadExcel(event)" class="w-full max-w-md rounded-2xl bg-white p-5">
+        <h2 class="mb-2 text-lg font-bold">
+          Nhập Excel/CSV
+        </h2>
+        <a href="/api/rooms/download-template" class="mb-4 block text-blue-600">
+          Tải file mẫu
+        </a>
+        <input id="excelFile" type="file" accept=".xlsx,.xls,.csv" required class="input mb-3">
+        <p id="uploadMsg" class="mb-3 hidden rounded p-2 text-sm">
+        </p>
+        <div class="flex justify-end gap-2">
+          <button type="button" onclick="modal('excelModal',false)" class="rounded border px-4 py-2">
+            Hủy
+          </button>
+          <button id="excelSave" class="rounded bg-emerald-600 px-4 py-2 font-bold text-white">
+            Tải lên
+          </button>
+        </div>
+      </form>
+    </div>
+    <div id="registerModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 p-3">
+      <div class="w-full max-w-sm rounded-2xl bg-white p-5">
+        <h2 class="mb-2 text-lg font-bold">
+          Đăng ký tài khoản
+        </h2>
+        <img id="zaloQR" class="mx-auto mb-3 h-32 w-32 border">
+        <input id="regPhone" class="input mb-2" placeholder="Số điện thoại">
+        <input id="regOTP" class="input mb-2" placeholder="Mã OTP">
+        <input id="regPass" type="password" minlength="8" class="input mb-4" placeholder="Mật khẩu tối thiểu 8 ký tự">
+        <div class="flex justify-end gap-2">
+          <button onclick="showLogin()" class="rounded border px-4 py-2">
+            Quay lại
+          </button>
+          <button onclick="register()" class="rounded bg-green-600 px-4 py-2 font-bold text-white">
+            Đăng ký
+          </button>
+        </div>
+      </div>
+    </div>
+    <style>
+      .input{margin-top:.25rem;width:100%;border:1px solid #cbd5e1;border-radius:.375rem;padding:.5rem}.input:focus{outline:2px solid #93c5fd}
+    </style>
+    <script>
+      const OA="{{ ZALO_OA_ID }}",$=id=>document.getElementById(id),roomFields=["room_code","address","room_name","price","floor","room_size","max_occupants","move_in_date","status","landlord_phone","is_private_bathroom","has_ac","has_heater","has_washer","allow_pets","has_balcony","has_window","has_fingerprint_lock","bed","wardrobe","parking_info","other_amenities","service_fees"];
+      let rooms=[],orders=[];
+      const esc=v=>String(v??"").replace(/[&<>"']/g,c=>( {
+          "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
+      }
+      [c])),val=v=>v===null||v===undefined||String(v).trim()===""?"—":esc(v),err=d=>typeof d?.detail==="string"?d.detail:d?.detail?JSON.stringify(d.detail):"Có lỗi xảy ra";
+      async function api(url,opt= {
+      }
+      ) {
+          let h=new Headers(opt.headers|| {
+          }
+          ),t=localStorage.getItem("accessToken");
+          if(t)h.set("Authorization",`Bearer ${t}`);
+          let r=await fetch(url, {
+              ...opt,headers:h
+          }
+          );
+          if(r.status===401&&!url.includes("/api/login"))logout();
+          return r
+      }
+      async function data(r) {
+          try {
+              return await r.json()
+          } catch {
+              return {
+              }
+          }
+      }
+      function modal(id,on) {
+          $(id).classList.toggle("hidden",!on);
+          $(id).classList.toggle("flex",on)
+      }
+      function busy(id,on) {
+          let b=$(id);
+          if(on)b.dataset.text=b.textContent;
+          b.disabled=on;
+          b.textContent=on?"Đang xử lý...":b.dataset.text||b.textContent
+      }
+      function auth() {
+          let ok=localStorage.getItem("isAdminLoggedIn")==="true"&&localStorage.getItem("accessToken");
+          $("loginModal").classList.toggle("hidden",!!ok);
+          $("dashboard").classList.toggle("hidden",!ok);
+          if(ok) {
+              let role=localStorage.getItem("userRole")||"USER";
+              $("loginInfo").textContent=`${localStorage.getItem("adminUsername")} · ${role}`;
+              $("ordersTab").classList.toggle("hidden",role!=="SUPER_ADMIN");
+              showPage("rooms")
+          }
+      }
+      async function login(e) {
+          e.preventDefault();
+          let r=await api("/api/login", {
+              method:"POST",headers: {
+                  "Content-Type":"application/json"
+              }
+              ,body:JSON.stringify( {
+                  phone:$("loginUsername").value.trim(),password:$("loginPassword").value
+              }
+              )
+          }
+          ),d=await data(r);
+          if(!r.ok)return alert(err(d));
+          Object.entries( {
+              isAdminLoggedIn:"true",adminUsername:d.username,userRole:d.role,accessToken:d.access_token,username:d.username
+          }
+          ).forEach(([k,v])=>localStorage.setItem(k,v));
+          auth()
+      }
+      function logout() {
+          ["isAdminLoggedIn","adminUsername","userRole","accessToken","username"].forEach(k=>localStorage.removeItem(k));
+          $("dashboard").classList.add("hidden");
+          $("loginModal").classList.remove("hidden")
+      }
+      function showPage(p) {
+          $("roomsPage").classList.toggle("hidden",p!=="rooms");
+          $("ordersPage").classList.toggle("hidden",p!=="orders");
+          p==="rooms"?loadRooms():loadOrders()
+      }
+      async function loadRooms() {
+          let p=new URLSearchParams( {
+              limit:"100"
+          }
+          );
+          [["min_price","fMin"],["max_price","fMax"],["from_date","fFrom"],["to_date","fTo"],["status","fStatus"]].forEach(([k,id])=> {
+              $(id).value&&p.set(k,$(id).value)
+          }
+          );
+          if($("fStatus").value==="ĐÃ XÓA")p.set("include_deleted","true");
+          let r=await api(`/api/admin/rooms?${p}`),d=await data(r);
+          if(!r.ok)return alert(err(d));
+          rooms=Array.isArray(d.data)?d.data:[];
+          filterRooms()
+      }
+      function filterRooms() {
+          let a=$("fAddress").value.toLowerCase(),n=$("fName").value.toLowerCase(),p=$("fPhone").value,x=$("fAC").value;
+          renderRooms(rooms.filter(r=>(!a||String(r.address||"").toLowerCase().includes(a))&&(!n||`${r.room_name||""} ${r.room_code||""}`.toLowerCase().includes(n))&&(!p||String(r.landlord_phone||"").includes(p))&&(!x||r.has_ac===x)))
+      }
+      function renderRooms(list) {
+          $("selectAll").checked=false;
+          updateSelected();
+          if(!list.length) {
+              $("roomBody").innerHTML='<tr><td colspan="5" class="p-6 text-center">Không có dữ liệu</td></tr>';
+              return
+          }
+          $("roomBody").innerHTML=list.map(r=> {
+              let m=(Array.isArray(r.media_urls)?r.media_urls:[]).filter(u=>/^https?:\/\//i.test(String(u))),imgs=m.map(u=>`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer"><img src="${esc(u)}" class="h-16 w-16 rounded object-cover" loading="lazy"></a>`).join("");
+              return`<tr class="border-t align-top"><td class="p-3"><input class="roomCheck" type="checkbox" value="${esc(r.id)}" onchange="updateSelected()"></td><td class="p-3"><b class="text-base text-blue-700">${val(r.room_code)}</b><div>${val(r.room_name)}</div><div>${val(r.address)}</div><b class="text-green-700">${val(r.price)} đ</b></td><td class="p-3"><div class="grid grid-cols-2 gap-1"><span>Tầng: <b>${val(r.floor)}</b></span><span>Diện tích: <b>${val(r.room_size)}</b></span><span>WC riêng: <b>${val(r.is_private_bathroom)}</b></span><span>Điều hòa: <b>${val(r.has_ac)}</b></span><span>Nóng lạnh: <b>${val(r.has_heater)}</b></span><span>Máy giặt: <b>${val(r.has_washer)}</b></span><span>Giường: <b>${val(r.bed)}</b></span><span>Tủ áo: <b>${val(r.wardrobe)}</b></span><span>Thú cưng: <b>${val(r.allow_pets)}</b></span><span>Ban công: <b>${val(r.has_balcony)}</b></span><span>Cửa sổ: <b>${val(r.has_window)}</b></span><span>Vân tay: <b>${val(r.has_fingerprint_lock)}</b></span><span>Để xe: <b>${val(r.parking_info)}</b></span><span>Tối đa: <b>${val(r.max_occupants)}</b></span><span class="col-span-2">Khác: <b>${val(r.other_amenities)}</b></span><span class="col-span-2">Phí: <b>${val(r.service_fees)}</b></span><span>Ngày vào: <b>${val(r.move_in_date)}</b></span><span>Timestamp: <b>${val(r.move_in_timestamp)}</b></span><span>Trạng thái: <b>${val(r.status)}</b></span><span>Chủ nhà: <b>${val(r.landlord_phone)}</b></span></div></td><td class="p-3"><div class="flex flex-wrap gap-1">${imgs||"Không media"}</div><div>ID: ${val(r.id)}</div><div>Zalo ID: ${val(r.zalo_user_id)}</div><div>Tạo: ${val(r.created_at)}</div><div>Cập nhật: ${val(r.updated_at)}</div><div>Xóa: ${val(r.deleted_at)}</div><div>Media URLs: ${m.length}</div></td><td class="p-3"><button onclick="editRoom('${esc(r.id)}')" class="rounded bg-blue-100 px-3 py-1">Sửa</button> <button onclick="deleteRoom('${esc(r.id)}')" class="rounded bg-red-100 px-3 py-1">Xóa</button></td></tr>`
+          }
+          ).join("")
+      }
+      function resetFilters() {
+          ["fAddress","fName","fMin","fMax","fFrom","fTo","fPhone"].forEach(id=>$(id).value="");
+          $("fStatus").value="";
+          $("fAC").value="";
+          loadRooms()
+      }
+      function selectAll(e) {
+          document.querySelectorAll(".roomCheck").forEach(c=>c.checked=e.checked);
+          updateSelected()
+      }
+      function updateSelected() {
+          let n=document.querySelectorAll(".roomCheck:checked").length;
+          $("selectedCount").textContent=n;
+          $("deleteSelectedBtn").classList.toggle("hidden",!n)
+      }
+      async function deleteRoom(id,confirming=true) {
+          if(confirming&&!confirm("Xác nhận xóa phòng?"))return false;
+          let r=await api(`/api/rooms/${encodeURIComponent(id)}`, {
+              method:"DELETE"
+          }
+          ),d=await data(r);
+          if(!r.ok) {
+              alert(err(d));
+              return false
+          }
+          if(confirming)loadRooms();
+          return true
+      }
+      async function deleteSelected() {
+          let ids=[...document.querySelectorAll(".roomCheck:checked")].map(x=>x.value);
+          if(!ids.length||!confirm(`Xóa ${ids.length} phòng?`))return;
+          for(let id of ids)if(!await deleteRoom(id,false))break;
+          loadRooms()
+      }
+      function choices() {
+          document.querySelectorAll("select.choice").forEach(s=>s.innerHTML=(s.classList.contains("washer")?["Chưa rõ","Có","Dùng chung","Không"]:["Chưa rõ","Có","Không"]).map(v=>`<option>${v}</option>`).join(""))
+      }
+      function openRoom(r=null) {
+          document.querySelector("#roomModal form").reset();
+          choices();
+          $("roomId").value=r?.id||"";
+          $("roomTitle").textContent=r?"Cập nhật phòng":"Thêm phòng";
+          if(r)roomFields.forEach(k=> {
+              $(k).value=r[k]??""
+          }
+          );
+          $("media_urls").value=Array.isArray(r?.media_urls)?r.media_urls.join(", "):"";
+          if(!r&&/^0[35789][0-9]{8}$/.test(localStorage.getItem("username")||""))$("landlord_phone").value=localStorage.getItem("username");
+          modal("roomModal",true)
+      }
+      function editRoom(id) {
+          let r=rooms.find(x=>String(x.id)===String(id));
+          r&&openRoom(r)
+      }
+      async function saveRoom(e) {
+          e.preventDefault();
+          busy("roomSave",true);
+          try {
+              let id=$("roomId").value,p= {
+              }
+              ;
+              roomFields.forEach(k=>p[k]=$(k).value.trim());
+              if(!p.room_code)delete p.room_code;
+              p.media_urls=$("media_urls").value.split(",").map(x=>x.trim()).filter(x=>/^https?:\/\//i.test(x));
+              let r=await api(id?`/api/rooms?point_id=${encodeURIComponent(id)}`:"/api/rooms", {
+                  method:"POST",headers: {
+                      "Content-Type":"application/json"
+                  }
+                  ,body:JSON.stringify(p)
+              }
+              ),d=await data(r);
+              if(!r.ok)return alert(err(d));
+              modal("roomModal",false);
+              loadRooms()
+          } finally {
+              busy("roomSave",false)
+          }
+      }
+      async function loadOrders() {
+          let p=new URLSearchParams( {
+              limit:"200"
+          }
+          );
+          [["room_code","ofCode"],["tenant_phone","ofTenant"],["landlord_phone","ofLandlord"]].forEach(([k,id])=> {
+              $(id).value.trim()&&p.set(k,$(id).value.trim())
+          }
+          );
+          let r=await api(`/api/admin/orders?${p}`),d=await data(r);
+          if(!r.ok)return alert(err(d));
+          orders=Array.isArray(d.data)?d.data:[];
+          $("orderBody").innerHTML=orders.length?orders.map(o=>`<tr class="border-t"><td class="p-3 font-bold">${val(o.room_code)}</td><td class="p-3">📞 ${val(o.tenant_phone)}<br>Zalo: ${val(o.tenant_zalo_id)}</td><td class="p-3">📞 ${val(o.landlord_phone)}<br>Zalo: ${val(o.landlord_zalo_id)}</td><td class="p-3">${val(o.viewing_time)}</td><td class="p-3">ID: ${val(o.id)}<br>Tạo: ${val(o.created_at)}</td><td class="p-3"><button onclick="editOrder('${esc(o.id)}')" class="rounded bg-blue-100 px-3 py-1">Sửa</button> <button onclick="deleteOrder('${esc(o.id)}')" class="rounded bg-red-100 px-3 py-1">Xóa</button></td></tr>`).join(""):'<tr><td colspan="6" class="p-6 text-center">Không có đơn đặt phòng</td></tr>'
+      }
+      function openOrder(o=null) {
+          document.querySelector("#orderModal form").reset();
+          $("orderId").value=o?.id||"";
+          $("orderTitle").textContent=o?"Cập nhật đơn":"Thêm đơn";
+          if(o) {
+              $("oCode").value=o.room_code||"";
+              $("oTenantPhone").value=o.tenant_phone||"";
+              $("oTenantZalo").value=o.tenant_zalo_id||"";
+              $("oLandlordPhone").value=o.landlord_phone||"";
+              $("oLandlordZalo").value=o.landlord_zalo_id||"";
+              $("oViewing").value=o.viewing_time?o.viewing_time.slice(0,16):""
+          }
+          modal("orderModal",true)
+      }
+      function editOrder(id) {
+          let o=orders.find(x=>x.id===id);
+          o&&openOrder(o)
+      }
+      async function saveOrder(e) {
+          e.preventDefault();
+          busy("orderSave",true);
+          try {
+              let id=$("orderId").value,p= {
+                  room_code:$("oCode").value.trim(),tenant_phone:$("oTenantPhone").value.trim(),tenant_zalo_id:$("oTenantZalo").value.trim()||null,landlord_phone:$("oLandlordPhone").value.trim()||null,landlord_zalo_id:$("oLandlordZalo").value.trim()||null,viewing_time:$("oViewing").value||null
+              }
+              ,r=await api(id?`/api/admin/orders/${encodeURIComponent(id)}`:"/api/admin/orders", {
+                  method:id?"PUT":"POST",headers: {
+                      "Content-Type":"application/json"
+                  }
+                  ,body:JSON.stringify(p)
+              }
+              ),d=await data(r);
+              if(!r.ok)return alert(err(d));
+              modal("orderModal",false);
+              loadOrders()
+          } finally {
+              busy("orderSave",false)
+          }
+      }
+      async function deleteOrder(id) {
+          if(!confirm("Xóa đơn đặt phòng này?"))return;
+          let r=await api(`/api/admin/orders/${encodeURIComponent(id)}`, {
+              method:"DELETE"
+          }
+          ),d=await data(r);
+          if(!r.ok)return alert(err(d));
+          loadOrders()
+      }
+      async function changePassword(e) {
+          e.preventDefault();
+          let r=await api("/api/admin/change-password", {
+              method:"POST",headers: {
+                  "Content-Type":"application/json"
+              }
+              ,body:JSON.stringify( {
+                  old_password:$("oldPass").value,new_password:$("newPass").value
+              }
+              )
+          }
+          ),d=await data(r);
+          if(!r.ok)return alert(err(d));
+          alert(d.message);
+          modal("passwordModal",false)
+      }
+      async function uploadExcel(e) {
+          e.preventDefault();
+          busy("excelSave",true);
+          try {
+              let f=new FormData();
+              f.append("file",$("excelFile").files[0]);
+              let r=await api("/api/rooms/upload-excel", {
+                  method:"POST",body:f
+              }
+              ),d=await data(r);
+              $("uploadMsg").classList.remove("hidden");
+              $("uploadMsg").textContent=r.ok?d.message:err(d);
+              if(r.ok)loadRooms()
+          } finally {
+              busy("excelSave",false)
+          }
+      }
+      function showRegister() {
+          $("loginModal").classList.add("hidden");
+          $("zaloQR").src=`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(`https://zalo.me/$ {
+              OA
+          }
+          `)}`;
+          modal("registerModal",true)
+      }
+      function showLogin() {
+          modal("registerModal",false);
+          $("loginModal").classList.remove("hidden")
+      }
+      async function register() {
+          let p= {
+              phone:$("regPhone").value.trim(),otp:$("regOTP").value.trim(),password:$("regPass").value
+          }
+          ;
+          if(!p.phone||!p.otp||p.password.length<8)return alert("Thông tin chưa hợp lệ");
+          let r=await api("/api/user/register", {
+              method:"POST",headers: {
+                  "Content-Type":"application/json"
+              }
+              ,body:JSON.stringify(p)
+          }
+          ),d=await data(r);
+          if(!r.ok)return alert(err(d));
+          alert(d.message);
+          showLogin()
+      }
+      choices();
+      document.addEventListener("DOMContentLoaded",auth);
+    </script>
+  </body>
 </html>
