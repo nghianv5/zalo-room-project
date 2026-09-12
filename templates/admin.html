@@ -763,8 +763,16 @@
           $("regPass").value="";
           $("registerMsg").textContent="";
           $("registerMsg").className="mb-3 hidden rounded p-2 text-sm";
-          const zaloUrl = `https://zalo.me/${ZALO_OA_ID}`;
-          $("zaloQR").src=`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(zaloUrl)}`;
+
+		  document.getElementById('loginModal').classList.add('hidden');
+		  document.getElementById('registerModal').classList.remove('hidden');
+			
+			// Tạo link Zalo OA
+		  const zaloUrl = `https://zalo.me/${ZALO_OA_ID}`;
+			
+			// Đưa link Zalo vào API tạo QR (dùng encodeURIComponent đúng cách)
+		  document.getElementById('zaloQR').src = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(zaloUrl)}`;
+		  
           modal("registerModal",true)
       }
       function switchToLogin() {
