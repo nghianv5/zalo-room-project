@@ -252,7 +252,7 @@ async def change_password(payload: AdminChangePasswordSchema, db: Session = Depe
     return {"status": "success", "message": "Đổi mật khẩu thành công!"}
 
 @app.post("/api/rooms/upload-excel")
-async def upload_excel_rooms(file: UploadFile = File(...), user: Principal = Depends(get_current_user)):
+async def upload_excel_rooms(file: UploadFile = File(...), user: Principal = Depends(get_current_user), db: Session = Depends(get_db)):
     if not file.filename.endswith((".xlsx", ".xls", ".csv")):
         raise HTTPException(status_code=400, detail="Vui lòng tải lên tệp .xlsx, .xls hoặc .csv!")
 
@@ -304,9 +304,9 @@ async def upload_excel_rooms(file: UploadFile = File(...), user: Principal = Dep
             if user.role == "SUPER_ADMIN":
                 excel_owner_phone = extracted.get("landlord_phone")  
                 if not excel_owner_phone or str(excel_owner_phone).strip().lower() in ["none", "null", ""]:
-                    excel_owner_phone = user.phone
+                    excel_owner_phone = get_phone_by_user_id(db, "ADMIN_SUPER")
             else:
-                user.username
+                excel_owner_phone = user.username
 
             extracted["landlord_phone"] = excel_owner_phone
             message = upsert_room_to_db(data=extracted, current_excel_row=current_excel_row, type_process="EXCEL", landlord_phone=excel_owner_phone)
