@@ -424,7 +424,7 @@
         </label>
         <div class="mb-4 rounded-lg border border-blue-100 bg-blue-50 p-3 text-center">
           <p class="mb-2 text-xs font-medium text-blue-800">
-            Quét mã để mở Zalo OA và gửi: OTP 0912345678
+            Quét mã để mở Zalo OA và gửi: OTP sdt của bạn (VD: OTP 0987628347)
           </p>
           <img id="zaloQR" alt="Mã QR Zalo OA" class="mx-auto h-32 w-32 rounded border bg-white p-1">
         </div>
@@ -755,6 +755,7 @@
               busy("excelSave",false)
           }
       }
+	  const ZALO_OA_ID = "{{ ZALO_OA_ID }}";
       function switchToRegister() {
           $("loginModal").classList.add("hidden");
           $("regPhone").value="";
@@ -762,7 +763,7 @@
           $("regPass").value="";
           $("registerMsg").textContent="";
           $("registerMsg").className="mb-3 hidden rounded p-2 text-sm";
-          const zaloUrl="https://zalo.me/"+OA;
+          const zaloUrl = `https://zalo.me/${ZALO_OA_ID}`;
           $("zaloQR").src=`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(zaloUrl)}`;
           modal("registerModal",true)
       }
