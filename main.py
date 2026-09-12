@@ -296,17 +296,13 @@ async def upload_excel_rooms(file: UploadFile = File(...), user: Principal = Dep
             raw_address = str(extracted.get("address") or "").strip()
 
             if not raw_address or raw_address.lower() in ["[chưa cập nhật]", "none", "null", "chưa rõ", ""]:
-                print(f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Thiếu hoặc sai địa chỉ.")
                 failed_rows_details.append({"row": current_excel_row, "reason": "Thiếu hoặc sai địa chỉ"})
                 continue
             
-            print(f"role : {user.role}")
             # Kiểm tra lưu DB (hàm trả về None/"" nếu thành công, trả về string lỗi nếu thất bại)
             if user.role == "SUPER_ADMIN":
                 excel_owner_phone = extracted.get("landlord_phone")  
-                print(f"excel_owner_phone : {excel_owner_phone}")
                 if not excel_owner_phone or str(excel_owner_phone).strip().lower() in ["none", "null", ""]:
-                    print(f"get_phone_by_user_id : {get_phone_by_user_id(db, "ADMIN_SUPER")}")
                     excel_owner_phone = get_phone_by_user_id(db, "ADMIN_SUPER")
             else:
                 excel_owner_phone = user.username
