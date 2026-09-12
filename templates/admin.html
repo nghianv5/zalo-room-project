@@ -26,8 +26,8 @@
         <button class="w-full rounded bg-blue-600 p-2 font-bold text-white">
           Đăng nhập
         </button>
-        <button type="button" onclick="showRegister()" class="mt-3 w-full text-sm font-semibold text-blue-600">
-          Đăng ký tài khoản
+        <button type="button" onclick="switchToRegister()" class="mt-3 w-full text-sm font-semibold text-blue-600">
+          Đăng ký ngay
         </button>
       </form>
     </div>
@@ -411,20 +411,39 @@
       </form>
     </div>
     <div id="registerModal" class="fixed inset-0 z-50 hidden items-center justify-center bg-black/60 p-3">
-      <div class="w-full max-w-sm rounded-2xl bg-white p-5">
+      <div class="max-h-[90vh] w-full max-w-sm overflow-y-auto rounded-2xl bg-white p-5">
         <h2 class="mb-2 text-lg font-bold">
-          Đăng ký tài khoản
+          Đăng ký tài khoản User
         </h2>
-        <img id="zaloQR" class="mx-auto mb-3 h-32 w-32 border">
-        <input id="regPhone" class="input mb-2" placeholder="Số điện thoại">
-        <input id="regOTP" class="input mb-2" placeholder="Mã OTP">
-        <input id="regPass" type="password" minlength="8" class="input mb-4" placeholder="Mật khẩu tối thiểu 8 ký tự">
-        <div class="flex justify-end gap-2">
-          <button onclick="showLogin()" class="rounded border px-4 py-2">
-            Quay lại
+        <p class="mb-4 text-xs text-slate-500">
+          Nhập số điện thoại, quét QR và nhắn Zalo OA theo cú pháp OTP SĐT để nhận mã xác thực.
+        </p>
+        <label class="text-sm font-semibold">
+          1. Số điện thoại đăng ký
+          <input id="regPhone" inputmode="numeric" maxlength="10" class="input mb-3" placeholder="Ví dụ: 0912345678">
+        </label>
+        <div class="mb-4 rounded-lg border border-blue-100 bg-blue-50 p-3 text-center">
+          <p class="mb-2 text-xs font-medium text-blue-800">
+            Quét mã để mở Zalo OA và gửi: OTP 0912345678
+          </p>
+          <img id="zaloQR" alt="Mã QR Zalo OA" class="mx-auto h-32 w-32 rounded border bg-white p-1">
+        </div>
+        <label class="text-sm font-semibold">
+          2. Mã OTP nhận từ Zalo
+          <input id="regOTP" inputmode="numeric" maxlength="6" class="input mb-3" placeholder="Nhập 6 số OTP">
+        </label>
+        <label class="text-sm font-semibold">
+          3. Mật khẩu mới
+          <input id="regPass" type="password" minlength="8" class="input mb-4" placeholder="Tối thiểu 8 ký tự">
+        </label>
+        <p id="registerMsg" class="mb-3 hidden rounded p-2 text-sm">
+        </p>
+        <div class="flex justify-between gap-2">
+          <button type="button" onclick="switchToLogin()" class="rounded border px-4 py-2">
+            Quay lại đăng nhập
           </button>
-          <button onclick="register()" class="rounded bg-green-600 px-4 py-2 font-bold text-white">
-            Đăng ký
+          <button id="registerButton" type="button" onclick="handleRegister()" class="rounded bg-green-600 px-4 py-2 font-bold text-white">
+            Xác nhận đăng ký
           </button>
         </div>
       </div>
@@ -736,32 +755,69 @@
               busy("excelSave",false)
           }
       }
-      function showRegister() {
+      function switchToRegister() {
           $("loginModal").classList.add("hidden");
+          $("regPhone").value="";
+          $("regOTP").value="";
+          $("regPass").value="";
+          $("registerMsg").textContent="";
+          $("registerMsg").className="mb-3 hidden rounded p-2 text-sm";
           const zaloUrl="https://zalo.me/"+OA;
           $("zaloQR").src=`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(zaloUrl)}`;
           modal("registerModal",true)
       }
-      function showLogin() {
+      function switchToLogin() {
           modal("registerModal",false);
           $("loginModal").classList.remove("hidden")
       }
-      async function register() {
-          let p= {
-              phone:$("regPhone").value.trim(),otp:$("regOTP").value.trim(),password:$("regPass").value
+      async function handleRegister() {
+          const phone=$("regPhone").value.trim();
+          const otp=$("regOTP").value.trim();
+          const password=$("regPass").value;
+          const messageBox=$("registerMsg");
+
+          if(!/^0[35789][0-9]{8}$/.test(phone)) {
+              messageBox.textContent="Số điện thoại Việt Nam không hợp lệ.";
+              messageBox.className="mb-3 rounded bg-red-100 p-2 text-sm text-red-800";
+              return
           }
-          ;
-          if(!p.phone||!p.otp||p.password.length<8)return alert("Thông tin chưa hợp lệ");
-          let r=await api("/api/user/register", {
-              method:"POST",headers: {
-                  "Content-Type":"application/json"
+          if(!/^[0-9]{6}$/.test(otp)) {
+              messageBox.textContent="Mã OTP phải gồm đúng 6 chữ số.";
+              messageBox.className="mb-3 rounded bg-red-100 p-2 text-sm text-red-800";
+              return
+          }
+          if(password.length<8) {
+              messageBox.textContent="Mật khẩu phải có tối thiểu 8 ký tự.";
+              messageBox.className="mb-3 rounded bg-red-100 p-2 text-sm text-red-800";
+              return
+          }
+
+          busy("registerButton",true);
+          messageBox.textContent="Đang đăng ký tài khoản...";
+          messageBox.className="mb-3 rounded bg-blue-100 p-2 text-sm text-blue-800";
+          try {
+              const response=await api("/api/user/register", {
+                  method:"POST",
+                  headers:{"Content-Type":"application/json"},
+                  body:JSON.stringify({phone,otp,password})
+              });
+              const result=await data(response);
+              if(!response.ok) {
+                  messageBox.textContent=err(result);
+                  messageBox.className="mb-3 rounded bg-red-100 p-2 text-sm text-red-800";
+                  return
               }
-              ,body:JSON.stringify(p)
+              messageBox.textContent=result.message||"Đăng ký tài khoản thành công.";
+              messageBox.className="mb-3 rounded bg-green-100 p-2 text-sm text-green-800";
+              $("loginUsername").value=phone;
+              setTimeout(switchToLogin,1200)
+          } catch(error) {
+              console.error("Lỗi đăng ký:",error);
+              messageBox.textContent="Không thể kết nối máy chủ. Vui lòng thử lại.";
+              messageBox.className="mb-3 rounded bg-red-100 p-2 text-sm text-red-800"
+          } finally {
+              busy("registerButton",false)
           }
-          ),d=await data(r);
-          if(!r.ok)return alert(err(d));
-          alert(d.message);
-          showLogin()
       }
       choices();
       $("excelFile").addEventListener("change",()=> {

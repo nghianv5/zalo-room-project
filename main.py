@@ -393,7 +393,7 @@ def _serialize_order(order: OrderRoom) -> dict:
     return {
         "id": order.id,
         "tenant_zalo_id": order.tenant_zalo_id,
-        "tenant_0": order.tenant_phone,
+        "tenant_phone": order.tenant_phone,
         "landlord_zalo_id": order.landlord_zalo_id,
         "landlord_phone": order.landlord_phone,
         "room_code": order.room_code,
