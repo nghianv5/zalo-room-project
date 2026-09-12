@@ -301,7 +301,13 @@ async def upload_excel_rooms(file: UploadFile = File(...), user: Principal = Dep
                 continue
 
             # Kiểm tra lưu DB (hàm trả về None/"" nếu thành công, trả về string lỗi nếu thất bại)
-            excel_owner_phone = extracted.get("landlord_phone") if user.role == "SUPER_ADMIN" else user.username
+            if user.role == "SUPER_ADMIN":
+                excel_owner_phone = extracted.get("landlord_phone")  
+                if not excel_owner_phone or str(excel_owner_phone).strip().lower() in ["none", "null", ""]:
+                    excel_owner_phone = user.phone
+            else:
+                user.username
+
             extracted["landlord_phone"] = excel_owner_phone
             message = upsert_room_to_db(data=extracted, current_excel_row=current_excel_row, type_process="EXCEL", landlord_phone=excel_owner_phone)
             if message == "SUCCESS":
@@ -388,7 +394,7 @@ def _serialize_order(order: OrderRoom) -> dict:
     return {
         "id": order.id,
         "tenant_zalo_id": order.tenant_zalo_id,
-        "tenant_phone": order.tenant_phone,
+        "tenant_0": order.tenant_phone,
         "landlord_zalo_id": order.landlord_zalo_id,
         "landlord_phone": order.landlord_phone,
         "room_code": order.room_code,
