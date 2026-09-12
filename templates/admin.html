@@ -48,7 +48,7 @@
             <button id="ordersTab" onclick="showPage('orders')" class="hidden rounded bg-violet-600 px-3 py-2 text-xs font-bold text-white">
               📅 Đặt phòng
             </button>
-            <button onclick="modal('excelModal',true)" class="rounded bg-emerald-600 px-3 py-2 text-xs font-bold text-white">
+            <button onclick="openExcelModal()" class="rounded bg-emerald-600 px-3 py-2 text-xs font-bold text-white">
               📊 Nhập Excel
             </button>
             <button onclick="modal('passwordModal',true)" class="rounded bg-amber-500 px-3 py-2 text-xs font-bold text-white">
@@ -465,6 +465,18 @@
           $(id).classList.toggle("hidden",!on);
           $(id).classList.toggle("flex",on)
       }
+      function resetExcelDialog() {
+          $("excelFile").value="";
+          $("uploadMsg").textContent="";
+          $("uploadMsg").className="mb-3 hidden rounded p-2 text-sm";
+          $("excelSave").disabled=false;
+          $("excelSave").textContent="Tải lên";
+          delete $("excelSave").dataset.text
+      }
+      function openExcelModal() {
+          resetExcelDialog();
+          modal("excelModal",true)
+      }
       function busy(id,on) {
           let b=$(id);
           if(on)b.dataset.text=b.textContent;
@@ -701,6 +713,8 @@
       }
       async function uploadExcel(e) {
           e.preventDefault();
+          $("uploadMsg").textContent="Đang tải lên và xử lý dữ liệu...";
+          $("uploadMsg").className="mb-3 rounded bg-blue-100 p-2 text-sm text-blue-800";
           busy("excelSave",true);
           try {
               let f=new FormData();
@@ -709,19 +723,23 @@
                   method:"POST",body:f
               }
               ),d=await data(r);
-              $("uploadMsg").classList.remove("hidden");
               $("uploadMsg").textContent=r.ok?d.message:err(d);
+              $("uploadMsg").className=r.ok
+                  ?"mb-3 rounded bg-green-100 p-2 text-sm text-green-800"
+                  :"mb-3 rounded bg-red-100 p-2 text-sm text-red-800";
               if(r.ok)loadRooms()
+          } catch(error) {
+              console.error("Lỗi tải Excel:",error);
+              $("uploadMsg").textContent="Không thể kết nối máy chủ. Vui lòng thử lại.";
+              $("uploadMsg").className="mb-3 rounded bg-red-100 p-2 text-sm text-red-800"
           } finally {
               busy("excelSave",false)
           }
       }
       function showRegister() {
           $("loginModal").classList.add("hidden");
-          $("zaloQR").src=`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(`https://zalo.me/$ {
-              OA
-          }
-          `)}`;
+          const zaloUrl="https://zalo.me/"+OA;
+          $("zaloQR").src=`https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(zaloUrl)}`;
           modal("registerModal",true)
       }
       function showLogin() {
@@ -746,6 +764,11 @@
           showLogin()
       }
       choices();
+      $("excelFile").addEventListener("change",()=> {
+          $("uploadMsg").textContent="";
+          $("uploadMsg").className="mb-3 hidden rounded p-2 text-sm"
+      }
+      );
       document.addEventListener("DOMContentLoaded",auth);
     </script>
   </body>
