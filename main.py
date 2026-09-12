@@ -304,6 +304,7 @@ async def upload_excel_rooms(file: UploadFile = File(...), user: Principal = Dep
             if user.role == "SUPER_ADMIN":
                 excel_owner_phone = extracted.get("landlord_phone")  
                 if not excel_owner_phone or str(excel_owner_phone).strip().lower() in ["none", "null", ""]:
+                    print(f"get_phone_by_user_id : {get_phone_by_user_id(db, "ADMIN_SUPER")}")
                     excel_owner_phone = get_phone_by_user_id(db, "ADMIN_SUPER")
             else:
                 excel_owner_phone = user.username
