@@ -340,6 +340,7 @@ def get_current_user(
         )
     clean_phone = x_user_phone if x_user_phone == "adminpro" else format_national_phone(x_user_phone)
     user = db.query(UserWeb).filter(UserWeb.phone == clean_phone).first()
+    print(f"user: {user}")
     if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
