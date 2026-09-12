@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
+from sqlalchemy.exc import IntegrityError
 from qdrant_client.http import models as qdrant_models
 from services import *
 from security import Principal, create_session_token, enforce_rate_limit, get_current_user, require_admin, verify_zalo_webhook
@@ -192,6 +193,19 @@ async def save_or_update_room(
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
+def _get_super_admin_account(db: Session, admin_username: str) -> Optional[UserWeb]:
+    """Ưu tiên khóa ổn định ADMIN_SUPER; phone chỉ là tương thích dữ liệu cũ."""
+    account = db.query(UserWeb).filter(UserWeb.user_id == "ADMIN_SUPER").first()
+    if account:
+        return account
+    return db.query(UserWeb).filter(UserWeb.phone == admin_username).first()
+
+
+def _set_account_password(account: UserWeb, raw_password: str) -> None:
+    account.password = bcrypt.hashpw(raw_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
+    account.updated_at = datetime.utcnow()
+
+
 @app.post("/api/login")
 def api_login(data: UnifiedLoginSchema, request: Request, db: Session = Depends(get_db)):
     enforce_rate_limit(redis_client, f"login:{request.client.host if request.client else 'unknown'}", 20, 900)
@@ -204,19 +218,42 @@ def api_login(data: UnifiedLoginSchema, request: Request, db: Session = Depends(
 
     admin_username = os.getenv("ADMIN_USERNAME", "adminpro")
     if phone_input == admin_username:
-        admin_acc = db.query(UserWeb).filter(UserWeb.phone == admin_username).first()
+        admin_acc = _get_super_admin_account(db, admin_username)
+        initial_password = os.getenv("ADMIN_INITIAL_PASSWORD", "")
         if not admin_acc:
-            initial_password = os.getenv("ADMIN_INITIAL_PASSWORD", "")
             if initial_password and password_input == initial_password:
-                salt = bcrypt.gensalt()
-                hashed_pw = bcrypt.hashpw(initial_password.encode('utf-8'), salt).decode('utf-8')
-                new_admin = UserWeb(phone=admin_username, password=hashed_pw, user_id="ADMIN_SUPER")
+                new_admin = UserWeb(phone=admin_username, user_id="ADMIN_SUPER")
+                _set_account_password(new_admin, initial_password)
                 db.add(new_admin)
-                db.commit()
-                return {"status": "success", "role": "SUPER_ADMIN", "username": admin_username, "access_token": create_session_token(admin_username, "SUPER_ADMIN")}
-            raise HTTPException(status_code=401, detail="Mật khẩu Admin không chính xác!")
+                try:
+                    db.commit()
+                    admin_acc = new_admin
+                except IntegrityError:
+                    # Một request khác hoặc dữ liệu cũ đã tạo ADMIN_SUPER trước đó.
+                    db.rollback()
+                    admin_acc = _get_super_admin_account(db, admin_username)
+                    if not admin_acc:
+                        raise HTTPException(status_code=409, detail="Tài khoản Admin đã tồn tại nhưng không thể tải dữ liệu.")
+            else:
+                raise HTTPException(status_code=401, detail="Mật khẩu Admin không chính xác!")
 
-        if bcrypt.checkpw(password_input.encode('utf-8'), admin_acc.password.encode('utf-8')):
+        if not admin_acc.password:
+            if not initial_password or password_input != initial_password:
+                raise HTTPException(status_code=401, detail="Mật khẩu Admin không chính xác!")
+            _set_account_password(admin_acc, initial_password)
+            admin_acc.user_id = "ADMIN_SUPER"
+            try:
+                db.commit()
+            except IntegrityError as exc:
+                db.rollback()
+                raise HTTPException(status_code=409, detail="Dữ liệu tài khoản Admin đang bị trùng.") from exc
+
+        try:
+            password_is_valid = bcrypt.checkpw(password_input.encode("utf-8"), admin_acc.password.encode("utf-8"))
+        except (TypeError, ValueError):
+            password_is_valid = False
+
+        if password_is_valid:
             return {"status": "success", "role": "SUPER_ADMIN", "username": admin_username, "access_token": create_session_token(admin_username, "SUPER_ADMIN")}
         raise HTTPException(status_code=401, detail="Mật khẩu Admin không chính xác!")
 
@@ -241,8 +278,11 @@ async def change_password(payload: AdminChangePasswordSchema, db: Session = Depe
     if not old_password or not new_password or not username:
         raise HTTPException(status_code=400, detail="Vui lòng nhập đầy đủ thông tin!")
 
-    target_username = username if username == os.getenv("ADMIN_USERNAME", "adminpro") else format_national_phone(username)
-    user_account = db.query(UserWeb).filter(UserWeb.phone == target_username).first()
+    if user.role == "SUPER_ADMIN":
+        user_account = _get_super_admin_account(db, os.getenv("ADMIN_USERNAME", "adminpro"))
+    else:
+        target_username = format_national_phone(username)
+        user_account = db.query(UserWeb).filter(UserWeb.phone == target_username).first()
 
     if not user_account or not user_account.password:
         raise HTTPException(status_code=400, detail="Tài khoản không tồn tại hoặc chưa tạo mật khẩu!")
