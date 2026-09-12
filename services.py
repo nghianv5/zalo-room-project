@@ -25,7 +25,7 @@ import string
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 import redis
-from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, JSON
+from sqlalchemy import create_engine, Column, Integer, String, Float, DateTime, JSON, text
 from sqlalchemy.orm import declarative_base, sessionmaker
 from sqlalchemy.sql import func
 from contextlib import asynccontextmanager
@@ -84,8 +84,8 @@ gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
 CACHE_TTL_SECONDS = 600
 MAX_MEDIA_PER_ROOM = int(os.getenv("MAX_MEDIA_PER_ROOM", "10"))
 MAX_SEARCH_MEDIA = int(os.getenv("MAX_SEARCH_MEDIA", "10"))
-MAX_SEARCH_ROOMS = max(1, int(os.getenv("MAX_SEARCH_ROOMS", "20")))
-MAX_SEARCH_MEDIA_PER_ROOM = max(1, int(os.getenv("MAX_SEARCH_MEDIA_PER_ROOM", "10")))
+MAX_SEARCH_ROOMS = max(1, int(os.getenv("MAX_SEARCH_ROOMS", "5")))
+MAX_SEARCH_MEDIA_PER_ROOM = max(1, int(os.getenv("MAX_SEARCH_MEDIA_PER_ROOM", "3")))
 
 # Initializing Qdrant Collection & Index
 try:
@@ -164,7 +164,9 @@ class OrderRoom(Base):
     room_code = Column(String, nullable=False)
     # 🆕 Thêm trường thời gian đến xem phòng
     viewing_time = Column(DateTime, nullable=True)
+    status = Column(String, nullable=False, default="CHỜ XEM")
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
 class ZaloToken(Base):
     __tablename__ = "zalo_tokens"
@@ -193,6 +195,20 @@ class AuditLog(Base):
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
 Base.metadata.create_all(bind=engine)
+
+
+def ensure_order_room_columns() -> None:
+    """Bổ sung cột cho DB hiện hữu vì create_all không thay đổi bảng đã tồn tại."""
+    with engine.begin() as connection:
+        connection.execute(text("ALTER TABLE order_room ADD COLUMN IF NOT EXISTS status VARCHAR"))
+        connection.execute(text("ALTER TABLE order_room ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP"))
+        connection.execute(text("UPDATE order_room SET status = 'CHỜ XEM' WHERE status IS NULL OR BTRIM(status) = ''"))
+        connection.execute(text("UPDATE order_room SET updated_at = COALESCE(created_at, CURRENT_TIMESTAMP) WHERE updated_at IS NULL"))
+        connection.execute(text("ALTER TABLE order_room ALTER COLUMN status SET DEFAULT 'CHỜ XEM'"))
+        connection.execute(text("ALTER TABLE order_room ALTER COLUMN status SET NOT NULL"))
+
+
+ensure_order_room_columns()
 
 # --- PYDANTIC SCHEMAS ---
 class UnifiedLoginSchema(BaseModel):
@@ -267,6 +283,7 @@ class OrderRoomCreateUpdateSchema(BaseModel):
     landlord_phone: Optional[str] = None
     room_code: str = Field(..., min_length=6, max_length=6, description="Mã phòng 6 ký tự")
     viewing_time: Optional[datetime] = None
+    status: Optional[str] = "CHỜ XEM"
 
     @validator("tenant_phone", pre=True)
     def validate_tenant_phone(cls, value):
@@ -284,6 +301,13 @@ class OrderRoomCreateUpdateSchema(BaseModel):
             raise ValueError("Số điện thoại chủ nhà không hợp lệ.")
         return phone
 
+    @validator("status", pre=True)
+    def validate_status(cls, value):
+        status_value = str(value or "CHỜ XEM").strip().upper()
+        if status_value not in {"CHỜ XEM", "ĐÃ XEM", "ĐÃ THUÊ"}:
+            raise ValueError("Trạng thái đặt phòng không hợp lệ.")
+        return status_value
+
     @validator("room_code", pre=True)
     def normalize_room_code(cls, value):
         code = str(value or "").strip().upper()
@@ -295,6 +319,17 @@ class OrderRoomCreateUpdateSchema(BaseModel):
     def normalize_optional_id(cls, value):
         clean_value = str(value or "").strip()
         return clean_value or None
+
+
+class OrderRoomStatusUpdateSchema(BaseModel):
+    status: str
+
+    @validator("status", pre=True)
+    def validate_status(cls, value):
+        status_value = str(value or "").strip().upper()
+        if status_value not in {"CHỜ XEM", "ĐÃ XEM", "ĐÃ THUÊ"}:
+            raise ValueError("Trạng thái đặt phòng không hợp lệ.")
+        return status_value
 
 
 def cron_refresh_zalo_job():
@@ -329,24 +364,23 @@ def get_db():
     finally:
         db.close()
 
-def get_current_user(
-    x_user_phone: str = Header(None, alias="X-User-Phone"),
-    db: Session = Depends(get_db)
-) -> UserWeb:
-    if not x_user_phone:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Vui lòng cung cấp số điện thoại hoặc thông tin xác thực!"
-        )
-    clean_phone = x_user_phone if x_user_phone == "adminpro" else format_national_phone(x_user_phone)
-    user = db.query(UserWeb).filter(UserWeb.phone == clean_phone).first()
-    print(f"user: {user}")
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="Không tìm thấy thông tin người dùng!"
-        )
-    return user
+#def get_current_user(
+#    x_user_phone: str = Header(None, alias="X-User-Phone"),
+#    db: Session = Depends(get_db)
+#) -> UserWeb:
+#    if not x_user_phone:
+#        raise HTTPException(
+#            status_code=status.HTTP_401_UNAUTHORIZED,
+#            detail="Vui lòng cung cấp số điện thoại hoặc thông tin xác thực!"
+#        )
+#    clean_phone = x_user_phone if x_user_phone == "adminpro" else format_national_phone(x_user_phone)
+#    user = db.query(UserWeb).filter(UserWeb.phone == clean_phone).first()
+#    if not user:
+#        raise HTTPException(
+#            status_code=status.HTTP_404_NOT_FOUND,
+#            detail="Không tìm thấy thông tin người dùng!"
+#        )
+#    return user
 
 # --- CORE UTILITY FUNCTIONS ---
 def format_national_phone(phone_str: str, default_region: str = "VN") -> str:
@@ -582,12 +616,12 @@ def format_room_search_message(room: dict, position: int) -> str:
         lines.append(f"✅ Tiện nghi: {', '.join(amenities)}")
 
     if room_code:
-        lines.append(f"👉 Đặt lịch xem phòng: nhắn “Đặt lịch {room_code}”")
+        lines.append(f"👉 Đặt lịch: nhắn “Đặt lịch {room_code}”")
     else:
         lines.append("👉 Nhắn OA để được tư vấn phòng này.")
     message = "\n".join(lines)
-
-    return message
+    # Loại bỏ các đường gạch dài bị chèn trước emoji khi format/paste source.
+    return re.sub(r"(?m)^\s*[-–—_]{5,}\s*", "", message).strip()
 
 
 def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
@@ -833,7 +867,6 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         if phone in ["", "none", "null"]:
             phone = landlord_phone
         phone = format_national_phone(phone)
-        print(f"phone : {phone}")
         if not re.fullmatch(r"0[35789][0-9]{8}", phone or ""):
             if type_process == "EXCEL":
                 return f"❌ Dòng {current_excel_row}: landlord_phone là trường bắt buộc và phải là số điện thoại Việt Nam hợp lệ."
@@ -1158,6 +1191,9 @@ def ai_validate_and_extract_room_batch(rows_list: List[dict]) -> List[Optional[d
     # Trả về danh sách Mặc định nếu tất cả Model/Retry đều thất bại (Tránh văng crash ứng dụng)
     return [None] * len(rows_list)
 
+import os
+import requests
+import pandas as pd
 
 def process_excel_file(file_url: str, sender_id: str) -> str:
     temp_file = "temp_rooms.xlsx"

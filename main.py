@@ -7,7 +7,7 @@ import bcrypt
 import pandas as pd
 import uvicorn
 from typing import Optional
-from fastapi import FastAPI, Request, BackgroundTasks, UploadFile, File, HTTPException, Depends, status
+from fastapi import FastAPI, Request, BackgroundTasks, UploadFile, File, HTTPException, Depends, Query, status
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
@@ -61,7 +61,14 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 @app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard(request: Request):
-    return templates.TemplateResponse(request=request, name="admin.html", context={"ZALO_OA_ID": ZALO_OA_ID or ""})
+    zalo_oa_url = os.getenv("ZALO_OA_URL", "").strip()
+    if not zalo_oa_url and ZALO_OA_ID:
+        zalo_oa_url = f"https://zalo.me/{str(ZALO_OA_ID).strip()}"
+    return templates.TemplateResponse(
+        request=request,
+        name="admin.html",
+        context={"ZALO_OA_URL": zalo_oa_url},
+    )
 
 @app.get("/health")
 def health_check():
@@ -252,7 +259,11 @@ async def change_password(payload: AdminChangePasswordSchema, db: Session = Depe
     return {"status": "success", "message": "Đổi mật khẩu thành công!"}
 
 @app.post("/api/rooms/upload-excel")
-async def upload_excel_rooms(file: UploadFile = File(...), user: Principal = Depends(get_current_user), db: Session = Depends(get_db)):
+async def upload_excel_rooms(
+    file: UploadFile = File(...),
+    user: Principal = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     if not file.filename.endswith((".xlsx", ".xls", ".csv")):
         raise HTTPException(status_code=400, detail="Vui lòng tải lên tệp .xlsx, .xls hoặc .csv!")
 
@@ -296,13 +307,14 @@ async def upload_excel_rooms(file: UploadFile = File(...), user: Principal = Dep
             raw_address = str(extracted.get("address") or "").strip()
 
             if not raw_address or raw_address.lower() in ["[chưa cập nhật]", "none", "null", "chưa rõ", ""]:
+                print(f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Thiếu hoặc sai địa chỉ.")
                 failed_rows_details.append({"row": current_excel_row, "reason": "Thiếu hoặc sai địa chỉ"})
                 continue
-            
+
             # Kiểm tra lưu DB (hàm trả về None/"" nếu thành công, trả về string lỗi nếu thất bại)
             if user.role == "SUPER_ADMIN":
-                excel_owner_phone = extracted.get("landlord_phone")  
-                if not excel_owner_phone or str(excel_owner_phone).strip().lower() in ["none", "null", ""]:
+                excel_owner_phone = extracted.get("landlord_phone")
+                if not excel_owner_phone or str(excel_owner_phone).strip().lower() in {"none", "null", ""}:
                     excel_owner_phone = get_phone_by_user_id(db, "ADMIN_SUPER")
             else:
                 excel_owner_phone = user.username
@@ -398,7 +410,9 @@ def _serialize_order(order: OrderRoom) -> dict:
         "landlord_phone": order.landlord_phone,
         "room_code": order.room_code,
         "viewing_time": order.viewing_time.isoformat() if order.viewing_time else None,
+        "status": order.status,
         "created_at": order.created_at.isoformat() if order.created_at else None,
+        "updated_at": order.updated_at.isoformat() if order.updated_at else None,
     }
 
 
@@ -423,12 +437,30 @@ def _get_room_by_code(room_code: str) -> dict:
     return records[0].payload
 
 
-def _prepare_order_data(data: OrderRoomCreateUpdateSchema, db: Session) -> dict:
+def _normalise_principal_phone(user: Principal) -> str:
+    phone = format_national_phone(str(user.username or "").strip())
+    if not re.fullmatch(r"0[35789][0-9]{8}", phone):
+        raise HTTPException(status_code=403, detail="Tài khoản chưa có số điện thoại hợp lệ.")
+    return phone
+
+
+def _prepare_order_data(
+    data: OrderRoomCreateUpdateSchema,
+    db: Session,
+    forced_landlord_phone: Optional[str] = None,
+) -> dict:
     order_data = data.model_dump() if hasattr(data, "model_dump") else data.dict()
     room_data = _get_room_by_code(order_data["room_code"])
+    room_landlord_phone = format_national_phone(str(room_data.get("landlord_phone") or "").strip())
+    if forced_landlord_phone:
+        if room_landlord_phone != forced_landlord_phone:
+            raise HTTPException(status_code=403, detail="Bạn chỉ được cập nhật đơn của phòng thuộc tài khoản mình.")
+        order_data["landlord_phone"] = forced_landlord_phone
+        order_data["landlord_zalo_id"] = get_user_id_by_phone(db, forced_landlord_phone)
+    else:
+        order_data["landlord_phone"] = order_data.get("landlord_phone") or room_landlord_phone
+        order_data["landlord_zalo_id"] = order_data.get("landlord_zalo_id") or get_user_id_by_phone(db, order_data.get("landlord_phone"))
     order_data["tenant_zalo_id"] = order_data.get("tenant_zalo_id") or get_user_id_by_phone(db, order_data["tenant_phone"])
-    order_data["landlord_phone"] = order_data.get("landlord_phone") or room_data.get("landlord_phone")
-    order_data["landlord_zalo_id"] = order_data.get("landlord_zalo_id") or get_user_id_by_phone(db, order_data.get("landlord_phone"))
     return order_data
 
 
@@ -437,18 +469,26 @@ def get_admin_orders(
     room_code: Optional[str] = None,
     tenant_phone: Optional[str] = None,
     landlord_phone: Optional[str] = None,
+    order_status: Optional[str] = Query(default=None, alias="status"),
     limit: int = 100,
     offset: int = 0,
     db: Session = Depends(get_db),
-    user: Principal = Depends(require_admin),
+    user: Principal = Depends(get_current_user),
 ):
     query = db.query(OrderRoom)
+    if user.role != "SUPER_ADMIN":
+        query = query.filter(OrderRoom.landlord_phone == _normalise_principal_phone(user))
     if room_code:
         query = query.filter(OrderRoom.room_code.ilike(f"%{room_code.strip()}%"))
     if tenant_phone:
         query = query.filter(OrderRoom.tenant_phone.ilike(f"%{tenant_phone.strip()}%"))
-    if landlord_phone:
+    if landlord_phone and user.role == "SUPER_ADMIN":
         query = query.filter(OrderRoom.landlord_phone.ilike(f"%{landlord_phone.strip()}%"))
+    if order_status:
+        normalized_status = order_status.strip().upper()
+        if normalized_status not in {"CHỜ XEM", "ĐÃ XEM", "ĐÃ THUÊ"}:
+            raise HTTPException(status_code=400, detail="Trạng thái lọc không hợp lệ.")
+        query = query.filter(OrderRoom.status == normalized_status)
     safe_limit = min(max(limit, 1), 200)
     safe_offset = max(offset, 0)
     total = query.count()
@@ -488,7 +528,8 @@ def update_admin_order(
     db: Session = Depends(get_db),
     user: Principal = Depends(require_admin),
 ):
-    order = db.query(OrderRoom).filter(OrderRoom.id == order_id).first()
+    query = db.query(OrderRoom).filter(OrderRoom.id == order_id)
+    order = query.first()
     if not order:
         raise HTTPException(status_code=404, detail="Không tìm thấy đơn đặt phòng.")
     order_data = _prepare_order_data(data, db)
@@ -509,6 +550,33 @@ def update_admin_order(
         raise HTTPException(status_code=500, detail="Không thể cập nhật đơn đặt phòng.") from exc
     write_audit_log(user.username, "ORDER_UPDATE", order.id, {"room_code": order.room_code})
     return {"status": "success", "message": "Cập nhật đơn đặt phòng thành công.", "data": _serialize_order(order)}
+
+
+@app.patch("/api/orders/{order_id}/status")
+def update_order_status(
+    order_id: str,
+    data: OrderRoomStatusUpdateSchema,
+    db: Session = Depends(get_db),
+    user: Principal = Depends(get_current_user),
+):
+    query = db.query(OrderRoom).filter(OrderRoom.id == order_id)
+    if user.role != "SUPER_ADMIN":
+        query = query.filter(OrderRoom.landlord_phone == _normalise_principal_phone(user))
+        if data.status not in {"ĐÃ XEM", "ĐÃ THUÊ"}:
+            raise HTTPException(status_code=403, detail="User chỉ được cập nhật trạng thái ĐÃ XEM hoặc ĐÃ THUÊ.")
+    order = query.first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Không tìm thấy đơn đặt phòng.")
+    order.status = data.status
+    order.updated_at = datetime.utcnow()
+    try:
+        db.commit()
+        db.refresh(order)
+    except Exception as exc:
+        db.rollback()
+        raise HTTPException(status_code=500, detail="Không thể cập nhật trạng thái đặt phòng.") from exc
+    write_audit_log(user.username, "ORDER_STATUS_UPDATE", order.id, {"status": order.status})
+    return {"status": "success", "message": "Cập nhật trạng thái thành công.", "data": _serialize_order(order)}
 
 
 @app.delete("/api/admin/orders/{order_id}")

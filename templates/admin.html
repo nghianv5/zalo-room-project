@@ -45,7 +45,7 @@
             <button onclick="showPage('rooms')" class="rounded bg-blue-600 px-3 py-2 text-xs font-bold text-white">
               🏠 Phòng
             </button>
-            <button id="ordersTab" onclick="showPage('orders')" class="hidden rounded bg-violet-600 px-3 py-2 text-xs font-bold text-white">
+            <button id="ordersTab" onclick="showPage('orders')" class="rounded bg-violet-600 px-3 py-2 text-xs font-bold text-white">
               📅 Đặt phòng
             </button>
             <button onclick="openExcelModal()" class="rounded bg-emerald-600 px-3 py-2 text-xs font-bold text-white">
@@ -152,14 +152,20 @@
             <b>
               Quản lý đặt phòng
             </b>
-            <button onclick="openOrder()" class="rounded bg-violet-600 px-3 py-2 text-xs font-bold text-white">
+            <button id="addOrderBtn" onclick="openOrder()" class="rounded bg-violet-600 px-3 py-2 text-xs font-bold text-white">
               + Thêm đơn
             </button>
           </div>
-          <div class="grid gap-2 md:grid-cols-4">
+          <div class="grid gap-2 md:grid-cols-5">
             <input id="ofCode" class="rounded border p-2" placeholder="Mã phòng">
             <input id="ofTenant" class="rounded border p-2" placeholder="SĐT người thuê">
             <input id="ofLandlord" class="rounded border p-2" placeholder="SĐT chủ nhà">
+            <select id="ofStatus" class="rounded border p-2">
+              <option value="">Tất cả trạng thái</option>
+              <option>CHỜ XEM</option>
+              <option>ĐÃ XEM</option>
+              <option>ĐÃ THUÊ</option>
+            </select>
             <button onclick="loadOrders()" class="rounded bg-violet-600 p-2 font-bold text-white">
               Tìm kiếm
             </button>
@@ -180,6 +186,9 @@
                 </th>
                 <th class="p-3">
                   Lịch xem
+                </th>
+                <th class="p-3">
+                  Trạng thái
                 </th>
                 <th class="p-3">
                   Hệ thống
@@ -361,6 +370,14 @@
             Thời gian xem
             <input id="oViewing" type="datetime-local" class="input">
           </label>
+          <label>
+            Trạng thái
+            <select id="oStatus" class="input">
+              <option>CHỜ XEM</option>
+              <option>ĐÃ XEM</option>
+              <option>ĐÃ THUÊ</option>
+            </select>
+          </label>
         </div>
         <div class="mt-5 flex justify-end gap-2">
           <button type="button" onclick="modal('orderModal',false)" class="rounded border px-4 py-2">
@@ -424,9 +441,16 @@
         </label>
         <div class="mb-4 rounded-lg border border-blue-100 bg-blue-50 p-3 text-center">
           <p class="mb-2 text-xs font-medium text-blue-800">
-            Quét mã để mở Zalo OA và gửi: OTP sdt của bạn (VD: OTP 0987628347)
+            Quét mã để mở Zalo OA và gửi: OTP số điện thoại của bạn (VD: OTP 0987628347)
           </p>
-          <img id="zaloQR" alt="Mã QR Zalo OA" class="mx-auto h-32 w-32 rounded border bg-white p-1">
+          <a id="openZaloOA" href="#" target="_blank" rel="noopener noreferrer" class="block">
+            <img id="zaloQR" alt="Mã QR Zalo OA" class="mx-auto h-32 w-32 rounded border bg-white p-1">
+          </a>
+          <button type="button" onclick="openConfiguredZaloOA()" class="mt-2 text-sm font-bold text-blue-700 underline">
+            Mở trực tiếp Zalo OA
+          </button>
+          <p id="zaloQRMsg" class="mt-2 hidden text-xs text-red-700">
+          </p>
         </div>
         <label class="text-sm font-semibold">
           2. Mã OTP nhận từ Zalo
@@ -452,7 +476,7 @@
       .input{margin-top:.25rem;width:100%;border:1px solid #cbd5e1;border-radius:.375rem;padding:.5rem}.input:focus{outline:2px solid #93c5fd}
     </style>
     <script>
-      const OA="{{ ZALO_OA_ID }}",$=id=>document.getElementById(id),roomFields=["room_code","address","room_name","price","floor","room_size","max_occupants","move_in_date","status","landlord_phone","is_private_bathroom","has_ac","has_heater","has_washer","allow_pets","has_balcony","has_window","has_fingerprint_lock","bed","wardrobe","parking_info","other_amenities","service_fees"];
+      const ZALO_OA_URL={{ ZALO_OA_URL | tojson }},$=id=>document.getElementById(id),roomFields=["room_code","address","room_name","price","floor","room_size","max_occupants","move_in_date","status","landlord_phone","is_private_bathroom","has_ac","has_heater","has_washer","allow_pets","has_balcony","has_window","has_fingerprint_lock","bed","wardrobe","parking_info","other_amenities","service_fees"];
       let rooms=[],orders=[];
       const esc=v=>String(v??"").replace(/[&<>"']/g,c=>( {
           "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
@@ -509,7 +533,10 @@
           if(ok) {
               let role=localStorage.getItem("userRole")||"USER";
               $("loginInfo").textContent=`${localStorage.getItem("adminUsername")} · ${role}`;
-              $("ordersTab").classList.toggle("hidden",role!=="SUPER_ADMIN");
+              $("ordersTab").classList.remove("hidden");
+              $("addOrderBtn").classList.toggle("hidden",role!=="SUPER_ADMIN");
+              $("ofLandlord").readOnly=role!=="SUPER_ADMIN";
+              $("ofLandlord").value=role!=="SUPER_ADMIN"?(localStorage.getItem("username")||""):"";
               showPage("rooms")
           }
       }
@@ -657,14 +684,19 @@
               limit:"200"
           }
           );
-          [["room_code","ofCode"],["tenant_phone","ofTenant"],["landlord_phone","ofLandlord"]].forEach(([k,id])=> {
+          [["room_code","ofCode"],["tenant_phone","ofTenant"],["landlord_phone","ofLandlord"],["status","ofStatus"]].forEach(([k,id])=> {
               $(id).value.trim()&&p.set(k,$(id).value.trim())
           }
           );
           let r=await api(`/api/admin/orders?${p}`),d=await data(r);
           if(!r.ok)return alert(err(d));
           orders=Array.isArray(d.data)?d.data:[];
-          $("orderBody").innerHTML=orders.length?orders.map(o=>`<tr class="border-t"><td class="p-3 font-bold">${val(o.room_code)}</td><td class="p-3">📞 ${val(o.tenant_phone)}<br>Zalo: ${val(o.tenant_zalo_id)}</td><td class="p-3">📞 ${val(o.landlord_phone)}<br>Zalo: ${val(o.landlord_zalo_id)}</td><td class="p-3">${val(o.viewing_time)}</td><td class="p-3">ID: ${val(o.id)}<br>Tạo: ${val(o.created_at)}</td><td class="p-3"><button onclick="editOrder('${esc(o.id)}')" class="rounded bg-blue-100 px-3 py-1">Sửa</button> <button onclick="deleteOrder('${esc(o.id)}')" class="rounded bg-red-100 px-3 py-1">Xóa</button></td></tr>`).join(""):'<tr><td colspan="6" class="p-6 text-center">Không có đơn đặt phòng</td></tr>'
+          const isSuperAdmin=localStorage.getItem("userRole")==="SUPER_ADMIN";
+          $("orderBody").innerHTML=orders.length?orders.map(o=> {
+              const userStatusAction=`<div class="flex min-w-[210px] gap-1"><select class="rounded border p-1"><option value="" disabled ${!["ĐÃ XEM","ĐÃ THUÊ"].includes(o.status)?"selected":""}>Chọn trạng thái</option><option ${o.status==="ĐÃ XEM"?"selected":""}>ĐÃ XEM</option><option ${o.status==="ĐÃ THUÊ"?"selected":""}>ĐÃ THUÊ</option></select><button onclick="updateOrderStatus('${esc(o.id)}',this.previousElementSibling.value)" class="rounded bg-emerald-600 px-2 py-1 font-bold text-white">Cập nhật</button></div>`;
+              const adminActions=`<button onclick="editOrder('${esc(o.id)}')" class="rounded bg-blue-100 px-3 py-1">Sửa</button> <button onclick="deleteOrder('${esc(o.id)}')" class="rounded bg-red-100 px-3 py-1">Xóa</button>`;
+              return`<tr class="border-t"><td class="p-3 font-bold">${val(o.room_code)}</td><td class="p-3">📞 ${val(o.tenant_phone)}<br>Zalo: ${val(o.tenant_zalo_id)}</td><td class="p-3">📞 ${val(o.landlord_phone)}<br>Zalo: ${val(o.landlord_zalo_id)}</td><td class="p-3">${val(o.viewing_time)}</td><td class="p-3 font-bold text-violet-700">${val(o.status)}</td><td class="p-3">ID: ${val(o.id)}<br>Tạo: ${val(o.created_at)}<br>Cập nhật: ${val(o.updated_at)}</td><td class="p-3">${isSuperAdmin?adminActions:userStatusAction}</td></tr>`
+          }).join(""):'<tr><td colspan="7" class="p-6 text-center">Không có đơn đặt phòng</td></tr>'
       }
       function openOrder(o=null) {
           document.querySelector("#orderModal form").reset();
@@ -676,8 +708,13 @@
               $("oTenantZalo").value=o.tenant_zalo_id||"";
               $("oLandlordPhone").value=o.landlord_phone||"";
               $("oLandlordZalo").value=o.landlord_zalo_id||"";
-              $("oViewing").value=o.viewing_time?o.viewing_time.slice(0,16):""
+              $("oViewing").value=o.viewing_time?o.viewing_time.slice(0,16):"";
+              $("oStatus").value=o.status||"CHỜ XEM"
           }
+          const isSuperAdmin=localStorage.getItem("userRole")==="SUPER_ADMIN";
+          $("oLandlordPhone").readOnly=!isSuperAdmin;
+          $("oLandlordZalo").readOnly=!isSuperAdmin;
+          if(!isSuperAdmin)$("oLandlordPhone").value=localStorage.getItem("username")||"";
           modal("orderModal",true)
       }
       function editOrder(id) {
@@ -689,7 +726,7 @@
           busy("orderSave",true);
           try {
               let id=$("orderId").value,p= {
-                  room_code:$("oCode").value.trim(),tenant_phone:$("oTenantPhone").value.trim(),tenant_zalo_id:$("oTenantZalo").value.trim()||null,landlord_phone:$("oLandlordPhone").value.trim()||null,landlord_zalo_id:$("oLandlordZalo").value.trim()||null,viewing_time:$("oViewing").value||null
+                  room_code:$("oCode").value.trim(),tenant_phone:$("oTenantPhone").value.trim(),tenant_zalo_id:$("oTenantZalo").value.trim()||null,landlord_phone:$("oLandlordPhone").value.trim()||null,landlord_zalo_id:$("oLandlordZalo").value.trim()||null,viewing_time:$("oViewing").value||null,status:$("oStatus").value
               }
               ,r=await api(id?`/api/admin/orders/${encodeURIComponent(id)}`:"/api/admin/orders", {
                   method:id?"PUT":"POST",headers: {
@@ -713,6 +750,14 @@
           ),d=await data(r);
           if(!r.ok)return alert(err(d));
           loadOrders()
+      }
+      async function updateOrderStatus(id,status) {
+          if(!["ĐÃ XEM","ĐÃ THUÊ"].includes(status))return alert("Vui lòng chọn ĐÃ XEM hoặc ĐÃ THUÊ.");
+          let r=await api(`/api/orders/${encodeURIComponent(id)}/status`, {
+              method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status})
+          }),d=await data(r);
+          if(!r.ok)return alert(err(d));
+          await loadOrders()
       }
       async function changePassword(e) {
           e.preventDefault();
@@ -755,7 +800,6 @@
               busy("excelSave",false)
           }
       }
-	  const ZALO_OA_ID = "{{ ZALO_OA_ID }}";
       function switchToRegister() {
           $("loginModal").classList.add("hidden");
           $("regPhone").value="";
@@ -763,17 +807,33 @@
           $("regPass").value="";
           $("registerMsg").textContent="";
           $("registerMsg").className="mb-3 hidden rounded p-2 text-sm";
-
-		  document.getElementById('loginModal').classList.add('hidden');
-		  document.getElementById('registerModal').classList.remove('hidden');
-			
-			// Tạo link Zalo OA
-		  const zaloUrl = `https://zalo.me/${ZALO_OA_ID}`;
-			
-			// Đưa link Zalo vào API tạo QR (dùng encodeURIComponent đúng cách)
-		  document.getElementById('zaloQR').src = `https://api.qrserver.com/v1/create-qr-code/?size=150x150&data=${encodeURIComponent(zaloUrl)}`;
-		  
+          configureZaloQR();
           modal("registerModal",true)
+      }
+      function getConfiguredZaloOAUrl() {
+          const value=String(ZALO_OA_URL||"").trim();
+          if(!/^https:\/\/zalo\.me\/.+/i.test(value))return "";
+          return value
+      }
+      function configureZaloQR() {
+          const zaloUrl=getConfiguredZaloOAUrl();
+          const message=$("zaloQRMsg");
+          if(!zaloUrl) {
+              $("zaloQR").removeAttribute("src");
+              $("openZaloOA").removeAttribute("href");
+              message.textContent="Chưa cấu hình đúng ZALO_OA_URL trên Render.";
+              message.classList.remove("hidden");
+              return
+          }
+          $("openZaloOA").href=zaloUrl;
+          $("zaloQR").src=`https://api.qrserver.com/v1/create-qr-code/?size=220x220&data=${encodeURIComponent(zaloUrl)}`;
+          message.textContent="";
+          message.classList.add("hidden")
+      }
+      function openConfiguredZaloOA() {
+          const zaloUrl=getConfiguredZaloOAUrl();
+          if(!zaloUrl)return alert("Chưa cấu hình đúng ZALO_OA_URL trên Render.");
+          window.location.href=zaloUrl
       }
       function switchToLogin() {
           modal("registerModal",false);
