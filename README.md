@@ -12,6 +12,8 @@
 
 Không chạy nhiều worker có scheduler riêng. Khóa Redis đã hạn chế refresh token trùng, nhưng mô hình ổn định nhất vẫn là một worker web hoặc tách scheduler thành tiến trình riêng.
 
+`ZALO_APP_ID` phải là App ID của ứng dụng liên kết OA trên Zalo Developers. Không dùng `ZALO_OA_ID` hoặc phần số trong link OA thay cho App ID. `ZALO_SECRET_KEY` phải thuộc cùng ứng dụng với `ZALO_APP_ID`; refresh token cũng phải được cấp cho đúng cặp ứng dụng/OA đó. Route `/` hỗ trợ cả GET và HEAD để health check của Render nhận HTTP 200.
+
 ## Kiểm thử
 
 Chạy `python -m pytest -q`. Endpoint `/health` kiểm tra PostgreSQL, Redis và Qdrant.

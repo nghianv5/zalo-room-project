@@ -10,7 +10,8 @@ def _env_int(name: str, default: int, minimum: int) -> int:
 
 class Config:
     ROOM_INDEX = os.getenv("ROOM_INDEX", "rooms_v01")
-    APP_ID = os.getenv("ZALO_OA_ID", "")
+    APP_ID = os.getenv("ZALO_APP_ID", "").strip()
+    OA_ID = os.getenv("ZALO_OA_ID", "").strip()
     SECRET_KEY = os.getenv("SESSION_SECRET", "")
     ZALO_ADMIN_ID = os.getenv("ZALO_ADMIN_ID", "").strip()
     ZALO_ERROR_ALERTS_ENABLED = os.getenv("ZALO_ERROR_ALERTS_ENABLED", "true").lower() in {"1", "true", "yes", "on"}

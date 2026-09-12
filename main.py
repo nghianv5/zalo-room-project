@@ -106,11 +106,14 @@ app.add_middleware(
 )
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
+
+@app.api_route("/", methods=["GET", "HEAD"])
+def root_status():
+    return {"status": "ok", "service": "zalo-room-app"}
+
 @app.get("/admin", response_class=HTMLResponse)
 def admin_dashboard(request: Request):
     zalo_oa_url = os.getenv("ZALO_OA_URL", "").strip()
-    if not zalo_oa_url and ZALO_OA_ID:
-        zalo_oa_url = f"https://zalo.me/{str(ZALO_OA_ID).strip()}"
     return templates.TemplateResponse(
         request=request,
         name="admin.html",

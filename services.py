@@ -45,6 +45,7 @@ app.mount("/static", StaticFiles(directory="static"), name="static")
 
 # --- CẤU HÌNH MÔI TRƯỜNG & KHỞI TẠO SERVICES ---
 ZALO_OA_ID = os.environ.get("ZALO_OA_ID")
+ZALO_APP_ID = os.environ.get("ZALO_APP_ID")
 ZALO_ACCESS_TOKEN = os.environ.get("ZALO_ACCESS_TOKEN")
 ZALO_SECRET_KEY = os.environ.get("ZALO_SECRET_KEY")
 ZALO_REFRESH_TOKEN = os.environ.get("ZALO_REFRESH_TOKEN")
@@ -335,6 +336,12 @@ class OrderRoomStatusUpdateSchema(BaseModel):
 
 def cron_refresh_zalo_job():
     print("🔄 [REFRESH TOKEN ZALO] Bắt đầu tự động...", flush=True) # Thêm flush=True
+    if not str(ZALO_APP_ID or "").strip() or not str(ZALO_SECRET_KEY or "").strip():
+        report_error(
+            "Bỏ qua refresh Zalo vì thiếu ZALO_APP_ID hoặc ZALO_SECRET_KEY",
+            context="cron_refresh_zalo_job",
+        )
+        return
     lock_key = "lock:zalo_token_refresh"
     lock_acquired = False
     try:
@@ -2110,14 +2117,20 @@ def search_rooms_with_filter(
 
 def refresh_zalo_tokens(db):
     current_token_entry = get_current_tokens_from_db(db)
-    current_refresh_token = current_token_entry["refresh_token"]
+    current_refresh_token = str((current_token_entry or {}).get("refresh_token") or "").strip()
     
-    app_id_clean = str(ZALO_OA_ID).strip() if ZALO_OA_ID else ""
+    app_id_clean = str(ZALO_APP_ID).strip() if ZALO_APP_ID else ""
     secret_key_clean = str(ZALO_SECRET_KEY).strip() if ZALO_SECRET_KEY else ""
 
     # Kiểm tra an toàn trước khi gọi API
-    if not app_id_clean or app_id_clean.lower() == "none":
-        raise Exception("❌ Thiếu ZALO_OA_ID trong biến môi trường!")
+    if not app_id_clean:
+        raise ValueError("Thiếu ZALO_APP_ID trong biến môi trường.")
+    if not app_id_clean.isdigit():
+        raise ValueError("ZALO_APP_ID phải là App ID dạng số lấy từ ứng dụng trên Zalo Developers.")
+    if not secret_key_clean:
+        raise ValueError("Thiếu ZALO_SECRET_KEY trong biến môi trường.")
+    if not current_refresh_token:
+        raise ValueError("Không có Zalo refresh token trong DB hoặc biến môi trường.")
 
     oauth_url = "https://oauth.zaloapp.com/v4/oa/access_token"
     headers = {
@@ -2130,16 +2143,22 @@ def refresh_zalo_tokens(db):
         "grant_type": "refresh_token"
     }
     
-    response = requests.post(oauth_url, headers=headers, data=data)
-    res_json = response.json()
+    response = requests.post(oauth_url, headers=headers, data=data, timeout=15)
+    try:
+        res_json = response.json()
+    except ValueError as exc:
+        raise RuntimeError(f"Zalo OAuth trả dữ liệu không hợp lệ (HTTP {response.status_code}).") from exc
     
-    if "access_token" in res_json:
+    if res_json.get("access_token") and res_json.get("refresh_token"):
         new_access_token = res_json["access_token"]
         new_refresh_token = res_json["refresh_token"]
         update_tokens_in_db(db, new_access_token, new_refresh_token)
         print("🎉 [ZALO OAUTH] Tự động Refresh Token và lưu DB thành công!", flush=True)
     else:
-        oauth_error = Exception(f"Zalo OAuth Error: {res_json.get('error_description', res_json)}")
+        oauth_error = RuntimeError(
+            f"Zalo OAuth Error {res_json.get('error')}: "
+            f"{res_json.get('error_description') or res_json.get('error_name') or 'Không xác định'}"
+        )
         report_error("Zalo OAuth không trả access token", oauth_error, "refresh_zalo_tokens")
         raise oauth_error
 
