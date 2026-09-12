@@ -22,6 +22,7 @@ from google.genai import types
 import cloudinary
 import cloudinary.uploader
 import string
+from error_reporting import report_error
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 import redis
@@ -95,7 +96,7 @@ try:
             vectors_config=VectorParams(size=VECTOR_SIZE, distance=Distance.COSINE)
         )
 except Exception as e:
-    print("❌ Lỗi khởi tạo Qdrant:", e)
+    report_error("Lỗi khởi tạo Qdrant", e, "services.startup")
 
 try:
     qdrant_client.create_payload_index(
@@ -347,7 +348,7 @@ def cron_refresh_zalo_job():
         refresh_zalo_tokens(db)
         print("✅ [REFRESH TOKEN ZALO] Thành công!", flush=True)
     except Exception as e:
-        print(f"❌ [REFRESH TOKEN ZALO ERROR]: {e}", flush=True)
+        report_error("Refresh token Zalo thất bại", e, "cron_refresh_zalo_job")
     finally:
         db.close()
         if lock_acquired:
@@ -679,7 +680,7 @@ def _refresh_zalo_token_after_invalid() -> str:
         finally:
             db.close()
     except Exception as exc:
-        print(f"❌ [ZALO TOKEN RECOVERY ERROR]: {exc}", flush=True)
+        report_error("Khôi phục Zalo access token thất bại", exc, "_refresh_zalo_token_after_invalid")
         return ""
     finally:
         if lock_acquired:
@@ -716,7 +717,7 @@ def send_zalo_message(
     finally:
         db.close()
     if not data_token or not data_token.get("access_token"):
-        print("❌ [ZALO ERROR]: Thiếu ZALO_ACCESS_TOKEN")
+        report_error("Thiếu Zalo access token để gửi tin nhắn", context="send_zalo_message", notify=False)
         return False
 
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
@@ -762,7 +763,7 @@ def send_zalo_message(
                 return False
         return True
     except Exception as e:
-        print("❌ [ZALO REQUEST EXCEPTION]:", e)
+        report_error("Gửi tin nhắn Zalo thất bại", e, "send_zalo_message", notify=False)
         return False
 
 
@@ -773,7 +774,7 @@ def write_audit_log(actor: str, action: str, target_id: str = None, details: dic
         audit_db.commit()
     except Exception as exc:
         audit_db.rollback()
-        print(f"⚠️ [AUDIT ERROR]: {exc}")
+        report_error("Ghi audit log thất bại", exc, "write_audit_log")
     finally:
         audit_db.close()
 
@@ -788,7 +789,7 @@ def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
             if url:
                 return url
         except Exception as e:
-            print(f"❌ [Cloudinary Error]: {e}, chuyển sang lưu local...")
+            report_error("Cloudinary upload thất bại; chuyển lưu local", e, "save_media_file")
 
     try:
         response = requests.get(zalo_media_url, timeout=15, stream=True)
@@ -802,7 +803,7 @@ def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
             server_domain = os.environ.get("SERVER_DOMAIN", "http://localhost:8000").rstrip("/")
             return f"{server_domain}/static/media/{filename}"
     except Exception as e:
-        print(f"❌ [Local Save Error]: {e}")
+        report_error("Lưu media local thất bại", e, "save_media_file")
     return zalo_media_url
 
 def get_text_embedding(text: str, retries: int = 3) -> List[float]:
@@ -829,7 +830,7 @@ def get_text_embedding(text: str, retries: int = 3) -> List[float]:
             if "embedding" in res and "values" in res["embedding"]:
                 return res["embedding"]["values"]
         except Exception as e:
-            print("❌ [REST FALLBACK ERROR]:", e)
+            report_error("Gemini embedding REST fallback thất bại", e, "get_text_embedding")
     return []
 
 def generate_content_with_retry(prompt: str, mime_type: str = "application/json", retries: int = 3) -> str:
@@ -937,7 +938,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         vector = get_text_embedding(text_to_embed)
         
         if not vector:
-            print(f"❌ [SYSTEM ERROR] Không thể tạo Vector Embedding cho phòng: {data.get('address')}")
+            report_error("Không thể tạo vector embedding cho phòng", context="upsert_room_to_db")
             if type_process == "NOT_EXCEL":
                 return f"Hệ thống AI Vector Embedding đang bận vui lòng thử lại sau"
             else:
@@ -1050,12 +1051,12 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
             mirror_db.commit()
         except Exception as mirror_error:
             mirror_db.rollback()
-            print(f"⚠️ [ROOM MIRROR ERROR]: {mirror_error}")
+            report_error("Đồng bộ room_records thất bại", mirror_error, "upsert_room_to_db")
         finally:
             mirror_db.close()
         return "SUCCESS"
     except Exception as e:
-        print("❌ [QDRANT UPSERT EXCEPTION]:", e)
+        report_error("Qdrant upsert phòng thất bại", e, "upsert_room_to_db")
         raise Exception(f"❌ [QDRANT UPSERT EXCEPTION]: {e}")
 
 def update_room_status_in_db(point_id: str, new_status: str) -> bool:
@@ -1075,7 +1076,7 @@ def update_room_status_in_db(point_id: str, new_status: str) -> bool:
         )
         return True
     except Exception as e:
-        print("❌ [UPDATE STATUS ERROR]:", e)
+        report_error("Cập nhật trạng thái phòng thất bại", e, "update_room_status_in_db")
         return False
 
 def ai_validate_and_extract_room_batch(rows_list: List[dict]) -> List[Optional[dict]]:
@@ -1283,7 +1284,7 @@ def process_excel_file(file_url: str, sender_id: str) -> str:
         return msg
 
     except Exception as e:
-        print("❌ [EXCEL PROCESS ERROR]:", e)
+        report_error("Xử lý file Excel thất bại", e, "process_excel_file")
         if os.path.exists(temp_file):
             os.remove(temp_file)
         return "Lỗi trong quá trình xử lý file Excel."
@@ -1648,7 +1649,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                 update_room_status_in_db(point_id=existing_point_id, new_status=new_status)
 
     except Exception as err:
-        print("❌ [AI Logic Exception]:", err)
+        report_error("Xử lý AI Zalo thất bại", err, "process_zalo_ai_logic")
         ai_reply = "Dạ hệ thống đang bận một chút, anh/chị chờ em vài giây rồi nhắn lại giúp em nhé!"
     if search_results_to_send:
         send_zalo_search_results(user_id, search_results_to_send)
@@ -1689,7 +1690,7 @@ def generate_unique_room_code() -> str:
 
         except Exception as e:
             # 💡 Xử lý lỗi kết nối DB: Không return ngay mà log lỗi và thử lại sau 0.5s
-            print(f"⚠️ Lỗi kết nối Qdrant khi kiểm tra room_code, đang thử lại... Chi tiết: {e}")
+            report_error("Kiểm tra room_code trên Qdrant thất bại", e, "generate_unique_room_code")
             return ""
 
 def process_room_booking(tenant_zalo_id: str, room_code: str, raw_message: str, db: Session) -> str:
@@ -1706,7 +1707,7 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, raw_message: str, 
             limit=1
         )
     except Exception as e:
-        print("❌ Lỗi truy vấn Qdrant:", e)
+        report_error("Truy vấn Qdrant khi đặt phòng thất bại", e, "process_room_booking")
         return "Dạ hệ thống đang gặp sự cố, vui lòng thử lại sau ít phút!"
 
     if not records:
@@ -1753,7 +1754,7 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, raw_message: str, 
         print(f"✅ Đã lưu đơn đặt phòng thành công: Order ID {new_order.id}")
     except Exception as e:
         db.rollback()
-        print(f"❌ Lỗi SQL khi chèn dữ liệu vào order_room: {e}")
+        report_error("Ghi order_room thất bại", e, "process_room_booking")
         return "Dạ hệ thống không thể khởi tạo đơn đặt phòng, vui lòng thử lại sau!"
     
     print(f"landlord_zalo_id: {landlord_zalo_id}")
@@ -1788,7 +1789,7 @@ def get_phone_by_user_id(db: Session, user_id: str) -> Optional[str]:
             return user.phone.strip()
         return None
     except Exception as e:
-        print(f"❌ Lỗi SQL khi lấy phone của user {user_id}: {e}")
+        report_error("Lấy số điện thoại người dùng thất bại", e, f"get_phone_by_user_id:{user_id}")
         return None
 
 def get_user_id_by_phone(db: Session, phone: str) -> Optional[str]:
@@ -1801,7 +1802,7 @@ def get_user_id_by_phone(db: Session, phone: str) -> Optional[str]:
             return user.user_id.strip()
         return None
     except Exception as e:
-        print(f"❌ Lỗi SQL khi lấy user_id của user {phone}: {e}")
+        report_error("Lấy Zalo user ID theo số điện thoại thất bại", e, "get_user_id_by_phone")
         return None
 
 def save_or_update_user_web(
@@ -1852,7 +1853,7 @@ def save_or_update_user_web(
 
     except Exception as e:
         db.rollback()  # Hoàn tác nếu có lỗi SQL
-        print(f"❌ Lỗi SQL khi lưu/cập nhật user_web: {e}")
+        report_error("Lưu hoặc cập nhật user_web thất bại", e, "save_or_update_user_web")
         raise e
         
         
@@ -1873,7 +1874,7 @@ def send_zalo_request(payload: dict) -> bool:
         db.close()
     access_token = str((token_data or {}).get("access_token") or "")
     if not access_token:
-        print("❌ [ZALO REQUEST]: Thiếu access token.")
+        report_error("Thiếu Zalo access token", context="send_zalo_request", notify=False)
         return False
 
     try:
@@ -1882,10 +1883,14 @@ def send_zalo_request(payload: dict) -> bool:
         if result.get("error") == 0:
             print(f"✅ Đã gửi Zalo request thành công tới: {recipient_id}")
             return True
-        print(f"❌ Lỗi Zalo request ({result.get('error')}): {result.get('message')}")
+        report_error(
+            f"Zalo request trả lỗi {result.get('error')}: {result.get('message')}",
+            context="send_zalo_request",
+            notify=False,
+        )
         return False
     except Exception as exc:
-        print(f"❌ Lỗi kết nối khi gửi Zalo request: {exc}")
+        report_error("Gửi Zalo request thất bại", exc, "send_zalo_request", notify=False)
         return False
         
 def is_phone_already_ordered(db: Session, tenant_phone: str, room_code: str = None) -> bool:
@@ -2094,7 +2099,7 @@ def search_rooms_with_filter(
             if rooms:
                 print(f"✅ [QDRANT FALLBACK]: Tìm thấy {len(rooms)} phòng bằng bộ lọc.")
         except Exception as exc:
-            print(f"❌ [SEARCH FILTER ERROR]: {type(exc).__name__}: {exc}")
+            report_error("Qdrant search fallback thất bại", exc, "search_rooms_by_filter")
             return []
 
     rooms.sort(key=parse_price_safe)
@@ -2134,8 +2139,9 @@ def refresh_zalo_tokens(db):
         update_tokens_in_db(db, new_access_token, new_refresh_token)
         print("🎉 [ZALO OAUTH] Tự động Refresh Token và lưu DB thành công!", flush=True)
     else:
-        print(f"❌ [ZALO Refresh access token False: ]: {res_json}", flush=True)
-        raise Exception(f"Zalo OAuth Error: {res_json.get('error_description', res_json)}")
+        oauth_error = Exception(f"Zalo OAuth Error: {res_json.get('error_description', res_json)}")
+        report_error("Zalo OAuth không trả access token", oauth_error, "refresh_zalo_tokens")
+        raise oauth_error
 
 def get_current_tokens_from_db(db: Session) -> dict:
     """
@@ -2188,7 +2194,7 @@ def update_tokens_in_db(db: Session, new_access_token: str, new_refresh_token: s
     except Exception as e:
         # Nếu có lỗi DB -> Rollback để tránh nghẽn/khóa connection pool
         db.rollback()
-        print(f"❌ [DATABASE ERROR]: Không thể lưu token vào DB: {e}", flush=True)
+        report_error("Không thể lưu Zalo token vào DB", e, "update_tokens_in_db")
         raise e
         
         

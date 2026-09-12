@@ -16,6 +16,12 @@ Không chạy nhiều worker có scheduler riêng. Khóa Redis đã hạn chế 
 
 Chạy `python -m pytest -q`. Endpoint `/health` kiểm tra PostgreSQL, Redis và Qdrant.
 
+## Log lỗi và cảnh báo Zalo Admin
+
+Lỗi được ghi vào `logs/app.log` theo cơ chế xoay vòng và exception nghiêm trọng được gửi tới Zalo Admin. `ZALO_ADMIN_ID` phải là **Zalo User ID của tài khoản quản trị đã từng tương tác với OA**, không phải OA ID hoặc App ID. Cấu hình bằng `ZALO_ADMIN_ID`, `ZALO_ERROR_ALERTS_ENABLED`, `ZALO_NOTIFY_HTTP_4XX`, `ZALO_ERROR_ALERT_COOLDOWN_SECONDS`, `LOG_FILE_PATH`, `LOG_MAX_BYTES` và `LOG_BACKUP_COUNT`. Mặc định không gửi lỗi HTTP 4xx để tránh spam do đăng nhập sai hoặc request sai; đặt `ZALO_NOTIFY_HTTP_4XX=true` nếu muốn nhận cả nhóm này. Super Admin có thể tải log hiện tại tại `GET /api/admin/logs/download` bằng access token. Token, mật khẩu, API key và mật khẩu PostgreSQL được che trước khi ghi/gửi.
+
+Render dùng filesystem tạm nếu chưa gắn Persistent Disk, vì vậy file log có thể mất sau lần deploy/restart; cảnh báo Zalo vẫn được gửi theo thời gian thực.
+
 ## Thay đổi dữ liệu
 
 Hai bảng `room_records` và `audit_logs` được tự tạo khi khởi động. Qdrant vẫn là nguồn tìm kiếm để không thay đổi chức năng cốt lõi; `room_records` là bản sao phục vụ sao lưu và phục hồi. Xóa phòng trên web đổi trạng thái thành `ĐÃ XÓA`, không xóa vật lý.
@@ -37,4 +43,4 @@ Tài khoản `SUPER_ADMIN` có tab **Đặt phòng** với các API:
 - `PUT /api/admin/orders/{order_id}`: sửa đơn.
 - `DELETE /api/admin/orders/{order_id}`: xóa đơn.
 
-API đặt phòng kiểm tra mã phòng trong Qdrant, chuẩn hóa số điện thoại, chống trùng người thuê/mã phòng và ghi audit log. Người dùng thường không được phép truy cập các API này.
+API đặt phòng kiểm tra mã phòng trong Qdrant, chuẩn hóa số điện thoại, chống trùng người thuê/mã phòng và ghi audit log. User thường chỉ xem đơn có `landlord_phone` trùng số đăng nhập và chỉ cập nhật trạng thái sang `ĐÃ XEM` hoặc `ĐÃ THUÊ`; Super Admin giữ quyền thêm, sửa và xóa toàn bộ đơn.

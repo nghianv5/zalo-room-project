@@ -8,7 +8,9 @@ import pandas as pd
 import uvicorn
 from typing import Optional
 from fastapi import FastAPI, Request, BackgroundTasks, UploadFile, File, HTTPException, Depends, Query, status
-from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse, JSONResponse
+from fastapi.exceptions import RequestValidationError
+from fastapi.encoders import jsonable_encoder
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,7 +21,10 @@ from services import *
 from security import Principal, create_session_token, enforce_rate_limit, get_current_user, require_admin, verify_zalo_webhook
 import sys
 from apscheduler.schedulers.background import BackgroundScheduler
+from apscheduler.events import EVENT_JOB_ERROR
 import logging
+from config import Config
+from error_reporting import configure_error_reporting, install_process_exception_hooks, report_error
 
 # Khởi tạo Scheduler
 scheduler = BackgroundScheduler()
@@ -27,6 +32,16 @@ scheduler.add_job(cron_refresh_zalo_job, 'interval', hours=6, next_run_time=date
 
 logging.basicConfig(level=logging.INFO)
 logging.getLogger('apscheduler').setLevel(logging.DEBUG)
+configure_error_reporting(send_zalo_message)
+install_process_exception_hooks()
+
+
+def _scheduler_error_listener(event) -> None:
+    if event.exception:
+        report_error("Tác vụ nền Scheduler thất bại", event.exception, f"scheduler:{event.job_id}")
+
+
+scheduler.add_listener(_scheduler_error_listener, EVENT_JOB_ERROR)
 
 # ĐỊNH NGHĨA LIFESPAN TRƯỚC
 @asynccontextmanager
@@ -43,6 +58,37 @@ async def lifespan(app: FastAPI):
 
 # TRUYỀN LIFESPAN VÀO FASTAPI APP
 app = FastAPI(lifespan=lifespan)
+
+
+@app.exception_handler(HTTPException)
+async def http_exception_handler(request: Request, exc: HTTPException):
+    report_error(
+        f"HTTP {exc.status_code}: {exc.detail}",
+        context=f"{request.method} {request.url.path}",
+        notify=exc.status_code >= 500 or Config.ZALO_NOTIFY_HTTP_4XX,
+    )
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.detail}, headers=exc.headers)
+
+
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
+    summary = "; ".join(
+        f"{'.'.join(map(str, item.get('loc', [])))}: {item.get('msg', 'invalid')}"
+        for item in exc.errors()[:10]
+    )
+    report_error(
+        f"Dữ liệu request không hợp lệ: {summary}",
+        exc,
+        f"{request.method} {request.url.path}",
+        notify=Config.ZALO_NOTIFY_HTTP_4XX,
+    )
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(exc.errors())})
+
+
+@app.exception_handler(Exception)
+async def unhandled_exception_handler(request: Request, exc: Exception):
+    report_error("Exception API chưa được xử lý", exc, f"{request.method} {request.url.path}")
+    return JSONResponse(status_code=500, content={"detail": "Lỗi hệ thống nội bộ."})
 
 
 
@@ -91,6 +137,14 @@ def health_check():
     if not all(checks.values()):
         raise HTTPException(status_code=503, detail=checks)
     return {"status": "ok", "checks": checks}
+
+
+@app.get("/api/admin/logs/download")
+def download_error_log(user: Principal = Depends(require_admin)):
+    log_path = os.path.abspath(Config.LOG_FILE_PATH)
+    if not os.path.isfile(log_path):
+        raise HTTPException(status_code=404, detail="Chưa có file log lỗi.")
+    return FileResponse(log_path, media_type="text/plain", filename="app-error.log")
 
 @app.get("/zalo_verifierCjNXTBZqO5H_qBfhZTypOtR2daEQj4iKE3Wn.html", response_class=PlainTextResponse)
 async def verify_zalo_specific_file():
@@ -720,7 +774,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                         return {"status": "success", "phone": extracted_phone}
                     
                     except Exception as e:
-                        print(f"❌ [DB ERROR]: {e}")
+                        report_error("Lưu số điện thoại từ webhook thất bại", e, f"zalo_user:{sender_id}")
                         return {"status": "error", "message": str(e)}
                     
             if "otp" in clean_message:
@@ -817,6 +871,8 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                 task_db = SessionLocal()
                 try:
                     process_zalo_ai_logic(text, media_items, sender_id, task_db)
+                except Exception as exc:
+                    report_error("Xử lý tin nhắn Zalo nền thất bại", exc, f"zalo_user:{sender_id}")
                 finally:
                     task_db.close()
             background_tasks.add_task(handle_zalo_message)
@@ -824,7 +880,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
     except HTTPException:
         raise
     except Exception as e:
-        print("❌ [Webhook Exception]:", e)
+        report_error("Webhook Zalo thất bại", e, f"event:{event_name}")
 
     return {"status": "success"}
 
