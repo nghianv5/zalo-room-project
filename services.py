@@ -832,6 +832,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         if phone in ["", "none", "null"]:
             phone = landlord_phone
         phone = format_national_phone(phone)
+        print(f"phone : {phone}")
         if not re.fullmatch(r"0[35789][0-9]{8}", phone or ""):
             if type_process == "EXCEL":
                 return f"❌ Dòng {current_excel_row}: landlord_phone là trường bắt buộc và phải là số điện thoại Việt Nam hợp lệ."
@@ -1156,9 +1157,6 @@ def ai_validate_and_extract_room_batch(rows_list: List[dict]) -> List[Optional[d
     # Trả về danh sách Mặc định nếu tất cả Model/Retry đều thất bại (Tránh văng crash ứng dụng)
     return [None] * len(rows_list)
 
-import os
-import requests
-import pandas as pd
 
 def process_excel_file(file_url: str, sender_id: str) -> str:
     temp_file = "temp_rooms.xlsx"
