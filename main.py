@@ -27,8 +27,8 @@ from config import Config
 from error_reporting import configure_error_reporting, install_process_exception_hooks, report_error
 
 # Khởi tạo Scheduler
-scheduler = BackgroundScheduler()
-scheduler.add_job(cron_refresh_zalo_job, 'interval', hours=6, next_run_time=datetime.now(), id='refresh_zalo_job', replace_existing=True) # 6 giờ chạy 1 lần
+scheduler = BackgroundScheduler(timezone=VN_TZ)
+scheduler.add_job(cron_refresh_zalo_job, 'interval', hours=6, next_run_time=datetime.now(VN_TZ), id='refresh_zalo_job', replace_existing=True) # 6 giờ chạy 1 lần
 
 logging.basicConfig(level=logging.INFO)
 logging.getLogger('apscheduler').setLevel(logging.DEBUG)
@@ -159,7 +159,7 @@ async def register_user(data: RegisterModel, request: Request, db: Session = Dep
     enforce_rate_limit(redis_client, f"register:{request.client.host if request.client else 'unknown'}", 10, 3600)
     if len(data.password) < 8:
         raise HTTPException(status_code=400, detail="Mật khẩu phải có tối thiểu 8 ký tự.")
-    now = datetime.now(timezone.utc)
+    now = vietnam_now()
     clean_phone = format_national_phone(data.phone)
     account = db.query(UserWeb).filter(UserWeb.phone == clean_phone).first()
 
@@ -170,8 +170,10 @@ async def register_user(data: RegisterModel, request: Request, db: Session = Dep
     if not account.otp:
         raise HTTPException(status_code=400, detail="Mã OTP không hợp lệ hoặc đã được sử dụng!")
 
-    expired_at_utc = account.expired_at.replace(tzinfo=timezone.utc) if account.expired_at.tzinfo is None else account.expired_at
-    if now > expired_at_utc:
+    expired_at_vn = account.expired_at
+    if expired_at_vn and expired_at_vn.tzinfo is not None:
+        expired_at_vn = expired_at_vn.astimezone(VN_TZ).replace(tzinfo=None)
+    if not expired_at_vn or now > expired_at_vn:
         account.otp = None
         db.commit()
         raise HTTPException(status_code=400, detail="Mã OTP đã hết hạn (quá 5 phút). Vui lòng lấy mã mới!")
@@ -183,7 +185,7 @@ async def register_user(data: RegisterModel, request: Request, db: Session = Dep
     hashed_password = bcrypt.hashpw(data.password.encode('utf-8'), salt).decode('utf-8')
     account.password = hashed_password
     account.otp = None
-    account.updated_at = datetime.utcnow()
+    account.updated_at = vietnam_now()
     db.commit()
 
     return {"status": "success", "message": "Đăng ký tài khoản thành công!"}
@@ -260,7 +262,7 @@ def _get_super_admin_account(db: Session, admin_username: str) -> Optional[UserW
 
 def _set_account_password(account: UserWeb, raw_password: str) -> None:
     account.password = bcrypt.hashpw(raw_password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
-    account.updated_at = datetime.utcnow()
+    account.updated_at = vietnam_now()
 
 
 @app.post("/api/login")
@@ -349,7 +351,7 @@ async def change_password(payload: AdminChangePasswordSchema, db: Session = Depe
 
     salt = bcrypt.gensalt()
     user_account.password = bcrypt.hashpw(new_password.encode('utf-8'), salt).decode('utf-8')
-    user_account.updated_at = datetime.utcnow()
+    user_account.updated_at = vietnam_now()
     db.commit()
     write_audit_log(user.username, "PASSWORD_CHANGE")
 
@@ -506,10 +508,10 @@ def _serialize_order(order: OrderRoom) -> dict:
         "landlord_zalo_id": order.landlord_zalo_id,
         "landlord_phone": order.landlord_phone,
         "room_code": order.room_code,
-        "viewing_time": order.viewing_time.isoformat() if order.viewing_time else None,
+        "viewing_time": vietnam_datetime_iso(order.viewing_time),
         "status": order.status,
-        "created_at": order.created_at.isoformat() if order.created_at else None,
-        "updated_at": order.updated_at.isoformat() if order.updated_at else None,
+        "created_at": vietnam_datetime_iso(order.created_at),
+        "updated_at": vietnam_datetime_iso(order.updated_at),
     }
 
 
@@ -606,7 +608,7 @@ def create_admin_order(
     ).first()
     if duplicate:
         raise HTTPException(status_code=409, detail="Số điện thoại này đã đặt phòng này.")
-    order = OrderRoom(id=str(uuid.uuid4()), **order_data, created_at=datetime.utcnow())
+    order = OrderRoom(id=str(uuid.uuid4()), **order_data, created_at=vietnam_now())
     try:
         db.add(order)
         db.commit()
@@ -665,7 +667,7 @@ def update_order_status(
     if not order:
         raise HTTPException(status_code=404, detail="Không tìm thấy đơn đặt phòng.")
     order.status = data.status
-    order.updated_at = datetime.utcnow()
+    order.updated_at = vietnam_now()
     try:
         db.commit()
         db.refresh(order)
@@ -786,7 +788,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                 if phone_match:
                     phone_number = format_national_phone(phone_match.group(1))
                     otp = str(random.randint(100000, 999999))
-                    now = datetime.utcnow()
+                    now = vietnam_now()
                     expired_at = now + timedelta(minutes=5)
 
                     existing_phone_record = db.query(UserWeb).filter(UserWeb.phone == phone_number).first()

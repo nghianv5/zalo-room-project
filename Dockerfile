@@ -3,7 +3,8 @@ FROM python:3.10-slim
 
 # 2. Ngăn Python tạo file .pyc và bật log trực tiếp ra console
 ENV PYTHONUNBUFFERED=1 \
-    PYTHONDONTWRITEBYTECODE=1
+    PYTHONDONTWRITEBYTECODE=1 \
+    TZ=Asia/Ho_Chi_Minh
 
 # 3. Tạo thư mục làm việc trong container
 WORKDIR /app

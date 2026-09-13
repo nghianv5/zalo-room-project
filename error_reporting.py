@@ -4,11 +4,11 @@ import os
 import re
 import sys
 import threading
-import traceback
-from datetime import datetime, timezone
+from datetime import datetime
 from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Callable, Optional
+from zoneinfo import ZoneInfo
 
 from config import Config
 
@@ -21,9 +21,14 @@ _sender: Optional[Callable[..., bool]] = None
 _send_lock = threading.Lock()
 _last_sent: dict[str, float] = {}
 _thread_state = threading.local()
+_VIETNAM_TIMEZONE = ZoneInfo("Asia/Ho_Chi_Minh")
 
 
 class _RedactingFormatter(logging.Formatter):
+    def formatTime(self, record: logging.LogRecord, datefmt: Optional[str] = None) -> str:
+        timestamp = datetime.fromtimestamp(record.created, tz=_VIETNAM_TIMEZONE)
+        return timestamp.strftime(datefmt) if datefmt else timestamp.isoformat(timespec="seconds")
+
     def format(self, record: logging.LogRecord) -> str:
         return _redact(super().format(record))
 
@@ -39,7 +44,7 @@ def _configure_file_handler() -> None:
         backupCount=Config.LOG_BACKUP_COUNT,
         encoding="utf-8",
     )
-    handler.setFormatter(_RedactingFormatter("%(asctime)sZ | %(levelname)s | %(message)s"))
+    handler.setFormatter(_RedactingFormatter("%(asctime)s | %(levelname)s | %(message)s"))
     _logger.addHandler(handler)
 
 
@@ -112,7 +117,7 @@ def report_error(
     fingerprint = hashlib.sha256(f"{error_name}|{clean_message}|{clean_context}".encode("utf-8")).hexdigest()
     alert = (
         "🚨 LỖI ỨNG DỤNG NHÀ TRỌ\n"
-        f"Thời gian UTC: {datetime.now(timezone.utc).isoformat(timespec='seconds')}\n"
+        f"Thời gian Việt Nam: {datetime.now(_VIETNAM_TIMEZONE).isoformat(timespec='seconds')}\n"
         f"Loại: {error_name}\n"
         f"Vị trí: {clean_context or 'Không xác định'}\n"
         f"Chi tiết: {error_detail[:900]}"

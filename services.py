@@ -54,7 +54,29 @@ SQLALCHEMY_DATABASE_URL = os.environ.get("SQLALCHEMY_DATABASE_URL")
 MEDIA_DIR = "static/media"
 os.makedirs(MEDIA_DIR, exist_ok=True)
 
-VN_TZ = pytz.timezone("Asia/Ho_Chi_Minh")
+APP_TIMEZONE = "Asia/Ho_Chi_Minh"
+VN_TZ = pytz.timezone(APP_TIMEZONE)
+
+# Đồng bộ múi giờ của toàn bộ tiến trình trên Render/Linux.
+os.environ["TZ"] = APP_TIMEZONE
+if hasattr(time, "tzset"):
+    time.tzset()
+
+
+def vietnam_now() -> datetime:
+    """Giờ Việt Nam dạng naive, tương thích các cột PostgreSQL TIMESTAMP hiện có."""
+    return datetime.now(VN_TZ).replace(tzinfo=None)
+
+
+def vietnam_datetime_iso(value: Optional[datetime]) -> Optional[str]:
+    """Xuất datetime theo ISO 8601 và luôn kèm offset giờ Việt Nam (+07:00)."""
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        value = VN_TZ.localize(value)
+    else:
+        value = value.astimezone(VN_TZ)
+    return value.isoformat()
 COLLECTION_NAME = "rooms_v01"
 VECTOR_SIZE = 768
 
@@ -150,7 +172,7 @@ class UserWeb(Base):
     otp = Column(String, nullable=True)
     password = Column(String, nullable=True)
     expired_at = Column(DateTime, nullable=True)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    updated_at = Column(DateTime, default=vietnam_now, onupdate=vietnam_now)
 
 # --- MODEL ORDER_ROOM TRONG SQLALCHEMY ---
 class OrderRoom(Base):
@@ -167,8 +189,8 @@ class OrderRoom(Base):
     # 🆕 Thêm trường thời gian đến xem phòng
     viewing_time = Column(DateTime, nullable=True)
     status = Column(String, nullable=False, default="CHỜ XEM")
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=vietnam_now)
+    updated_at = Column(DateTime, default=vietnam_now, onupdate=vietnam_now)
 
 class ZaloToken(Base):
     __tablename__ = "zalo_tokens"
@@ -184,8 +206,8 @@ class RoomRecord(Base):
     landlord_phone = Column(String, index=True, nullable=False)
     room_code = Column(String, unique=True, index=True, nullable=False)
     payload = Column(JSON, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+    created_at = Column(DateTime, default=vietnam_now)
+    updated_at = Column(DateTime, default=vietnam_now, onupdate=vietnam_now)
 
 class AuditLog(Base):
     __tablename__ = "audit_logs"
@@ -194,7 +216,7 @@ class AuditLog(Base):
     action = Column(String, index=True, nullable=False)
     target_id = Column(String, index=True, nullable=True)
     details = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=datetime.utcnow, index=True)
+    created_at = Column(DateTime, default=vietnam_now, index=True)
 
 Base.metadata.create_all(bind=engine)
 
@@ -205,7 +227,7 @@ def ensure_order_room_columns() -> None:
         connection.execute(text("ALTER TABLE order_room ADD COLUMN IF NOT EXISTS status VARCHAR"))
         connection.execute(text("ALTER TABLE order_room ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP"))
         connection.execute(text("UPDATE order_room SET status = 'CHỜ XEM' WHERE status IS NULL OR BTRIM(status) = ''"))
-        connection.execute(text("UPDATE order_room SET updated_at = COALESCE(created_at, CURRENT_TIMESTAMP) WHERE updated_at IS NULL"))
+        connection.execute(text("UPDATE order_room SET updated_at = COALESCE(created_at, CURRENT_TIMESTAMP AT TIME ZONE 'Asia/Ho_Chi_Minh') WHERE updated_at IS NULL"))
         connection.execute(text("ALTER TABLE order_room ALTER COLUMN status SET DEFAULT 'CHỜ XEM'"))
         connection.execute(text("ALTER TABLE order_room ALTER COLUMN status SET NOT NULL"))
 
@@ -627,10 +649,9 @@ def format_room_search_message(room: dict, position: int) -> str:
         lines.append(f"👉 Đặt lịch: nhắn “Đặt lịch {room_code}”")
     else:
         lines.append("👉 Nhắn OA để được tư vấn phòng này.")
-    message = "***************************".join(lines)
     message = "\n".join(lines)
-
-    return message
+    # Loại bỏ các đường gạch dài bị chèn trước emoji khi format/paste source.
+    return re.sub(r"(?m)^\s*[-–—_]{5,}\s*", "", message).strip()
 
 
 def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
@@ -1053,7 +1074,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
                 mirror.landlord_phone = payload["landlord_phone"]
                 mirror.room_code = payload["room_code"]
                 mirror.payload = payload
-                mirror.updated_at = datetime.utcnow()
+                mirror.updated_at = vietnam_now()
             else:
                 mirror_db.add(RoomRecord(id=str(new_point_id), landlord_phone=payload["landlord_phone"], room_code=payload["room_code"], payload=payload))
             mirror_db.commit()
@@ -1071,7 +1092,7 @@ def update_room_status_in_db(point_id: str, new_status: str) -> bool:
     if not point_id:
         return False
     try:
-        now_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        now_str = vietnam_now().strftime("%Y-%m-%d %H:%M:%S")
         qdrant_client.set_payload(
             collection_name=COLLECTION_NAME,
             payload={
@@ -1754,7 +1775,7 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, raw_message: str, 
             landlord_phone=landlord_phone,
             room_code=room_code,
             viewing_time=viewing_time_parsed,  # 👈 Thêm vào đây
-            created_at=datetime.utcnow()
+            created_at=vietnam_now()
         )
         db.add(new_order)
         db.commit()
@@ -1842,7 +1863,7 @@ def save_or_update_user_web(
         if user:
             # 2A. Nếu tìm thấy -> Cập nhật thông tin
             user.phone = clean_phone
-            user.updated_at = datetime.utcnow()
+            user.updated_at = vietnam_now()
             print(f"🔄 Đã cập nhật User Web (Zalo ID: {clean_zalo_id}) -> SĐT: {clean_phone}")
         else:
             # 2B. Nếu chưa có -> Tạo mới bản ghi user_web
@@ -1921,7 +1942,7 @@ def extract_viewing_time(text: str):
     Trích xuất Ngày và Giờ xem phòng từ tin nhắn Zalo của khách hàng.
     Trả về đối tượng datetime hoặc None nếu không tìm thấy.
     """
-    now = datetime.now()
+    now = vietnam_now()
     text_lower = text.lower()
     
     extracted_date = None

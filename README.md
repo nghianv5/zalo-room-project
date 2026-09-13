@@ -20,7 +20,7 @@ Chạy `python -m pytest -q`. Endpoint `/health` kiểm tra PostgreSQL, Redis v�
 
 ## Log lỗi và cảnh báo Zalo Admin
 
-Lỗi được ghi vào `logs/app.log` theo cơ chế xoay vòng và exception nghiêm trọng được gửi tới Zalo Admin. `ZALO_ADMIN_ID` phải là **Zalo User ID của tài khoản quản trị đã từng tương tác với OA**, không phải OA ID hoặc App ID. Cấu hình bằng `ZALO_ADMIN_ID`, `ZALO_ERROR_ALERTS_ENABLED`, `ZALO_NOTIFY_HTTP_4XX`, `ZALO_ERROR_ALERT_COOLDOWN_SECONDS`, `LOG_FILE_PATH`, `LOG_MAX_BYTES` và `LOG_BACKUP_COUNT`. Mặc định không gửi lỗi HTTP 4xx để tránh spam do đăng nhập sai hoặc request sai; đặt `ZALO_NOTIFY_HTTP_4XX=true` nếu muốn nhận cả nhóm này. Super Admin có thể tải log hiện tại tại `GET /api/admin/logs/download` bằng access token. Token, mật khẩu, API key và mật khẩu PostgreSQL được che trước khi ghi/gửi.
+Lỗi được ghi vào `logs/app.log` theo cơ chế xoay vòng và exception nghiêm trọng được gửi tới Zalo Admin. Thời gian trong file log và tin Zalo dùng múi giờ Việt Nam `Asia/Ho_Chi_Minh` (UTC+7). `ZALO_ADMIN_ID` phải là **Zalo User ID của tài khoản quản trị đã từng tương tác với OA**, không phải OA ID hoặc App ID. Cấu hình bằng `ZALO_ADMIN_ID`, `ZALO_ERROR_ALERTS_ENABLED`, `ZALO_NOTIFY_HTTP_4XX`, `ZALO_ERROR_ALERT_COOLDOWN_SECONDS`, `LOG_FILE_PATH`, `LOG_MAX_BYTES` và `LOG_BACKUP_COUNT`. Mặc định không gửi lỗi HTTP 4xx để tránh spam do đăng nhập sai hoặc request sai; đặt `ZALO_NOTIFY_HTTP_4XX=true` nếu muốn nhận cả nhóm này. Super Admin có thể tải log hiện tại tại `GET /api/admin/logs/download` bằng access token. Token, mật khẩu, API key và mật khẩu PostgreSQL được che trước khi ghi/gửi.
 
 Render dùng filesystem tạm nếu chưa gắn Persistent Disk, vì vậy file log có thể mất sau lần deploy/restart; cảnh báo Zalo vẫn được gửi theo thời gian thực.
 
