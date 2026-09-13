@@ -1859,6 +1859,12 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         print(f"ai_reply 1: {ai_reply}")
         action = result_data.get("action")
         extracted = result_data.get("extracted_data", {})
+        update_command = is_room_update_command(message_text)
+        direct_room_code = extract_room_code_for_media(message_text) if update_command else None
+        if direct_room_code:
+            # Mã phòng trong câu người dùng là nguồn xác định chính, không phụ thuộc Gemini.
+            extracted["room_code"] = direct_room_code
+            action = "ADD_ROOM"
         address = str(extracted.get("address") or "").strip()
         room_name = str(extracted.get("room_name") or "").strip()
         
@@ -2005,9 +2011,10 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
 #                    ai_reply = f"❌ Không thể lưu thông tin phòng: {db_message}"
 #
         elif action == "ADD_ROOM":
-            
-            # ✅ TRƯỜNG HỢP 2: ĐỊA CHỈ ĐÃ ĐỦ RÕ RÀNG -> TIẾN HÀNH LƯU DATABASE
-            if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
+
+            valid_address = address and address.lower() not in ["null", "none", "chưa rõ", ""]
+            # Phòng mới cần địa chỉ; cập nhật phòng cũ có thể chỉ cần mã phòng.
+            if valid_address or (update_command and direct_room_code):
                 #nếu người dùng chưa đăng ký phòng trên zalo hay web thì sẽ tạo mới data cho user
           
                 if not phone:
@@ -2034,12 +2041,11 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     send_zalo_request(request_phone_message)
                     return {"status": "phone_required"}
 
-                update_command = is_room_update_command(message_text)
                 existing_point_id = find_existing_room_id(
                     address=address,
                     room_name=extracted.get("room_name"),
                     landlord_phone=phone,
-                    room_code=extracted.get("room_code"),
+                    room_code=direct_room_code or extracted.get("room_code"),
                 )
                 if update_command and not existing_point_id:
                     ai_reply = (
@@ -2065,13 +2071,16 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                         get_get_and_clear_pending_media(user_id)
                         clear_pending_room(user_id)
                         if existing_point_id:
-                            room_code = str(extracted.get("room_code") or "").strip().upper()
+                            room_code = str(direct_room_code or extracted.get("room_code") or "").strip().upper()
                             code_text = f" (mã {room_code})" if room_code else ""
                             ai_reply = f"✅ Đã cập nhật thông tin phòng{code_text} thành công."
                         else:
                             ai_reply = "✅ Bạn đã đăng ký phòng thành công."
                     else:
                         ai_reply = message
+            else:
+                ai_reply = "❌ Vui lòng cung cấp địa chỉ phòng mới hoặc mã phòng cần cập nhật."
+                urls_to_send = []
                 
         elif action == "UPDATE_STATUS":
             existing_point_id = find_existing_room_id(address=address, room_name=room_name, landlord_phone=phone)

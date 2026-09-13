@@ -185,6 +185,10 @@ def test_zalo_room_update_is_partial_and_owner_scoped():
     assert 'data["has_fridge"] = "Có"' in services_source
     assert "Không tìm thấy đúng phòng thuộc SĐT của bạn để cập nhật" in services_source
     assert "Đã cập nhật thông tin phòng" in services_source
+    assert "direct_room_code = extract_room_code_for_media(message_text) if update_command else None" in services_source
+    assert 'extracted["room_code"] = direct_room_code' in services_source
+    assert 'action = "ADD_ROOM"' in services_source
+    assert "valid_address or (update_command and direct_room_code)" in services_source
 
 
 def test_excel_dialog_resets_previous_result_before_reopen():
