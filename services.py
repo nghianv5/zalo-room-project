@@ -627,9 +627,10 @@ def format_room_search_message(room: dict, position: int) -> str:
         lines.append(f"👉 Đặt lịch: nhắn “Đặt lịch {room_code}”")
     else:
         lines.append("👉 Nhắn OA để được tư vấn phòng này.")
+    message = "***************************".join(lines)
     message = "\n".join(lines)
-    # Loại bỏ các đường gạch dài bị chèn trước emoji khi format/paste source.
-    return re.sub(r"(?m)^\s*[-–—_]{5,}\s*", "", message).strip()
+
+    return message
 
 
 def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
