@@ -312,6 +312,11 @@
               </select>
             </label>
             <label>
+              Tủ lạnh
+              <select id="has_fridge" class="input choice">
+              </select>
+            </label>
+            <label>
               Chỗ để xe
               <input id="parking_info" class="input">
             </label>
@@ -476,7 +481,7 @@
       .input{margin-top:.25rem;width:100%;border:1px solid #cbd5e1;border-radius:.375rem;padding:.5rem}.input:focus{outline:2px solid #93c5fd}
     </style>
     <script>
-      const ZALO_OA_URL={{ ZALO_OA_URL | tojson }},$=id=>document.getElementById(id),roomFields=["room_code","address","room_name","price","floor","room_size","max_occupants","move_in_date","status","landlord_phone","is_private_bathroom","has_ac","has_heater","has_washer","allow_pets","has_balcony","has_window","has_fingerprint_lock","bed","wardrobe","parking_info","other_amenities","service_fees"];
+      const ZALO_OA_URL={{ ZALO_OA_URL | tojson }},$=id=>document.getElementById(id),roomFields=["room_code","address","room_name","price","floor","room_size","max_occupants","move_in_date","status","landlord_phone","is_private_bathroom","has_ac","has_heater","has_washer","has_fridge","allow_pets","has_balcony","has_window","has_fingerprint_lock","bed","wardrobe","parking_info","other_amenities","service_fees"];
       let rooms=[],orders=[];
       const esc=v=>String(v??"").replace(/[&<>"']/g,c=>( {
           "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
@@ -597,7 +602,7 @@
           }
           $("roomBody").innerHTML=list.map(r=> {
               let m=(Array.isArray(r.media_urls)?r.media_urls:[]).filter(u=>/^https?:\/\//i.test(String(u))),imgs=m.map(u=>`<a href="${esc(u)}" target="_blank" rel="noopener noreferrer"><img src="${esc(u)}" class="h-16 w-16 rounded object-cover" loading="lazy"></a>`).join("");
-              return`<tr class="border-t align-top"><td class="p-3"><input class="roomCheck" type="checkbox" value="${esc(r.id)}" onchange="updateSelected()"></td><td class="p-3"><b class="text-base text-blue-700">${val(r.room_code)}</b><div>${val(r.room_name)}</div><div>${val(r.address)}</div><b class="text-green-700">${val(r.price)} đ</b></td><td class="p-3"><div class="grid grid-cols-2 gap-1"><span>Tầng: <b>${val(r.floor)}</b></span><span>Diện tích: <b>${val(r.room_size)}</b></span><span>WC riêng: <b>${val(r.is_private_bathroom)}</b></span><span>Điều hòa: <b>${val(r.has_ac)}</b></span><span>Nóng lạnh: <b>${val(r.has_heater)}</b></span><span>Máy giặt: <b>${val(r.has_washer)}</b></span><span>Giường: <b>${val(r.bed)}</b></span><span>Tủ áo: <b>${val(r.wardrobe)}</b></span><span>Thú cưng: <b>${val(r.allow_pets)}</b></span><span>Ban công: <b>${val(r.has_balcony)}</b></span><span>Cửa sổ: <b>${val(r.has_window)}</b></span><span>Vân tay: <b>${val(r.has_fingerprint_lock)}</b></span><span>Để xe: <b>${val(r.parking_info)}</b></span><span>Tối đa: <b>${val(r.max_occupants)}</b></span><span class="col-span-2">Khác: <b>${val(r.other_amenities)}</b></span><span class="col-span-2">Phí: <b>${val(r.service_fees)}</b></span><span>Ngày vào: <b>${val(r.move_in_date)}</b></span><span>Timestamp: <b>${val(r.move_in_timestamp)}</b></span><span>Trạng thái: <b>${val(r.status)}</b></span><span>Chủ nhà: <b>${val(r.landlord_phone)}</b></span></div></td><td class="p-3"><div class="flex flex-wrap gap-1">${imgs||"Không media"}</div><div>ID: ${val(r.id)}</div><div>Zalo ID: ${val(r.zalo_user_id)}</div><div>Tạo: ${val(r.created_at)}</div><div>Cập nhật: ${val(r.updated_at)}</div><div>Xóa: ${val(r.deleted_at)}</div><div>Media URLs: ${m.length}</div></td><td class="p-3"><button onclick="editRoom('${esc(r.id)}')" class="rounded bg-blue-100 px-3 py-1">Sửa</button> <button onclick="deleteRoom('${esc(r.id)}')" class="rounded bg-red-100 px-3 py-1">Xóa</button></td></tr>`
+              return`<tr class="border-t align-top"><td class="p-3"><input class="roomCheck" type="checkbox" value="${esc(r.id)}" onchange="updateSelected()"></td><td class="p-3"><b class="text-base text-blue-700">${val(r.room_code)}</b><div>${val(r.room_name)}</div><div>${val(r.address)}</div><b class="text-green-700">${val(r.price)} đ</b></td><td class="p-3"><div class="grid grid-cols-2 gap-1"><span>Tầng: <b>${val(r.floor)}</b></span><span>Diện tích: <b>${val(r.room_size)}</b></span><span>WC riêng: <b>${val(r.is_private_bathroom)}</b></span><span>Điều hòa: <b>${val(r.has_ac)}</b></span><span>Nóng lạnh: <b>${val(r.has_heater)}</b></span><span>Máy giặt: <b>${val(r.has_washer)}</b></span><span>Tủ lạnh: <b>${val(r.has_fridge)}</b></span><span>Giường: <b>${val(r.bed)}</b></span><span>Tủ áo: <b>${val(r.wardrobe)}</b></span><span>Thú cưng: <b>${val(r.allow_pets)}</b></span><span>Ban công: <b>${val(r.has_balcony)}</b></span><span>Cửa sổ: <b>${val(r.has_window)}</b></span><span>Vân tay: <b>${val(r.has_fingerprint_lock)}</b></span><span>Để xe: <b>${val(r.parking_info)}</b></span><span>Tối đa: <b>${val(r.max_occupants)}</b></span><span class="col-span-2">Khác: <b>${val(r.other_amenities)}</b></span><span class="col-span-2">Phí: <b>${val(r.service_fees)}</b></span><span>Ngày vào: <b>${val(r.move_in_date)}</b></span><span>Timestamp: <b>${val(r.move_in_timestamp)}</b></span><span>Trạng thái: <b>${val(r.status)}</b></span><span>Chủ nhà: <b>${val(r.landlord_phone)}</b></span></div></td><td class="p-3"><div class="flex flex-wrap gap-1">${imgs||"Không media"}</div><div>ID: ${val(r.id)}</div><div>Zalo ID: ${val(r.zalo_user_id)}</div><div>Tạo: ${val(r.created_at)}</div><div>Cập nhật: ${val(r.updated_at)}</div><div>Xóa: ${val(r.deleted_at)}</div><div>Media URLs: ${m.length}</div></td><td class="p-3"><button onclick="editRoom('${esc(r.id)}')" class="rounded bg-blue-100 px-3 py-1">Sửa</button> <button onclick="deleteRoom('${esc(r.id)}')" class="rounded bg-red-100 px-3 py-1">Xóa</button></td></tr>`
           }
           ).join("")
       }

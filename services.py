@@ -270,6 +270,7 @@ class RoomCreateUpdateSchema(BaseModel):
     has_ac: Optional[str] = "Chưa rõ"                 
     has_heater: Optional[str] = "Chưa rõ"             
     has_washer: Optional[str] = "Chưa rõ"             
+    has_fridge: Optional[str] = "Chưa rõ"
     allow_pets: Optional[str] = "Chưa rõ"             
     has_balcony: Optional[str] = "Chưa rõ"            
     has_window: Optional[str] = "Chưa rõ"             
@@ -799,6 +800,7 @@ def format_room_search_message(room: dict, position: int) -> str:
         ("has_ac", "Điều hòa"),
         ("has_heater", "Nóng lạnh"),
         ("has_washer", "Máy giặt"),
+        ("has_fridge", "Tủ lạnh"),
         ("bed", "Giường"),
         ("wardrobe", "Tủ quần áo"),
         ("has_balcony", "Ban công"),
@@ -1098,6 +1100,48 @@ def is_room_update_command(message_text: str) -> bool:
     return bool(re.search(r"\b(cập nhật|sửa|bổ sung|thay đổi|đổi)\b", clean_text))
 
 
+def infer_explicit_boolean_room_updates(message_text: str) -> dict:
+    """Đọc trực tiếp tiện ích Có/Không từ câu cập nhật, kể cả khi Gemini bỏ sót khóa."""
+    clean_text = re.sub(r"\s+", " ", str(message_text or "").strip().lower())
+    field_keywords = {
+        "is_private_bathroom": ("vệ sinh riêng", "wc riêng", "khép kín"),
+        "has_ac": ("điều hòa", "điều hoà", "máy lạnh"),
+        "has_heater": ("nóng lạnh", "máy nước nóng"),
+        "has_washer": ("máy giặt",),
+        "has_fridge": ("tủ lạnh", "tủ mát"),
+        "allow_pets": ("cho nuôi pet", "cho nuôi chó", "cho nuôi mèo", "cho nuôi thú cưng"),
+        "has_balcony": ("ban công",),
+        "has_window": ("cửa sổ",),
+        "has_fingerprint_lock": (
+            "cổng vân tay",
+            "cửa vân tay",
+            "khóa vân tay",
+            "khoá vân tay",
+            "khóa cửa vân tay",
+            "khoá cửa vân tay",
+            "vân tay",
+        ),
+        "parking_info": ("chỗ để xe", "nơi để xe", "bãi xe", "để xe"),
+        "bed": ("giường",),
+        "wardrobe": ("tủ quần áo", "tủ áo"),
+    }
+    inferred = {}
+    for field, keywords in field_keywords.items():
+        matched_keyword = next((keyword for keyword in keywords if keyword in clean_text), None)
+        if not matched_keyword:
+            continue
+        negative_phrases = (
+            f"không có {matched_keyword}",
+            f"không còn {matched_keyword}",
+            f"không {matched_keyword}",
+            f"bỏ {matched_keyword}",
+            f"xóa {matched_keyword}",
+            f"xoá {matched_keyword}",
+        )
+        inferred[field] = "Không" if any(phrase in clean_text for phrase in negative_phrases) else "Có"
+    return inferred
+
+
 def keep_only_explicit_room_updates(data: dict, message_text: str) -> dict:
     """Không cho giá trị AI suy đoán ghi đè các trường người dùng không nhắc tới."""
     clean_text = str(message_text or "").strip().lower()
@@ -1109,6 +1153,7 @@ def keep_only_explicit_room_updates(data: dict, message_text: str) -> dict:
         "has_ac": ("điều hòa", "điều hoà", "máy lạnh"),
         "has_heater": ("nóng lạnh", "máy nước nóng"),
         "has_washer": ("máy giặt",),
+        "has_fridge": ("tủ lạnh", "tủ mát"),
         "allow_pets": ("thú cưng", "nuôi pet", "nuôi chó", "nuôi mèo"),
         "has_balcony": ("ban công",),
         "has_window": ("cửa sổ",),
@@ -1118,7 +1163,7 @@ def keep_only_explicit_room_updates(data: dict, message_text: str) -> dict:
         "wardrobe": ("tủ quần áo", "tủ áo"),
         "room_size": ("diện tích", "m2", "m²"),
         "max_occupants": ("người ở", "ở tối đa", "số người"),
-        "other_amenities": ("tiện ích", "tủ lạnh", "tivi", "bếp"),
+        "other_amenities": ("tiện ích khác", "tivi", "bếp"),
         "service_fees": ("phí", "tiền điện", "tiền nước", "wifi"),
         "move_in_date": ("vào ở", "chuyển vào",),
         "status": ("trạng thái", "đã thuê", "đã cho thuê", "còn trống", "phòng trống"),
@@ -1130,11 +1175,17 @@ def keep_only_explicit_room_updates(data: dict, message_text: str) -> dict:
     for field, keywords in keyword_map.items():
         if any(keyword in clean_text for keyword in keywords) and field in data:
             explicit[field] = data[field]
+    # Giá trị đọc trực tiếp từ câu người dùng được ưu tiên hơn kết quả AI.
+    explicit.update(infer_explicit_boolean_room_updates(message_text))
     return explicit
 
 
 def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[List[str]] = None, current_excel_row: int = 0, type_process: str = None,  landlord_phone: str = None) -> Optional[str]:
     try:
+        data = dict(data or {})
+        legacy_amenities = str(data.get("other_amenities") or "").lower()
+        if not has_room_update_value(data.get("has_fridge")) and "tủ lạnh" in legacy_amenities:
+            data["has_fridge"] = "Có"
         address = str(data.get("address", "")).strip()
         address_clean = address.lower()
         if address_clean:
@@ -1192,6 +1243,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
             bool_to_text(data.get("has_ac"), "Có điều hòa", "Không có điều hòa"),
             bool_to_text(data.get("has_heater"), "Có nóng lạnh", "Không có nóng lạnh"),
             bool_to_text(data.get("has_washer"), "Có máy giặt", "Không có máy giặt"),
+            bool_to_text(data.get("has_fridge"), "Có tủ lạnh", "Không có tủ lạnh"),
             bool_to_text(data.get("bed"), "Có giường", "Không có giường"),
             bool_to_text(data.get("wardrobe"), "Có tủ quần áo", "Không có tủ quần áo"),
             bool_to_text(data.get("allow_pets"), "Cho phép nuôi thú cưng / pet", "Không cho nuôi pet"),
@@ -1314,6 +1366,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
             "has_ac": str(data.get("has_ac", "Chưa rõ")),
             "has_heater": str(data.get("has_heater", "Chưa rõ")),
             "has_washer": str(data.get("has_washer", "Chưa rõ")),
+            "has_fridge": str(data.get("has_fridge", "Chưa rõ")),
             "allow_pets": str(data.get("allow_pets", "Chưa rõ")),
             "has_balcony": str(data.get("has_balcony", "Chưa rõ")),
             "has_window": str(data.get("has_window", "Chưa rõ")),
@@ -1426,6 +1479,7 @@ def ai_validate_and_extract_room_batch(rows_list: List[dict]) -> List[Optional[d
               "has_ac": "",
               "has_heater": "",
               "has_washer": "",
+              "has_fridge": "",
               "allow_pets": "",
               "has_balcony": "",
               "has_window": "",
@@ -1689,7 +1743,8 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         6. `has_ac`:  Điều hoà có hay không?
         7. `has_heater`: có bình nóng lạnh không?
         8. `has_washer`: Có máy giặt không?
-        9. `allow_pets`: Có cho nuôi pet không?
+        9. `has_fridge`: Có tủ lạnh không?
+        10. `allow_pets`: Có cho nuôi pet không?
         10. `has_balcony`: Có ban công không?
         11. `has_window`: Có cửa sổ không?
         12. `has_fingerprint_lock`: Ra vào bằng khoá vân tay có hay không?
@@ -1771,6 +1826,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
             "has_ac": "Có/Không",
             "has_heater": "Có/Không",
             "has_washer": "Có/Không",
+            "has_fridge": "Có/Không",
             "allow_pets": "Có/Không",
             "has_balcony": "Có/Không",
             "has_window": "Có/Không",
@@ -1876,7 +1932,8 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     6. `has_ac`:  Điều hoà có hay không?
                     7. `has_heater`: có bình nóng lạnh không?
                     8. `has_washer`: Có máy giặt không?
-                    9. `allow_pets`: Có cho nuôi pet không?
+                    9. `has_fridge`: Có tủ lạnh không?
+                    10. `allow_pets`: Có cho nuôi pet không?
                     10. `has_balcony`: Có ban công không?
                     11. `has_window`: Có cửa sổ không?
                     12. `has_fingerprint_lock`: Ra vào bằng khoá vân tay có hay không?

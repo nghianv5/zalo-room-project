@@ -21,7 +21,7 @@ def _schema_fields(class_name: str):
 def test_admin_room_form_and_table_cover_schema_fields():
     html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
     fields = _schema_fields("RoomCreateUpdateSchema")
-    assert len(fields) == 24
+    assert len(fields) == 25
     assert not [field for field in fields if not re.search(rf'id=["\']{field}["\']', html)]
     assert not [field for field in fields if not re.search(rf'r\.{field}\b', html)]
 
@@ -170,12 +170,19 @@ def test_zalo_room_update_is_partial_and_owner_scoped():
     services_source = (ROOT / "services.py").read_text(encoding="utf-8")
     assert "def merge_room_partial_update" in services_source
     assert "def keep_only_explicit_room_updates" in services_source
+    assert "def infer_explicit_boolean_room_updates" in services_source
     assert "def normalize_room_address" in services_source
     assert "is_room_update_command(message_text)" in services_source
     assert "point_id=existing_point_id" in services_source
     assert 'key="landlord_phone"' in services_source
     assert 'match=qdrant_models.MatchValue(value=safe_phone)' in services_source
     assert '"has_balcony": ("ban công",)' in services_source
+    assert '"cổng vân tay"' in services_source
+    assert "explicit.update(infer_explicit_boolean_room_updates(message_text))" in services_source
+    assert "has_fridge: Optional[str]" in services_source
+    assert '"has_fridge": ("tủ lạnh", "tủ mát")' in services_source
+    assert '"parking_info": ("chỗ để xe", "nơi để xe", "bãi xe", "để xe")' in services_source
+    assert 'data["has_fridge"] = "Có"' in services_source
     assert "Không tìm thấy đúng phòng thuộc SĐT của bạn để cập nhật" in services_source
     assert "Đã cập nhật thông tin phòng" in services_source
 
