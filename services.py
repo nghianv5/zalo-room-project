@@ -537,6 +537,159 @@ def add_pending_media(user_id: str, new_urls: list):
     return merged
 
 
+def clear_pending_media(user_id: str) -> None:
+    """Xóa media đang chờ chọn phòng của đúng người dùng Zalo."""
+    redis_client.delete(f"pending_media:{user_id}")
+
+
+def get_rooms_by_landlord_phone(landlord_phone: str, limit: int = 8) -> List[dict]:
+    """Lấy các phòng thuộc đúng SĐT chủ nhà để họ chọn mã phòng gắn media."""
+    safe_phone = format_national_phone(landlord_phone)
+    if not safe_phone:
+        return []
+    records, _ = qdrant_client.scroll(
+        collection_name=COLLECTION_NAME,
+        scroll_filter=qdrant_models.Filter(
+            must=[qdrant_models.FieldCondition(
+                key="landlord_phone",
+                match=qdrant_models.MatchValue(value=safe_phone),
+            )]
+        ),
+        limit=min(max(int(limit), 1), 20),
+        with_payload=True,
+        with_vectors=False,
+    )
+    rooms = []
+    for record in records:
+        if record.payload:
+            room = dict(record.payload)
+            room["id"] = str(record.id)
+            rooms.append(room)
+    rooms.sort(key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""), reverse=True)
+    return rooms
+
+
+def format_room_media_choices(rooms: List[dict], pending_count: int) -> str:
+    """Tạo danh sách xác nhận rõ mã, tên và địa chỉ; không lộ phòng của chủ khác."""
+    if not rooms:
+        return (
+            f"📸 Đã lưu tạm {pending_count} ảnh/video nhưng chưa tìm thấy phòng nào thuộc SĐT của bạn.\n\n"
+            "Bạn hãy gửi thông tin phòng (tên phòng, địa chỉ, giá...) để tạo phòng mới."
+        )
+    lines = [
+        f"📸 Đã lưu tạm {pending_count} ảnh/video.",
+        "Vui lòng xác nhận phòng cần cập nhật bằng cách nhắn: CẬP NHẬT ẢNH <MÃ PHÒNG>",
+        "",
+        "Các phòng thuộc SĐT của bạn:",
+    ]
+    for index, room in enumerate(rooms, start=1):
+        code = str(room.get("room_code") or "[chưa có mã]").strip()
+        name = str(room.get("room_name") or "[chưa có tên]").strip()
+        address = str(room.get("address") or "[chưa có địa chỉ]").strip()
+        lines.append(f"{index}. 🏠 {code} — {name}\n   📍 {address}")
+    lines.append("\nVí dụ: CẬP NHẬT ẢNH SP840D")
+    return "\n".join(lines)
+
+
+def build_room_media_choices(landlord_phone: str, pending_count: int) -> str:
+    """Lấy và định dạng danh sách phòng, đồng thời phản hồi rõ nếu Qdrant tạm lỗi."""
+    try:
+        return format_room_media_choices(
+            get_rooms_by_landlord_phone(landlord_phone),
+            pending_count,
+        )
+    except Exception as exc:
+        report_error("Không thể tải danh sách phòng để chọn media", exc, "build_room_media_choices")
+        return (
+            f"📸 Hệ thống vẫn đang giữ tạm {pending_count} ảnh/video.\n\n"
+            "⚠️ Chưa tải được danh sách phòng. Bạn vui lòng thử lại bằng cách nhắn: "
+            "CẬP NHẬT ẢNH <MÃ PHÒNG>."
+        )
+
+
+def extract_room_code_for_media(message_text: str) -> Optional[str]:
+    """Chỉ nhận mã 6 ký tự có cả chữ và số khi đang có media chờ xử lý."""
+    candidates = re.findall(r"\b(?=[A-Za-z0-9]{6}\b)(?=[A-Za-z0-9]*[A-Za-z])(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{6}\b", message_text or "")
+    return candidates[0].upper() if len(candidates) == 1 else None
+
+
+def attach_media_to_owned_room(landlord_phone: str, room_code: str, media_urls: List[str]) -> dict:
+    """Gắn media vào phòng sau khi xác thực đồng thời room_code và landlord_phone."""
+    safe_phone = format_national_phone(landlord_phone)
+    safe_code = str(room_code or "").strip().upper()
+    unique_new_media = [
+        str(url).strip() for url in dict.fromkeys(media_urls or [])
+        if str(url or "").strip().startswith(("https://", "http://"))
+    ]
+    if not safe_phone or not safe_code or not unique_new_media:
+        raise ValueError("Thiếu SĐT, mã phòng hoặc ảnh/video cần cập nhật.")
+
+    records, _ = qdrant_client.scroll(
+        collection_name=COLLECTION_NAME,
+        scroll_filter=qdrant_models.Filter(must=[
+            qdrant_models.FieldCondition(
+                key="landlord_phone",
+                match=qdrant_models.MatchValue(value=safe_phone),
+            ),
+            qdrant_models.FieldCondition(
+                key="room_code",
+                match=qdrant_models.MatchValue(value=safe_code),
+            ),
+        ]),
+        limit=2,
+        with_payload=True,
+        with_vectors=False,
+    )
+    if len(records) != 1 or not records[0].payload:
+        raise ValueError(f"Không tìm thấy mã phòng {safe_code} thuộc đúng SĐT của bạn.")
+
+    record = records[0]
+    room_payload = dict(record.payload)
+    old_media = room_payload.get("media_urls") or []
+    if isinstance(old_media, str):
+        old_media = [item.strip() for item in old_media.split(",") if item.strip()]
+    merged_media = list(dict.fromkeys(list(old_media) + unique_new_media))[:MAX_MEDIA_PER_ROOM]
+    updated_at = vietnam_now().strftime("%Y-%m-%d %H:%M:%S")
+    qdrant_client.set_payload(
+        collection_name=COLLECTION_NAME,
+        points=[record.id],
+        payload={"media_urls": merged_media, "updated_at": updated_at},
+        wait=True,
+    )
+
+    room_payload["media_urls"] = merged_media
+    room_payload["updated_at"] = updated_at
+    mirror_db = SessionLocal()
+    try:
+        mirror = mirror_db.query(RoomRecord).filter(RoomRecord.id == str(record.id)).first()
+        if mirror:
+            mirror.payload = room_payload
+            mirror.updated_at = vietnam_now()
+        else:
+            mirror_db.add(RoomRecord(
+                id=str(record.id),
+                landlord_phone=safe_phone,
+                room_code=safe_code,
+                payload=room_payload,
+                created_at=vietnam_now(),
+                updated_at=vietnam_now(),
+            ))
+        mirror_db.commit()
+    except Exception as exc:
+        mirror_db.rollback()
+        report_error("Đồng bộ media phòng vào room_records thất bại", exc, f"room:{safe_code}")
+    finally:
+        mirror_db.close()
+
+    write_audit_log(safe_phone, "ROOM_MEDIA_UPDATE", str(record.id), {
+        "room_code": safe_code,
+        "new_media_count": len(unique_new_media),
+        "total_media_count": len(merged_media),
+    })
+    room_payload["new_media_count"] = len(unique_new_media)
+    return room_payload
+
+
 def collect_search_media_urls(search_results: List[dict], limit: int = MAX_SEARCH_MEDIA) -> List[str]:
     """Lấy media từ kết quả tìm phòng, giữ thứ tự và loại bỏ URL trùng."""
     collected = []
@@ -1326,16 +1479,55 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
             incoming_media_urls.append(saved_url)
     if incoming_media_urls:
         add_pending_media(user_id, incoming_media_urls)
-    if not message_text.strip() and incoming_media_urls:
-        merged_media = get_pending_media(user_id)
-        total_pending = len(merged_media)
-        reply = f"📸 Em đã nhận {len(incoming_media_urls)} ảnh/video! (Tổng đã nhận: {total_pending} file)\n\n👉 Anh/Chị gửi thêm thông tin phòng để em tạo bài nhé!"
-        send_zalo_message(user_id, reply, media_urls=incoming_media_urls)
-        return
+
+    phone = get_phone_by_user_id(db, user_id) if db is not None else None
     pending_urls = get_pending_media(user_id)
     all_current_media = list(dict.fromkeys(pending_urls + incoming_media_urls))
     urls_to_send = all_current_media
     search_results_to_send = None
+
+    # Luồng xác nhận media chạy độc lập với AI để không bao giờ đoán nhầm phòng.
+    selected_room_code = extract_room_code_for_media(message_text) if pending_urls else None
+    if selected_room_code:
+        if not phone:
+            send_zalo_message(user_id, "⚠️ Vui lòng chia sẻ SĐT Zalo trước khi chọn phòng cập nhật ảnh/video.")
+            return
+        try:
+            updated_room = attach_media_to_owned_room(phone, selected_room_code, pending_urls)
+        except ValueError as exc:
+            reply = f"❌ {exc}\n\n{build_room_media_choices(phone, len(pending_urls))}"
+            send_zalo_message(user_id, reply)
+            return
+        except Exception as exc:
+            report_error("Cập nhật media phòng thất bại", exc, f"room:{selected_room_code}")
+            send_zalo_message(
+                user_id,
+                f"⚠️ Chưa thể cập nhật phòng {selected_room_code}. Ảnh/video vẫn được giữ tạm, bạn vui lòng thử lại.",
+            )
+            return
+        clear_pending_media(user_id)
+        room_name = str(updated_room.get("room_name") or "[chưa có tên]").strip()
+        address = str(updated_room.get("address") or "[chưa có địa chỉ]").strip()
+        reply = (
+            f"✅ Đã cập nhật {updated_room['new_media_count']} ảnh/video vào đúng phòng:\n"
+            f"🏠 Mã phòng: {selected_room_code}\n"
+            f"📝 Tên phòng: {room_name}\n"
+            f"📍 Địa chỉ: {address}\n"
+            f"📚 Tổng media hiện có: {len(updated_room.get('media_urls') or [])} file"
+        )
+        send_zalo_message(user_id, reply)
+        return
+
+    if not message_text.strip() and incoming_media_urls:
+        if not phone:
+            reply = (
+                f"📸 Đã lưu tạm {len(pending_urls)} ảnh/video.\n\n"
+                "⚠️ Bạn cần chia sẻ SĐT Zalo để hệ thống chỉ hiển thị các phòng thuộc quyền quản lý của bạn."
+            )
+        else:
+            reply = build_room_media_choices(phone, len(pending_urls))
+        send_zalo_message(user_id, reply)
+        return
     
     # 1. Lấy lịch sử chat của User từ Redis
     history_list = get_chat_history(user_id)
@@ -1352,11 +1544,11 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
     clean_message = message_text.strip().lower()
     if any(keyword in clean_message for keyword in ["bắt đầu lại", "tìm phòng khác", "xóa lịch sử", "reset", "làm mới"]):
         clear_chat_history(user_id)
+        clear_pending_media(user_id)
         ai_reply = "Dạ em đã làm mới cuộc hội thoại rồi ạ. Anh/chị muốn tìm phòng trọ ở khu vực nào và ngân sách khoảng bao nhiêu ạ?"
         send_zalo_message(user_id, ai_reply)
         return
-    
-    phone = get_phone_by_user_id(db, user_id)
+
     try:
         
         system_prompt = f"""

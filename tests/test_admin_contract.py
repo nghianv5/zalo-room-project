@@ -148,6 +148,24 @@ def test_system_scheduler_and_database_use_vietnam_timezone():
     assert "TZ=Asia/Ho_Chi_Minh" in env_source
 
 
+def test_zalo_media_is_attached_only_after_owned_room_confirmation():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+
+    assert "def get_rooms_by_landlord_phone" in services_source
+    assert "def format_room_media_choices" in services_source
+    assert "def build_room_media_choices" in services_source
+    assert "def extract_room_code_for_media" in services_source
+    assert "def attach_media_to_owned_room" in services_source
+    assert 'key="landlord_phone"' in services_source
+    assert 'key="room_code"' in services_source
+    assert '"ROOM_MEDIA_UPDATE"' in services_source
+    assert "selected_room_code = extract_room_code_for_media(message_text) if pending_urls else None" in services_source
+    assert "attach_media_to_owned_room(phone, selected_room_code, pending_urls)" in services_source
+    assert "clear_pending_media(user_id)" in services_source
+    assert "build_room_media_choices(extracted_phone, len(pending_media))" in main_source
+
+
 def test_excel_dialog_resets_previous_result_before_reopen():
     html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
     assert 'onclick="openExcelModal()"' in html

@@ -763,18 +763,27 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                             phone=extracted_phone
                         )
                         pending_room = get_pending_room(str(sender_id))
+                        phone_reply = f"✅ Cảm ơn bạn! Hệ thống đã ghi nhận thành công Số điện thoại: {extracted_phone}. Mời bạn đăng thông tin phòng."
                         if pending_room:
                             pending_media = get_pending_media(str(sender_id))
                             result = upsert_room_to_db(pending_room, media_urls=pending_media, type_process="NOT_EXCEL", landlord_phone=extracted_phone)
                             if result == "SUCCESS":
                                 clear_pending_room(str(sender_id))
                                 get_get_and_clear_pending_media(str(sender_id))
+                                phone_reply = "✅ Đã xác thực SĐT và đăng phòng đang chờ thành công."
+                        else:
+                            pending_media = get_pending_media(str(sender_id))
+                            if pending_media:
+                                phone_reply = (
+                                    f"✅ Đã xác thực SĐT: {extracted_phone}.\n\n"
+                                    f"{build_room_media_choices(extracted_phone, len(pending_media))}"
+                                )
                         print(f"✅ [SUCCESS] Đã bắt thành công SĐT từ text: {extracted_phone} (User ID: {sender_id})")
                         
                         # Phản hồi lại cho khách
                         send_zalo_message(
                             str(sender_id),
-                            f"✅ Cảm ơn bạn! Hệ thống đã ghi nhận thành công Số điện thoại: {extracted_phone}. Mời bạn đăng thông tin phòng."
+                            phone_reply
                         )
                         return {"status": "success", "phone": extracted_phone}
                     
