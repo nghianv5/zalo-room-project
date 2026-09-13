@@ -556,7 +556,7 @@ def get_rooms_by_landlord_phone(landlord_phone: str, limit: int = 8) -> List[dic
                 match=qdrant_models.MatchValue(value=safe_phone),
             )]
         ),
-        limit=min(max(int(limit), 1), 20),
+        limit=min(max(int(limit), 1), 50),
         with_payload=True,
         with_vectors=False,
     )
@@ -624,6 +624,62 @@ def build_owned_room_reference(landlord_phone: str) -> str:
         address = str(room.get("address") or "[chưa có địa chỉ]").strip()
         lines.append(f"{index}. 🏠 {code} — {name}\n   📍 {address}")
     return "\n".join(lines)
+
+
+def is_my_rooms_request(message_text: str) -> bool:
+    """Nhận dạng nhu cầu xem phòng do chính người gửi đăng bằng ngôn ngữ tự nhiên."""
+    clean_text = re.sub(r"\s+", " ", str(message_text or "").strip().lower())
+    owner_phrases = (
+        "phòng của tôi",
+        "phòng cho thuê của tôi",
+        "phòng trọ của tôi",
+        "phòng tôi đăng",
+        "phòng tôi đã đăng",
+        "phòng do tôi đăng",
+        "phòng tôi cho thuê",
+        "danh sách phòng của mình",
+        "phòng của mình",
+        "phòng đã đăng của tôi",
+    )
+    owner_signal = any(owner_phrase in clean_text for owner_phrase in owner_phrases) or bool(
+        re.search(r"phòng.*(?:của tôi|của mình|tôi.*(?:đã\s+)?đăng|tôi.*cho thuê)", clean_text)
+    )
+    list_phrases = (
+        "danh sách", "liệt kê", "cho xem", "xem", "quản lý", "kiểm tra",
+        "những phòng nào", "các phòng nào", "tôi có phòng nào",
+    )
+    return owner_signal and any(list_phrase in clean_text for list_phrase in list_phrases)
+
+
+def format_my_rooms_overview(rooms: List[dict]) -> str:
+    """Định dạng danh sách quản lý phòng của chủ nhà, không lẫn kết quả tìm thuê."""
+    if not rooms:
+        return "🏠 SĐT của bạn hiện chưa có phòng nào được đăng trên hệ thống."
+    lines = [f"🏠 DANH SÁCH PHÒNG CỦA BẠN ({len(rooms)} phòng)", ""]
+    for index, room in enumerate(rooms, start=1):
+        code = str(room.get("room_code") or "[chưa có mã]").strip()
+        name = str(room.get("room_name") or "Phòng trọ").strip()
+        address = str(room.get("address") or "[chưa có địa chỉ]").strip()
+        status_text = str(room.get("status") or "[chưa cập nhật]").strip()
+        price_value = parse_price_safe(room)
+        price_text = f"{price_value:,.0f}đ/tháng" if price_value > 0 else "[chưa cập nhật giá]"
+        lines.append(
+            f"{index}. 🏷️ {code} — {name}\n"
+            f"   📍 {address}\n"
+            f"   💰 {price_text} | 📌 {status_text}"
+        )
+    lines.append("\nMuốn sửa, bạn có thể nhắn: Cập nhật phòng <MÃ PHÒNG> <thông tin cần sửa>.")
+    return "\n".join(lines)
+
+
+def send_my_rooms_overview(user_id: str, landlord_phone: str) -> None:
+    """Chỉ lấy phòng theo SĐT đã liên kết của đúng người gửi Zalo."""
+    try:
+        rooms = get_rooms_by_landlord_phone(landlord_phone, limit=50)
+        send_zalo_message(user_id, format_my_rooms_overview(rooms))
+    except Exception as exc:
+        report_error("Không thể tải danh sách phòng của người dùng", exc, f"zalo_user:{user_id}")
+        send_zalo_message(user_id, "⚠️ Chưa tải được danh sách phòng của bạn. Vui lòng thử lại sau.")
 
 
 def extract_room_code_for_media(message_text: str) -> Optional[str]:
@@ -1722,6 +1778,17 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         send_zalo_message(user_id, ai_reply)
         return
 
+    # Ý định quản lý phòng của chủ nhà được xử lý trước AI để không nhầm thành tìm thuê.
+    if is_my_rooms_request(message_text):
+        if not phone:
+            send_zalo_message(
+                user_id,
+                "⚠️ Bạn vui lòng chia sẻ SĐT Zalo trước để hệ thống xác định đúng các phòng do bạn đăng.",
+            )
+        else:
+            send_my_rooms_overview(user_id, phone)
+        return
+
     try:
         
         system_prompt = f"""
@@ -1768,6 +1835,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         - "ADD_ROOM": Dùng khi người dùng ĐĂNG PHÒNG MỚI hoặc CẬP NHẬT/SỬA BẤT KỲ THÔNG TIN NÀO CỦA PHÒNG.
         - "UPDATE_STATUS": CHỈ DÙNG khi người dùng báo phòng "ĐÃ CHO THUÊ", "ĐÃ CHỐT" hoặc "ĐỔI SANG TRỐNG".
         - "SEARCH_ROOM": Dùng khi khách có nhu cầu TÌM KIẾM phòng trọ.
+        - "LIST_MY_ROOMS": Dùng khi người dùng muốn xem/liệt kê/quản lý các phòng do chính họ đăng hoặc các phòng cho thuê của họ. Không yêu cầu địa chỉ và giá cho action này.
         
         CÁC QUY TẮC BẮT BUỘC KHI TRÍCH XUẤT ĐỊA CHỈ (address):
         1. GIỮ NGUYÊN 100% TÊN ĐƯỜNG/TÊN PHƯỜNG do người dùng nhập. KHÔNG TỰ Ý SỬA LỖI CHÍNH TẢ TÊN RIÊNG (Ví dụ: "Phan Thị Hành" KHÔNG ĐƯỢC sửa thành "Phan Thị Hạnh").
@@ -1809,7 +1877,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         
         TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
         {{
-          "action": "ADD_ROOM | SEARCH_ROOM | UPDATE_STATUS",
+          "action": "ADD_ROOM | SEARCH_ROOM | UPDATE_STATUS | LIST_MY_ROOMS",
           "is_valid_search": true/false,
           "extracted_search": {{
             "location_search": "Tên đường hoặc phường/xã trích xuất được (hoặc null)",
@@ -1870,7 +1938,16 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         
         print(f"landlord_phone: {extracted.get("landlord_phone")}")
         print(f"phone: {phone}")
-        if action == "SEARCH_ROOM":
+        if action == "LIST_MY_ROOMS":
+            if not phone:
+                send_zalo_message(
+                    user_id,
+                    "⚠️ Bạn vui lòng chia sẻ SĐT Zalo trước để xem các phòng do mình đăng.",
+                )
+            else:
+                send_my_rooms_overview(user_id, phone)
+            return
+        elif action == "SEARCH_ROOM":
             add_chat_history(user_id=user_id, user_message=message_text, ai_reply=None)
             is_valid_search = result_data.get("is_valid_search", False)
         

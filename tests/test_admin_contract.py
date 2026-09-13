@@ -191,6 +191,17 @@ def test_zalo_room_update_is_partial_and_owner_scoped():
     assert "valid_address or (update_command and direct_room_code)" in services_source
 
 
+def test_natural_language_my_rooms_intent_is_not_tenant_search():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    assert "def is_my_rooms_request" in services_source
+    assert "def format_my_rooms_overview" in services_source
+    assert "def send_my_rooms_overview" in services_source
+    assert "if is_my_rooms_request(message_text):" in services_source
+    assert 'action == "LIST_MY_ROOMS"' in services_source
+    assert '"LIST_MY_ROOMS": Dùng khi người dùng muốn xem/liệt kê/quản lý' in services_source
+    assert "get_rooms_by_landlord_phone(landlord_phone, limit=50)" in services_source
+
+
 def test_excel_dialog_resets_previous_result_before_reopen():
     html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
     assert 'onclick="openExcelModal()"' in html
