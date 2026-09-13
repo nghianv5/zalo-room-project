@@ -32,10 +32,6 @@ Hai bảng `room_records` và `audit_logs` được tự tạo khi khởi độn
 
 Khi tìm phòng, hệ thống không in đường dẫn `media_urls` trong tin nhắn. Mỗi phòng được gửi thành một cụm riêng; ảnh đầu tiên được ghép cùng request với nội dung phòng, các ảnh tiếp theo nằm ngay sau đó. Nếu OA không hỗ trợ payload kết hợp, hệ thống tự fallback sang nội dung rồi ảnh để không làm gián đoạn phản hồi. Các đường gạch dài thừa cũng được tự loại bỏ. `MAX_SEARCH_ROOMS` giới hạn số phòng hiển thị (mặc định 5), `MAX_SEARCH_MEDIA_PER_ROOM` giới hạn media mỗi phòng (mặc định 3), và `MAX_SEARCH_MEDIA` giới hạn tổng media của một lượt (mặc định 10).
 
-## Tối ưu chi phí Gemini
-
-Ứng dụng giữ nguyên Gemini, dùng `gemini-2.5-flash-lite` làm model mặc định và `gemini-2.5-flash` làm dự phòng. Embedding được cache trong Redis, lịch sử hội thoại được giới hạn, output/retry được khống chế và lượt gọi Gemini định dạng kết quả tìm kiếm không được sử dụng đã bị loại bỏ. Theo dõi log `GEMINI_USAGE` để kiểm tra token thực tế.
-
 Tìm kiếm Qdrant dùng timeout 30 giây và retry 3 lần theo mặc định. Nếu vector search vẫn lỗi hoặc timeout, hệ thống fallback sang `scroll` với cùng bộ lọc trạng thái, địa chỉ và giá. Có thể chỉnh bằng `QDRANT_TIMEOUT_SECONDS` và `QDRANT_SEARCH_RETRIES`.
 
 ## Quản trị phòng và đặt phòng
