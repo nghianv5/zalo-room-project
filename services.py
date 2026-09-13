@@ -607,6 +607,24 @@ def build_room_media_choices(landlord_phone: str, pending_count: int) -> str:
         )
 
 
+def build_owned_room_reference(landlord_phone: str) -> str:
+    """Liệt kê mã, tên và địa chỉ phòng để người dùng xác định đúng phòng cần sửa."""
+    try:
+        rooms = get_rooms_by_landlord_phone(landlord_phone)
+    except Exception as exc:
+        report_error("Không thể tải danh sách phòng của chủ nhà", exc, "build_owned_room_reference")
+        return "⚠️ Hiện chưa tải được danh sách mã phòng, vui lòng thử lại sau."
+    if not rooms:
+        return "Hiện SĐT của bạn chưa có phòng nào trên hệ thống."
+    lines = ["Các phòng gần đây thuộc SĐT của bạn:"]
+    for index, room in enumerate(rooms, start=1):
+        code = str(room.get("room_code") or "[chưa có mã]").strip()
+        name = str(room.get("room_name") or "[chưa có tên]").strip()
+        address = str(room.get("address") or "[chưa có địa chỉ]").strip()
+        lines.append(f"{index}. 🏠 {code} — {name}\n   📍 {address}")
+    return "\n".join(lines)
+
+
 def extract_room_code_for_media(message_text: str) -> Optional[str]:
     """Chỉ nhận mã 6 ký tự có cả chữ và số khi đang có media chờ xử lý."""
     candidates = re.findall(r"\b(?=[A-Za-z0-9]{6}\b)(?=[A-Za-z0-9]*[A-Za-z])(?=[A-Za-z0-9]*\d)[A-Za-z0-9]{6}\b", message_text or "")
@@ -1038,6 +1056,83 @@ def generate_content_with_retry(prompt: str, mime_type: str = "application/json"
     return ""
 
 # --- QDRANT VECTOR & ROOM SERVICES ---
+ROOM_NULL_VALUES = {"", "none", "null", "nan", "chưa rõ", "undefined", "[chưa cập nhật]"}
+
+
+def has_room_update_value(value) -> bool:
+    """Phân biệt dữ liệu người dùng thực sự cung cấp với giá trị rỗng do AI sinh ra."""
+    if value is None:
+        return False
+    if isinstance(value, (bool, int, float)):
+        return True
+    if isinstance(value, (list, tuple, dict)):
+        return bool(value)
+    return str(value).strip().lower() not in ROOM_NULL_VALUES
+
+
+def merge_room_partial_update(old_payload: dict, new_data: dict, media_urls: Optional[List[str]] = None) -> dict:
+    """Giữ dữ liệu cũ và chỉ ghi đè những trường có giá trị trong yêu cầu cập nhật."""
+    merged = dict(old_payload or {})
+    for key, value in dict(new_data or {}).items():
+        if key in {"id", "created_at", "updated_at", "move_in_timestamp"}:
+            continue
+        if has_room_update_value(value):
+            merged[key] = value
+
+    if has_room_update_value(new_data.get("move_in_date")):
+        merged.pop("move_in_timestamp", None)
+
+    incoming_media = media_urls if media_urls is not None else new_data.get("media_urls")
+    if incoming_media:
+        if isinstance(incoming_media, str):
+            incoming_media = [item.strip() for item in incoming_media.split(",") if item.strip()]
+        old_media = old_payload.get("media_urls") or []
+        if isinstance(old_media, str):
+            old_media = [item.strip() for item in old_media.split(",") if item.strip()]
+        merged["media_urls"] = list(dict.fromkeys(list(old_media) + list(incoming_media)))[:MAX_MEDIA_PER_ROOM]
+    return merged
+
+
+def is_room_update_command(message_text: str) -> bool:
+    clean_text = str(message_text or "").strip().lower()
+    return bool(re.search(r"\b(cập nhật|sửa|bổ sung|thay đổi|đổi)\b", clean_text))
+
+
+def keep_only_explicit_room_updates(data: dict, message_text: str) -> dict:
+    """Không cho giá trị AI suy đoán ghi đè các trường người dùng không nhắc tới."""
+    clean_text = str(message_text or "").strip().lower()
+    keyword_map = {
+        "room_name": ("tên phòng", "số phòng"),
+        "price": ("giá", "triệu", "tr/tháng", "đ/tháng"),
+        "floor": ("tầng",),
+        "is_private_bathroom": ("vệ sinh", "wc", "khép kín"),
+        "has_ac": ("điều hòa", "điều hoà", "máy lạnh"),
+        "has_heater": ("nóng lạnh", "máy nước nóng"),
+        "has_washer": ("máy giặt",),
+        "allow_pets": ("thú cưng", "nuôi pet", "nuôi chó", "nuôi mèo"),
+        "has_balcony": ("ban công",),
+        "has_window": ("cửa sổ",),
+        "has_fingerprint_lock": ("vân tay",),
+        "parking_info": ("để xe", "giữ xe", "đậu xe"),
+        "bed": ("giường",),
+        "wardrobe": ("tủ quần áo", "tủ áo"),
+        "room_size": ("diện tích", "m2", "m²"),
+        "max_occupants": ("người ở", "ở tối đa", "số người"),
+        "other_amenities": ("tiện ích", "tủ lạnh", "tivi", "bếp"),
+        "service_fees": ("phí", "tiền điện", "tiền nước", "wifi"),
+        "move_in_date": ("vào ở", "chuyển vào",),
+        "status": ("trạng thái", "đã thuê", "đã cho thuê", "còn trống", "phòng trống"),
+    }
+    explicit = {
+        key: value for key, value in dict(data or {}).items()
+        if key in {"address", "room_code", "landlord_phone", "media_urls"}
+    }
+    for field, keywords in keyword_map.items():
+        if any(keyword in clean_text for keyword in keywords) and field in data:
+            explicit[field] = data[field]
+    return explicit
+
+
 def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[List[str]] = None, current_excel_row: int = 0, type_process: str = None,  landlord_phone: str = None) -> Optional[str]:
     try:
         address = str(data.get("address", "")).strip()
@@ -1045,7 +1140,8 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         if address_clean:
             address_clean = re.sub(r'\b(hn)\b', 'Hà Nội', address_clean)
             address_clean = re.sub(r'\b(hcm|sg|sai gon)\b', 'Hồ Chí Minh', address_clean)
-        room_name = str(data.get("room_name", "Phòng trọ")).strip()
+        raw_room_name = data.get("room_name")
+        room_name = str(raw_room_name).strip() if has_room_update_value(raw_room_name) else ""
         phone = str(data.get("landlord_phone", "")).strip().lower()
         if phone in ["", "none", "null"]:
             phone = landlord_phone
@@ -1055,11 +1151,30 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
                 return f"❌ Dòng {current_excel_row}: landlord_phone là trường bắt buộc và phải là số điện thoại Việt Nam hợp lệ."
             return "landlord_phone là trường bắt buộc và phải là số điện thoại Việt Nam hợp lệ."
         # Nếu tìm thấy thì bản ghi thì k cập nhật mà bỏ qua
-        existing_id = find_existing_room_id(address=address_clean, room_name=room_name, landlord_phone=phone)
+        existing_id = point_id or find_existing_room_id(
+            address=address_clean,
+            room_name=room_name,
+            landlord_phone=phone,
+            room_code=data.get("room_code"),
+        )
         if existing_id:
             point_id = existing_id
             if type_process == "EXCEL":
                 return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Phòng đã được bạn hoặc người dùng khác đăng ký."
+
+            old_records = qdrant_client.retrieve(
+                collection_name=COLLECTION_NAME,
+                ids=[existing_id],
+                with_payload=True,
+                with_vectors=False,
+            )
+            if not old_records or not old_records[0].payload:
+                return "Không thể tải dữ liệu phòng cũ để cập nhật. Vui lòng thử lại."
+            data = merge_room_partial_update(dict(old_records[0].payload), data, media_urls)
+            media_urls = data.get("media_urls") or []
+            address = str(data.get("address") or "").strip()
+            address_clean = address.lower()
+            room_name = str(data.get("room_name") or "Phòng trọ").strip()
         
         if not address_clean:
             if type_process == "NOT_EXCEL":
@@ -1170,7 +1285,11 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         ]
         # Nếu không nhập ngày chuyển vào
         # => lấy đúng thời gian hiện tại Việt Nam
-        if raw_move_in_text.lower() in invalid_move_in_values:
+        existing_move_in_timestamp = data.get("move_in_timestamp") if point_id else None
+        if existing_move_in_timestamp is not None:
+            move_in_date_str = raw_move_in_text or "Vào ở ngay"
+            move_in_timestamp = float(existing_move_in_timestamp)
+        elif raw_move_in_text.lower() in invalid_move_in_values:
             now_vn = datetime.now(VN_TZ)
             move_in_date_str = "Vào ở ngay"
             move_in_timestamp = now_vn.timestamp()
@@ -1598,6 +1717,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         CÁC QUY TẮC BẮT BUỘC KHI TRÍCH XUẤT ĐỊA CHỈ (address):
         1. GIỮ NGUYÊN 100% TÊN ĐƯỜNG/TÊN PHƯỜNG do người dùng nhập. KHÔNG TỰ Ý SỬA LỖI CHÍNH TẢ TÊN RIÊNG (Ví dụ: "Phan Thị Hành" KHÔNG ĐƯỢC sửa thành "Phan Thị Hạnh").
         2. Chỉ chuẩn hóa từ viết tắt viết tắt tỉnh/thành phố: HN -> Hà Nội, HCM/hcm/sg -> Hồ Chí Minh.
+        3. Khi người dùng yêu cầu CẬP NHẬT/SỬA phòng, trường nào người dùng không nhắc tới phải trả về chuỗi rỗng ""; tuyệt đối không tự điền "Không", "Chưa rõ" hoặc giá trị mặc định.
         
         CÁC QUY TẮC BẮT BUỘC KHI TRÍCH XUẤT NGÀY CÓ THỂ CHUYỂN VÀO PHÒNG ĐỂ Ở (move_in_date):
         1. Nếu người dùng CÓ NÓI RÕ ngày có thể vào ở:
@@ -1644,6 +1764,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
           "extracted_data": {{
             "address": "Địa chỉ phòng trọ...",
             "room_name": "Tên phòng trọ...",
+            "room_code": "Mã phòng 6 ký tự nếu người dùng cung cấp, nếu không thì để rỗng",
             "price": "Giá thuê (ví dụ: 3.5 triệu)...",
             "floor": "Tầng số...",
             "is_private_bathroom": "Có/Không",
@@ -1682,6 +1803,8 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         print(f"ai_reply 1: {ai_reply}")
         action = result_data.get("action")
         extracted = result_data.get("extracted_data", {})
+        address = str(extracted.get("address") or "").strip()
+        room_name = str(extracted.get("room_name") or "").strip()
         
         print(f"landlord_phone: {extracted.get("landlord_phone")}")
         print(f"phone: {phone}")
@@ -1827,7 +1950,6 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         elif action == "ADD_ROOM":
             
             # ✅ TRƯỜNG HỢP 2: ĐỊA CHỈ ĐÃ ĐỦ RÕ RÀNG -> TIẾN HÀNH LƯU DATABASE
-            address = str(extracted.get("address", "")).strip()
             if address and address.lower() not in ["null", "none", "chưa rõ", ""]:
                 #nếu người dùng chưa đăng ký phòng trên zalo hay web thì sẽ tạo mới data cho user
           
@@ -1855,13 +1977,44 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     send_zalo_request(request_phone_message)
                     return {"status": "phone_required"}
 
-                message = upsert_room_to_db(data=extracted, media_urls=all_current_media, point_id=None, type_process = "NOT_EXCEL", landlord_phone=phone)
-                if message == "SUCCESS":
-                    get_get_and_clear_pending_media(user_id)
-                    clear_pending_room(user_id)
-                    ai_reply = "Bạn đã đăng ký phòng thành công"
+                update_command = is_room_update_command(message_text)
+                existing_point_id = find_existing_room_id(
+                    address=address,
+                    room_name=extracted.get("room_name"),
+                    landlord_phone=phone,
+                    room_code=extracted.get("room_code"),
+                )
+                if update_command and not existing_point_id:
+                    ai_reply = (
+                        "❌ Không tìm thấy đúng phòng thuộc SĐT của bạn để cập nhật.\n\n"
+                        "Bạn hãy kiểm tra lại địa chỉ hoặc gửi theo cú pháp: "
+                        "Cập nhật phòng <MÃ PHÒNG> <thông tin cần sửa>.\n\n"
+                        f"{build_owned_room_reference(phone)}"
+                    )
+                    urls_to_send = []
                 else:
-                    ai_reply = message
+                    data_to_save = (
+                        keep_only_explicit_room_updates(extracted, message_text)
+                        if update_command else extracted
+                    )
+                    message = upsert_room_to_db(
+                        data=data_to_save,
+                        media_urls=all_current_media,
+                        point_id=existing_point_id,
+                        type_process="NOT_EXCEL",
+                        landlord_phone=phone,
+                    )
+                    if message == "SUCCESS":
+                        get_get_and_clear_pending_media(user_id)
+                        clear_pending_room(user_id)
+                        if existing_point_id:
+                            room_code = str(extracted.get("room_code") or "").strip().upper()
+                            code_text = f" (mã {room_code})" if room_code else ""
+                            ai_reply = f"✅ Đã cập nhật thông tin phòng{code_text} thành công."
+                        else:
+                            ai_reply = "✅ Bạn đã đăng ký phòng thành công."
+                    else:
+                        ai_reply = message
                 
         elif action == "UPDATE_STATUS":
             existing_point_id = find_existing_room_id(address=address, room_name=room_name, landlord_phone=phone)
@@ -2431,55 +2584,80 @@ def update_tokens_in_db(db: Session, new_access_token: str, new_refresh_token: s
         raise e
         
         
-def find_existing_room_id(address: str, room_name: str = "", landlord_phone: str = "") -> Optional[str]:
-    """Tìm phòng trùng dựa trên address, room_name và phone của chủ nhà trực tiếp trong Query Filter"""
+def normalize_room_address(value: str) -> str:
+    """Chuẩn hóa vừa đủ để so khớp địa chỉ nhưng không làm thay đổi tên riêng."""
+    normalized = str(value or "").strip().lower()
+    normalized = re.sub(r"[,.\-/]+", " ", normalized)
+    return re.sub(r"\s+", " ", normalized).strip()
+
+
+def find_existing_room_id(
+    address: str,
+    room_name: str = "",
+    landlord_phone: str = "",
+    room_code: str = "",
+) -> Optional[str]:
+    """Tìm duy nhất một phòng thuộc chủ nhà bằng mã hoặc địa chỉ đã chuẩn hóa."""
     try:
         safe_address = str(address or "").strip()
-        safe_room_name = str(room_name or "").strip()
-        safe_phone = str(landlord_phone or "").strip()
+        safe_room_name = str(room_name or "").strip() if has_room_update_value(room_name) else ""
+        safe_phone = format_national_phone(landlord_phone)
+        safe_code = str(room_code or "").strip().upper() if has_room_update_value(room_code) else ""
 
-        if not safe_address:
+        if not safe_phone or (not safe_address and not safe_code):
             return None
 
-        # Khởi tạo danh sách các điều kiện lọc bắt buộc (must conditions)
         must_conditions = [
             qdrant_models.FieldCondition(
-                key="address",
-                match=qdrant_models.MatchText(text=safe_address)
+                key="landlord_phone",
+                match=qdrant_models.MatchValue(value=safe_phone),
             )
         ]
-
-        # Đưa room_name vào làm điều kiện Query trực tiếp của Qdrant
-        if safe_room_name:
+        if safe_code:
             must_conditions.append(
                 qdrant_models.FieldCondition(
-                    key="room_name",
-                    match=qdrant_models.MatchValue(value=safe_room_name)
+                    key="room_code",
+                    match=qdrant_models.MatchValue(value=safe_code),
                 )
             )
-
-        # Đổi lọc theo user_id thành lọc theo số điện thoại (landlord_phone)
-        if safe_phone:
+        elif safe_address:
             must_conditions.append(
                 qdrant_models.FieldCondition(
-                    key="landlord_phone",
-                    match=qdrant_models.MatchValue(value=safe_phone)
+                    key="address",
+                    match=qdrant_models.MatchText(text=safe_address),
                 )
             )
-
-        # Truy vấn Qdrant
-        search_filter = qdrant_models.Filter(must=must_conditions)
 
         records, _ = qdrant_client.scroll(
             collection_name=COLLECTION_NAME,
-            scroll_filter=search_filter,
-            limit=1,
-            with_payload=False
+            scroll_filter=qdrant_models.Filter(must=must_conditions),
+            limit=50,
+            with_payload=True,
+            with_vectors=False,
         )
 
-        # Trả về ID nếu tìm thấy bản ghi trùng khớp
-        if records:
-            return str(records[0].id)
+        if safe_code:
+            exact_code_records = [
+                record for record in records
+                if str((record.payload or {}).get("room_code") or "").strip().upper() == safe_code
+            ]
+            return str(exact_code_records[0].id) if len(exact_code_records) == 1 else None
+
+        normalized_address = normalize_room_address(safe_address)
+        exact_address_records = [
+            record for record in records
+            if normalize_room_address((record.payload or {}).get("address")) == normalized_address
+        ]
+        if safe_room_name:
+            normalized_name = safe_room_name.casefold()
+            named_records = [
+                record for record in exact_address_records
+                if str((record.payload or {}).get("room_name") or "").strip().casefold() == normalized_name
+            ]
+            if len(named_records) == 1:
+                return str(named_records[0].id)
+        if len(exact_address_records) == 1:
+            return str(exact_address_records[0].id)
 
         return None
     except Exception as e:

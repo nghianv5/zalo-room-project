@@ -166,6 +166,20 @@ def test_zalo_media_is_attached_only_after_owned_room_confirmation():
     assert "build_room_media_choices(extracted_phone, len(pending_media))" in main_source
 
 
+def test_zalo_room_update_is_partial_and_owner_scoped():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    assert "def merge_room_partial_update" in services_source
+    assert "def keep_only_explicit_room_updates" in services_source
+    assert "def normalize_room_address" in services_source
+    assert "is_room_update_command(message_text)" in services_source
+    assert "point_id=existing_point_id" in services_source
+    assert 'key="landlord_phone"' in services_source
+    assert 'match=qdrant_models.MatchValue(value=safe_phone)' in services_source
+    assert '"has_balcony": ("ban công",)' in services_source
+    assert "Không tìm thấy đúng phòng thuộc SĐT của bạn để cập nhật" in services_source
+    assert "Đã cập nhật thông tin phòng" in services_source
+
+
 def test_excel_dialog_resets_previous_result_before_reopen():
     html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
     assert 'onclick="openExcelModal()"' in html
