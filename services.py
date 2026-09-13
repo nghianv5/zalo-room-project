@@ -5,6 +5,7 @@ import uuid
 import time
 import re
 import random
+import hashlib
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta, timezone
 import pytz
@@ -103,6 +104,12 @@ if CLOUDINARY_URL:
 
 GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY")
 gemini_client = genai.Client(api_key=GEMINI_API_KEY) if GEMINI_API_KEY else None
+GEMINI_TEXT_MODEL = os.getenv("GEMINI_TEXT_MODEL", "gemini-2.5-flash").strip()
+GEMINI_TEXT_RETRIES = max(1, min(int(os.getenv("GEMINI_TEXT_RETRIES", "2")), 3))
+GEMINI_EMBED_RETRIES = max(1, min(int(os.getenv("GEMINI_EMBED_RETRIES", "2")), 3))
+GEMINI_EMBED_CACHE_TTL = max(3600, int(os.getenv("GEMINI_EMBED_CACHE_TTL", "604800")))
+GEMINI_MAX_OUTPUT_TOKENS = max(256, int(os.getenv("GEMINI_MAX_OUTPUT_TOKENS", "2048")))
+GEMINI_EXCEL_MAX_OUTPUT_TOKENS = max(2048, int(os.getenv("GEMINI_EXCEL_MAX_OUTPUT_TOKENS", "8192")))
 
 # Bộ nhớ đệm tạm thời
 CACHE_TTL_SECONDS = 600
@@ -1064,53 +1071,92 @@ def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
         report_error("Lưu media local thất bại", e, "save_media_file")
     return zalo_media_url
 
-def get_text_embedding(text: str, retries: int = 3) -> List[float]:
+def _log_gemini_usage(response, operation: str, model_name: str) -> None:
+    """Ghi token sử dụng để theo dõi chức năng nào đang phát sinh chi phí."""
+    usage = getattr(response, "usage_metadata", None)
+    if not usage:
+        return
+    print(
+        "📊 [GEMINI USAGE] "
+        f"operation={operation} model={model_name} "
+        f"input={getattr(usage, 'prompt_token_count', 0) or 0} "
+        f"output={getattr(usage, 'candidates_token_count', 0) or 0} "
+        f"total={getattr(usage, 'total_token_count', 0) or 0}",
+        flush=True,
+    )
+
+
+def get_text_embedding(text: str, retries: int = GEMINI_EMBED_RETRIES) -> List[float]:
     if not text or not text.strip():
         return []
+    normalized_text = re.sub(r"\s+", " ", text.strip())
+    cache_key = f"gemini:embedding:{hashlib.sha256(normalized_text.encode('utf-8')).hexdigest()}"
+    try:
+        cached_vector = redis_client.get(cache_key)
+        if cached_vector:
+            parsed_vector = json.loads(cached_vector)
+            if isinstance(parsed_vector, list) and len(parsed_vector) == VECTOR_SIZE:
+                return parsed_vector
+    except Exception:
+        pass
+
     if gemini_client:
         for _ in range(retries):
             try:
                 response = gemini_client.models.embed_content(
                     model="models/gemini-embedding-001",
-                    contents=text,
+                    contents=normalized_text,
                     config=types.EmbedContentConfig(output_dimensionality=768)
                 )
                 if response and response.embedding and response.embedding.values:
-                    return response.embedding.values
+                    vector = list(response.embedding.values)
+                    _log_gemini_usage(response, "embedding", "gemini-embedding-001")
+                    try:
+                        redis_client.set(cache_key, json.dumps(vector), ex=GEMINI_EMBED_CACHE_TTL)
+                    except Exception:
+                        pass
+                    return vector
             except Exception:
                 time.sleep(1)
     if GEMINI_API_KEY:
         url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-embedding-001:embedContent?key={GEMINI_API_KEY}"
         headers = {"Content-Type": "application/json"}
-        payload = {"model": "models/gemini-embedding-001", "content": {"parts": [{"text": text}]}, "outputDimensionality": 768}
+        payload = {"model": "models/gemini-embedding-001", "content": {"parts": [{"text": normalized_text}]}, "outputDimensionality": 768}
         try:
             res = requests.post(url, headers=headers, json=payload, timeout=10).json()
             if "embedding" in res and "values" in res["embedding"]:
-                return res["embedding"]["values"]
+                vector = res["embedding"]["values"]
+                try:
+                    redis_client.set(cache_key, json.dumps(vector), ex=GEMINI_EMBED_CACHE_TTL)
+                except Exception:
+                    pass
+                return vector
         except Exception as e:
             report_error("Gemini embedding REST fallback thất bại", e, "get_text_embedding")
     return []
 
-def generate_content_with_retry(prompt: str, mime_type: str = "application/json", retries: int = 3) -> str:
+def generate_content_with_retry(prompt: str, mime_type: str = "application/json", retries: int = GEMINI_TEXT_RETRIES) -> str:
     if not gemini_client:
         return ""
-    models_to_try = ["gemini-2.5-flash", "gemini-2.0-flash", "gemini-1.5-flash"]
-    for model_name in models_to_try:
-        for attempt in range(retries):
-            try:
-                config = types.GenerateContentConfig()
-                if mime_type:
-                    config.response_mime_type = mime_type
-                response = gemini_client.models.generate_content(
-                    model=model_name, contents=prompt, config=config
-                )
-                if response and response.text:
-                    return response.text.strip()
-            except Exception as e:
-                if "503" in str(e) or "429" in str(e):
-                    time.sleep(2 ** attempt)
-                else:
-                    break
+    for attempt in range(retries):
+        try:
+            config = types.GenerateContentConfig(
+                temperature=0.1,
+                max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
+            )
+            if mime_type:
+                config.response_mime_type = mime_type
+            response = gemini_client.models.generate_content(
+                model=GEMINI_TEXT_MODEL, contents=prompt, config=config
+            )
+            _log_gemini_usage(response, "generate_content", GEMINI_TEXT_MODEL)
+            if response and response.text:
+                return response.text.strip()
+        except Exception as e:
+            if attempt + 1 < retries and any(code in str(e) for code in ("503", "429", "UNAVAILABLE")):
+                time.sleep(2 ** attempt)
+                continue
+            break
     return ""
 
 # --- QDRANT VECTOR & ROOM SERVICES ---
@@ -1234,6 +1280,21 @@ def keep_only_explicit_room_updates(data: dict, message_text: str) -> dict:
     # Giá trị đọc trực tiếp từ câu người dùng được ưu tiên hơn kết quả AI.
     explicit.update(infer_explicit_boolean_room_updates(message_text))
     return explicit
+
+
+def can_update_amenities_without_ai(message_text: str) -> bool:
+    """Chỉ bỏ qua Gemini khi câu lệnh rõ ràng và không chứa trường dạng văn bản/số."""
+    if not is_room_update_command(message_text) or not extract_room_code_for_media(message_text):
+        return False
+    if not infer_explicit_boolean_room_updates(message_text):
+        return False
+    clean_text = str(message_text or "").strip().lower()
+    complex_field_keywords = (
+        "địa chỉ", "tên phòng", "giá", "triệu", "tầng", "diện tích", "m2", "m²",
+        "người ở", "số người", "phí", "tiền điện", "tiền nước", "wifi",
+        "vào ở", "chuyển vào", "trạng thái", "tiện ích khác", "tivi", "bếp",
+    )
+    return not any(keyword in clean_text for keyword in complex_field_keywords)
 
 
 def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[List[str]] = None, current_excel_row: int = 0, type_process: str = None,  landlord_phone: str = None) -> Optional[str]:
@@ -1555,22 +1616,23 @@ def ai_validate_and_extract_room_batch(rows_list: List[dict]) -> List[Optional[d
         ]
     """
 
-    models_to_try = [
-        "models/gemini-2.5-flash", 
-        "models/gemini-2.0-flash", 
-        "models/gemini-1.5-flash"
-    ]
+    models_to_try = [GEMINI_TEXT_MODEL]
 
     for model_name in models_to_try:
-        for attempt in range(3):
+        for attempt in range(GEMINI_TEXT_RETRIES):
             # 💡 FIX LỖI: Khởi tạo parsed_data = None ngay trước khối try
             parsed_data = None 
             try:
                 response = gemini_client.models.generate_content(
                     model=model_name,
                     contents=prompt,
-                    config=types.GenerateContentConfig(response_mime_type="application/json")
+                    config=types.GenerateContentConfig(
+                        response_mime_type="application/json",
+                        temperature=0.1,
+                        max_output_tokens=GEMINI_EXCEL_MAX_OUTPUT_TOKENS,
+                    )
                 )
+                _log_gemini_usage(response, "excel_normalization", model_name)
                 
                 if response and response.text:
                     raw_text = response.text.strip()
@@ -1789,6 +1851,39 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
             send_my_rooms_overview(user_id, phone)
         return
 
+    # Cập nhật tiện ích rõ ràng bằng mã phòng không cần gọi Gemini tạo nội dung.
+    if can_update_amenities_without_ai(message_text):
+        direct_room_code = extract_room_code_for_media(message_text)
+        if not phone:
+            send_zalo_message(user_id, "⚠️ Vui lòng chia sẻ SĐT Zalo trước khi cập nhật phòng.")
+            return
+        existing_point_id = find_existing_room_id(
+            address="",
+            landlord_phone=phone,
+            room_code=direct_room_code,
+        )
+        if not existing_point_id:
+            send_zalo_message(
+                user_id,
+                f"❌ Không tìm thấy phòng {direct_room_code} thuộc SĐT của bạn.\n\n{build_owned_room_reference(phone)}",
+            )
+            return
+        direct_updates = infer_explicit_boolean_room_updates(message_text)
+        direct_updates["room_code"] = direct_room_code
+        result = upsert_room_to_db(
+            data=direct_updates,
+            point_id=existing_point_id,
+            media_urls=None,
+            type_process="NOT_EXCEL",
+            landlord_phone=phone,
+        )
+        if result == "SUCCESS":
+            changed_fields = ", ".join(sorted(set(direct_updates) - {"room_code"}))
+            send_zalo_message(user_id, f"✅ Đã cập nhật phòng {direct_room_code}: {changed_fields}.")
+        else:
+            send_zalo_message(user_id, f"❌ Không thể cập nhật phòng {direct_room_code}: {result}")
+        return
+
     try:
         
         system_prompt = f"""
@@ -1979,7 +2074,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     location_search=location_search,
                     min_price=min_p, 
                     max_price=max_p, 
-                    top_k=20
+                    top_k=10
                 )
                 print(f"search_result : {search_results}")
                 if not search_results:
@@ -1989,80 +2084,6 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                     # Cuối luồng sẽ gửi từng phòng kèm đúng media của phòng đó.
                     search_results_to_send = search_results
                     urls_to_send = []
-                    rooms_for_prompt = [
-                        {key: value for key, value in room.items() if key != "media_urls"}
-                        for room in search_results
-                    ]
-                    # ... (Đoạn gọi Gemini định dạng danh sách phòng giữ nguyên như cũ) ...
-                    # 1. Chuẩn bị Prompt cho Gemini định dạng danh sách phòng
-                    prompt_format_rooms = f"""
-                    Bạn là một trợ lý tư vấn tìm phòng trọ thân thiện và chuyên nghiệp.
-                    Nhiệm vụ của bạn:
-                    1. So sánh danh sách tiện ích của phòng với tiện ích khách yêu cầu trong prompt.
-                    2. Nếu phòng TRÙNG KHỚP HOÀN TOÀN: Giới thiệu phòng bình thường.
-                    3. Nếu phòng CHỈ ĐÁP ỨNG MỘT PHẦN (ví dụ: Đúng giá/vị trí nhưng KHÔNG CÓ Tủ Lạnh): 
-                       - Bạn BẮT BUỘC phải giải thích rõ cho khách: "Mình tìm thấy phòng đúng khu vực Phan Thị Hành giá 4.5tr, tuy nhiên phòng này HỆN CHƯA CÓ TIVI. Bạn tham khảo qua nhé:"
-                    4. Ưu tiên trả về danh sách kết quả gần giống nhất. Nếu KHÔNG CÓ phòng nào thỏa mãn địa điểm và giá yêu cầu: Thông báo không có phòng phù hợp.
-                    
-                    Dưới đây là danh sách các phòng trọ phù hợp với yêu cầu của khách hàng:
-                    Phân tích tin nhắn người dùng và trích xuất đúng 13 trường thông tin:
-
-                    1. `address`: Địa chỉ đầy đủ gộp lại.
-                    2. `room_name`: Tên hoặc số phòng (VD: Phòng 301, Phòng tầng 2...).
-                    3. `price`: Giá thuê.
-                    4. `floor`: Tầng bao nhiêu.
-                    5. `is_private_bathroom`: Vệ sinh riêng hay khép kín hay không.
-                    6. `has_ac`:  Điều hoà có hay không?
-                    7. `has_heater`: có bình nóng lạnh không?
-                    8. `has_washer`: Có máy giặt không?
-                    9. `has_fridge`: Có tủ lạnh không?
-                    10. `allow_pets`: Có cho nuôi pet không?
-                    10. `has_balcony`: Có ban công không?
-                    11. `has_window`: Có cửa sổ không?
-                    12. `has_fingerprint_lock`: Ra vào bằng khoá vân tay có hay không?
-                    13. `parking_info`: có chỗ để xe không?
-                    14. `bed`: Có giường không?
-                    15. `wardrobe`: Có tủ quần áo không?
-                    16. `room size`: Diện tích phòng bao nhiêu?
-                    17. `max_occupants`: số ng ở tối đã
-                    18. `other_amenities`: Có thêm tiện ích gì khác
-                    19. `service_fees`: Phí dịch vụ (điện, nước, wifi)...
-                    20. `status`: Trạng thái phòng ("TRỐNG" hoặc "ĐÃ CHO THUÊ").
-                    21. `move_in_date`: Ngày có thể chuyển vào phòng để ở
-                    22. `min_price`: Giá thuê thấp nhất
-                    23. `max_price`: Giá thuê cao nhất
-                    
-                    Yêu cầu của khách: "{message_text}"
-                    Danh sách phòng tìm được: {rooms_for_prompt}
-                    
-                    HƯỚNG DẪN TẠO `ai_reply`:
-                    - Liệt kê các phòng rõ ràng, dễ đọc (tên/mã phòng, địa chỉ, giá tiền, tiện ích nổi bật).
-                    - Giữ văn phong lịch sự, tư vấn nhiệt tình.
-                    - Không tự bịa ra thông tin ngoài dữ liệu được cung cấp.
-                    - Nếu "Danh sách phòng trống" RỖNG: Trả lời lịch sự báo hiện chưa có phòng phù hợp.
-                    - Nếu CÓ PHÒNG: Định dạng ngay danh sách phòng thành 1 tin nhắn phản hồi đẹp mắt trên Zalo:
-                        + Đánh số thứ tự (1, 2, 3...).
-                        + Tuyệt đối KHÔNG hiển thị các trường ghi "[Chưa cập nhật]", "Không", "Chưa rõ", "null", hoặc rỗng.
-                        + Bắt buộc hiển thị: Mã phòng, Tên phòng, Địa chỉ và Giá thuê.
-                        + Dùng emoji sinh động. KHÔNG tự chèn đường link ảnh vào văn bản.
-                        + Mỗi phòng liệt kê ngắn gọn: Tên/Số phòng, Địa chỉ, Giá thuê, và danh sách tiện ích có sẵn.
-                        + Dùng icon/emoji sinh động. KHÔNG chèn bất kỳ đường link ảnh nào.
-                        + Phải có thông tin mã phòng để người dùng đặt phòng
-                        + Tuyệt đối không hiển thị URL ảnh/video trong văn bản; hệ thống sẽ gửi media riêng.
-                        
-                    TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
-                    {{
-                      "ai_reply": "Mô tả chi tiết dạng văn bản đẹp mắt..."
-                    }}
-                    
-                    """
-                    raw_text_search = generate_content_with_retry(prompt_format_rooms, mime_type="application/json")
-                    cleaned_text_search = clean_json_string(raw_text_search)
-                    if not cleaned_text_search:
-                        raise ValueError("Phản hồi từ Gemini bị rỗng sau khi làm sạch.")
-                    result_data = json.loads(cleaned_text_search)
-                    ai_reply = result_data.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
-                    add_chat_history(user_id=user_id, user_message=None, ai_reply=ai_reply)
                     
                 # urls_to_send đã chứa media của kết quả tìm kiếm để Zalo hiển thị trực tiếp.
 
@@ -2815,7 +2836,7 @@ def bool_to_text(val, true_str, false_str=""):
     return false_str
     
     
-MAX_HISTORY_MESSAGES = 30  # Lưu 5 cặp câu hỏi - trả lời gần nhất
+MAX_HISTORY_MESSAGES = 8  # Giữ tối đa 4 cặp gần nhất để giảm token đầu vào Gemini
 CHAT_HISTORY_TTL = 7200    # Hết hạn sau 1 giờ không tương tác
 
 def get_chat_history(user_id: str) -> list:

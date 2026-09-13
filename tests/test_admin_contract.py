@@ -202,6 +202,23 @@ def test_natural_language_my_rooms_intent_is_not_tenant_search():
     assert "get_rooms_by_landlord_phone(landlord_phone, limit=50)" in services_source
 
 
+def test_gemini_cost_optimizations_are_enabled():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    env_source = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "GEMINI_TEXT_RETRIES" in services_source
+    assert 'models_to_try = [GEMINI_TEXT_MODEL]' in services_source
+    assert "def _log_gemini_usage" in services_source
+    assert 'gemini:embedding:' in services_source
+    assert "GEMINI_EMBED_CACHE_TTL" in services_source
+    assert "MAX_HISTORY_MESSAGES = 8" in services_source
+    assert "top_k=10" in services_source
+    assert "prompt_format_rooms" not in services_source
+    assert "raw_text_search" not in services_source
+    assert "def can_update_amenities_without_ai" in services_source
+    assert "if can_update_amenities_without_ai(message_text):" in services_source
+    assert "GEMINI_TEXT_MODEL=gemini-2.5-flash" in env_source
+
+
 def test_excel_dialog_resets_previous_result_before_reopen():
     html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
     assert 'onclick="openExcelModal()"' in html

@@ -14,6 +14,10 @@ Không chạy nhiều worker có scheduler riêng. Khóa Redis đã hạn chế 
 
 `ZALO_APP_ID` phải là App ID của ứng dụng liên kết OA trên Zalo Developers. Không dùng `ZALO_OA_ID` hoặc phần số trong link OA thay cho App ID. `ZALO_SECRET_KEY` phải thuộc cùng ứng dụng với `ZALO_APP_ID`; refresh token cũng phải được cấp cho đúng cặp ứng dụng/OA đó. Route `/` hỗ trợ cả GET và HEAD để health check của Render nhận HTTP 200.
 
+## Tối ưu chi phí Gemini
+
+Ứng dụng mặc định chỉ dùng `gemini-2.5-flash`, retry tối đa 2 lần, cache embedding trong Redis 7 ngày và giữ 8 tin nhắn lịch sử gần nhất. Kết quả tìm phòng được định dạng bằng code nên không gọi Gemini lần hai. Có thể điều chỉnh bằng `GEMINI_TEXT_MODEL`, `GEMINI_TEXT_RETRIES`, `GEMINI_EMBED_RETRIES`, `GEMINI_EMBED_CACHE_TTL`, `GEMINI_MAX_OUTPUT_TOKENS` và `GEMINI_EXCEL_MAX_OUTPUT_TOKENS`. Log `GEMINI USAGE` cho biết token đầu vào, đầu ra và tổng token theo từng tác vụ.
+
 ## Kiểm thử
 
 Chạy `python -m pytest -q`. Endpoint `/health` kiểm tra PostgreSQL, Redis và Qdrant.
