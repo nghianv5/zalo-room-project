@@ -6,6 +6,8 @@ import time
 import re
 import random
 import hashlib
+import ipaddress
+from urllib.parse import urlparse
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta, timezone
 import pytz
@@ -117,6 +119,44 @@ MAX_MEDIA_PER_ROOM = int(os.getenv("MAX_MEDIA_PER_ROOM", "10"))
 MAX_SEARCH_MEDIA = int(os.getenv("MAX_SEARCH_MEDIA", "10"))
 MAX_SEARCH_ROOMS = max(1, int(os.getenv("MAX_SEARCH_ROOMS", "5")))
 MAX_SEARCH_MEDIA_PER_ROOM = max(1, int(os.getenv("MAX_SEARCH_MEDIA_PER_ROOM", "3")))
+
+
+def get_public_server_domain() -> str:
+    """Trả về origin HTTPS công khai để Zalo có thể tải tệp static."""
+    domain = os.getenv("SERVER_DOMAIN", "").strip().rstrip("/")
+    try:
+        parsed = urlparse(domain)
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme != "https" or not host or host == "localhost":
+            return ""
+        try:
+            if ipaddress.ip_address(host).is_private:
+                return ""
+        except ValueError:
+            pass
+        return domain
+    except Exception:
+        return ""
+
+
+def get_zalo_request_image_url() -> str:
+    domain = get_public_server_domain()
+    return f"{domain}/static/icon_zalo_room.png" if domain else ""
+
+
+def is_valid_zalo_media_url(value: str) -> bool:
+    """Loại URL rỗng, local hoặc không HTTPS trước khi gọi Zalo OA API."""
+    try:
+        parsed = urlparse(str(value or "").strip())
+        host = (parsed.hostname or "").lower()
+        if parsed.scheme != "https" or not host or host == "localhost":
+            return False
+        try:
+            return not ipaddress.ip_address(host).is_private
+        except ValueError:
+            return True
+    except Exception:
+        return False
 
 # Initializing Qdrant Collection & Index
 try:
@@ -989,7 +1029,10 @@ def send_zalo_message(
     access_token = data_token["access_token"]
     clean_reply = re.sub(r"(?m)^\s*[-–—_]{5,}\s*", "", str(ai_reply or "")).strip()
     text_chunks = split_text_by_limit(clean_reply, max_length=1800)
-    unique_media = list(dict.fromkeys(media_urls or []))[:MAX_MEDIA_PER_ROOM]
+    unique_media = [
+        value for value in dict.fromkeys(str(item or "").strip() for item in (media_urls or []))
+        if is_valid_zalo_media_url(value)
+    ][:MAX_MEDIA_PER_ROOM]
     try:
         for idx, chunk in enumerate(text_chunks):
             message_payload = {"text": chunk}
@@ -1011,6 +1054,8 @@ def send_zalo_message(
             print(f"📩 [ZALO RES Part {idx+1}/{len(text_chunks)}]: {res_data}")
             # Một số phiên bản OA không nhận text + media chung: tự fallback an toàn.
             if res_data.get("error") != 0 and "attachment" in message_payload:
+                if res_data.get("error") == -201 and unique_media:
+                    unique_media.pop(0)
                 payload = {"recipient": {"user_id": user_id}, "message": {"text": chunk}}
                 res_data, access_token = _post_zalo_with_token_retry(url, payload, access_token)
                 combine_first_media = False
@@ -1024,6 +1069,10 @@ def send_zalo_message(
             media_type = "video" if re.search(r"\.(mp4|mov|webm)(\?|$)", media_url, re.I) else "image"
             payload = {"recipient": {"user_id": user_id}, "message": {"attachment": {"type": "template", "payload": {"template_type": "media", "elements": [{"media_type": media_type, "url": media_url}]}}}}
             res_data, access_token = _post_zalo_with_token_retry(url, payload, access_token)
+            print(f"📩 [ZALO MEDIA RES]: {res_data}")
+            if res_data.get("error") == -201:
+                report_error(f"Zalo từ chối media không hợp lệ: {media_url}", context="send_zalo_message", notify=False)
+                continue
             if res_data.get("error") != 0:
                 return False
         return True
@@ -1065,11 +1114,13 @@ def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
             with open(filepath, "wb") as f:
                 for chunk in response.iter_content(chunk_size=8192):
                     f.write(chunk)
-            server_domain = os.environ.get("SERVER_DOMAIN", "http://localhost:8000").rstrip("/")
-            return f"{server_domain}/static/media/{filename}"
+            server_domain = get_public_server_domain()
+            if server_domain:
+                return f"{server_domain}/static/media/{filename}"
+            report_error("Đã lưu media local nhưng SERVER_DOMAIN chưa phải URL HTTPS công khai", context="save_media_file", notify=False)
     except Exception as e:
         report_error("Lưu media local thất bại", e, "save_media_file")
-    return zalo_media_url
+    return ""
 
 def _log_gemini_usage(response, operation: str, model_name: str) -> None:
     """Ghi token sử dụng để theo dõi chức năng nào đang phát sinh chi phí."""
@@ -1135,9 +1186,27 @@ def get_text_embedding(text: str, retries: int = GEMINI_EMBED_RETRIES) -> List[f
             report_error("Gemini embedding REST fallback thất bại", e, "get_text_embedding")
     return []
 
+def normalize_gemini_json_text(raw_text: str) -> str:
+    """Bỏ code fence/phần thừa nhưng không tự đoán hay sửa sai nội dung JSON."""
+    cleaned = str(raw_text or "").strip()
+    cleaned = re.sub(r"^```(?:json)?\s*", "", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\s*```$", "", cleaned)
+    first_object = cleaned.find("{")
+    first_array = cleaned.find("[")
+    starts = [position for position in (first_object, first_array) if position >= 0]
+    if starts:
+        start = min(starts)
+        closing = "}" if cleaned[start] == "{" else "]"
+        end = cleaned.rfind(closing)
+        if end >= start:
+            cleaned = cleaned[start:end + 1]
+    return cleaned.strip()
+
+
 def generate_content_with_retry(prompt: str, mime_type: str = "application/json", retries: int = GEMINI_TEXT_RETRIES) -> str:
     if not gemini_client:
         return ""
+    last_error = None
     for attempt in range(retries):
         try:
             config = types.GenerateContentConfig(
@@ -1151,12 +1220,32 @@ def generate_content_with_retry(prompt: str, mime_type: str = "application/json"
             )
             _log_gemini_usage(response, "generate_content", GEMINI_TEXT_MODEL)
             if response and response.text:
-                return response.text.strip()
+                response_text = response.text.strip()
+                if mime_type == "application/json":
+                    response_text = normalize_gemini_json_text(response_text)
+                    try:
+                        json.loads(response_text)
+                    except json.JSONDecodeError as exc:
+                        last_error = exc
+                        print(
+                            f"⚠️ [GEMINI JSON INVALID] thử {attempt + 1}/{retries}: {exc}",
+                            flush=True,
+                        )
+                        continue
+                return response_text
         except Exception as e:
+            last_error = e
             if attempt + 1 < retries and any(code in str(e) for code in ("503", "429", "UNAVAILABLE")):
                 time.sleep(2 ** attempt)
                 continue
             break
+    if last_error:
+        report_error(
+            "Gemini không trả JSON hợp lệ sau khi retry",
+            last_error,
+            "generate_content_with_retry",
+            notify=False,
+        )
     return ""
 
 # --- QDRANT VECTOR & ROOM SERVICES ---
@@ -1954,10 +2043,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         "21 Phan Thị Hành giá 5tr, ngày 10/09/2026 vào ở"
         => "move_in_date": "10/09/2026"
         
-        HƯỚNG DẪN TẠO `ai_reply` CHO TỪNG ACTION:
-        1. Nếu action là "ADD_ROOM" hoặc "UPDATE_STATUS": 
-           - Viết câu xác nhận ngắn gọn, lịch sự cho chủ nhà.
-        2. Nếu action là "SEARCH_ROOM":
+        THÔNG TIN CHO ACTION "SEARCH_ROOM":
             THÔNG TIN BẮT BUỘC ĐỐI VỚI YÊU CẦU TÌM PHÒNG (SEARCH_ROOM):
             1. `location_search`: Yêu cầu người dùng nhập địa chỉ muốn thuê
             2. `min_price`: Giá thuê tối thiểu khách có thể trả (Dạng số float tính theo VNĐ, ví dụ: 2000000). Nếu khách không nói giá tối thiểu thì mặc định là 0.
@@ -1973,11 +2059,11 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         TRẢ VỀ DUY NHẤT 1 CHUỖI JSON ĐÚNG CẤU TRÚC:
         {{
           "action": "ADD_ROOM | SEARCH_ROOM | UPDATE_STATUS | LIST_MY_ROOMS",
-          "is_valid_search": true/false,
+          "is_valid_search": false,
           "extracted_search": {{
-            "location_search": "Tên đường hoặc phường/xã trích xuất được (hoặc null)",
-            "min_price": Giá thuê thấp nhất,
-            "max_price": Giá thuê cao nhất
+            "location_search": "",
+            "min_price": 0,
+            "max_price": 0
           }},
           "extracted_data": {{
             "address": "Địa chỉ phòng trọ...",
@@ -2004,8 +2090,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
             "move_in_date": "Ngày có thể chuyển vào...",
             "media_urls": {json.dumps(all_current_media)},
             "landlord_phone": "{phone}"
-          }},
-          "ai_reply": "Mô tả chi tiết dạng văn bản đẹp mắt..."
+          }}
         }}
         """
                 
@@ -2117,6 +2202,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
           
                 if not phone:
                     save_pending_room(user_id, extracted)
+                    request_image_url = get_zalo_request_image_url()
                     # 🚨 BẮT BUỘC: Nếu chưa có SĐT -> Chặn lại và yêu cầu chia sẻ SĐT
                     request_phone_message = {
                             "recipient": {"user_id": user_id},
@@ -2129,14 +2215,17 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                                         "elements": [{
                                             "title": "Xác thực Số điện thoại",
                                             "subtitle": "Yêu cầu cung cấp SĐT chính chủ trên Zalo để tạo tài khoản đăng phòng.",
-                                            "image_url": "https://your-domain.com/static/icon.png"
+                                            **({"image_url": request_image_url} if request_image_url else {})
                                         }]
                                     }
                                 }
                             }
                         }
                     # Gọi Zalo Open API gửi yêu cầu xin SĐT
-                    send_zalo_request(request_phone_message)
+                    if request_image_url:
+                        send_zalo_request(request_phone_message)
+                    else:
+                        send_zalo_message(user_id, "⚠️ Chưa thể mở nút chia sẻ SĐT vì SERVER_DOMAIN chưa được cấu hình bằng URL HTTPS công khai. Vui lòng liên hệ quản trị viên.")
                     return {"status": "phone_required"}
 
                 existing_point_id = find_existing_room_id(

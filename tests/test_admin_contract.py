@@ -219,6 +219,34 @@ def test_gemini_cost_optimizations_are_enabled():
     assert "GEMINI_TEXT_MODEL=gemini-2.5-flash" in env_source
 
 
+def test_malformed_gemini_json_is_validated_before_business_logic():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    assert "def normalize_gemini_json_text" in services_source
+    assert "json.loads(response_text)" in services_source
+    assert "except json.JSONDecodeError" in services_source
+    assert "GEMINI JSON INVALID" in services_source
+    assert "Gemini không trả JSON hợp lệ sau khi retry" in services_source
+    assert '"is_valid_search": false' in services_source
+    assert '"min_price": 0' in services_source
+    assert '"max_price": 0' in services_source
+    assert '"is_valid_search": true/false' not in services_source
+    assert '"ai_reply": "Mô tả chi tiết dạng văn bản đẹp mắt..."' not in services_source
+
+
+def test_zalo_media_urls_are_public_and_invalid_images_do_not_break_text():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    env_source = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "https://your-domain.com/static/icon.png" not in services_source
+    assert "def get_public_server_domain" in services_source
+    assert "def get_zalo_request_image_url" in services_source
+    assert "def is_valid_zalo_media_url" in services_source
+    assert 'res_data.get("error") == -201' in services_source
+    assert "request_image_url = get_zalo_request_image_url()" in services_source
+    assert "request_image_url = get_zalo_request_image_url()" in main_source
+    assert "your-render-service.onrender.com" in env_source
+
+
 def test_excel_dialog_resets_previous_result_before_reopen():
     html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
     assert 'onclick="openExcelModal()"' in html

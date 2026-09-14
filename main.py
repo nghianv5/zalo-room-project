@@ -838,6 +838,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                 tenant_phone = get_phone_by_user_id(db, str(sender_id))
                 # 🚨 Nếu chưa xác thực SĐT -> Yêu cầu chia sẻ lại SĐT
                 if not tenant_phone or tenant_phone in ["Chưa xác thực SĐT", "Chưa cập nhật", ""]:
+                    request_image_url = get_zalo_request_image_url()
                     request_phone_payload = {
                         "recipient": {"user_id": str(sender_id)},
                         "message": {
@@ -848,13 +849,16 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                                     "elements": [{
                                         "title": "Xác thực số điện thoại",
                                         "subtitle": "Vui lòng chia sẻ số điện thoại Zalo để đặt lịch xem phòng.",
-                                        "image_url": f"{os.getenv('SERVER_DOMAIN', str(request.base_url)).rstrip('/')}/static/icon_zalo_room.png"
+                                        **({"image_url": request_image_url} if request_image_url else {})
                                     }]
                                 }
                             }
                         }
                     }
-                    send_zalo_request(request_phone_payload)
+                    if request_image_url:
+                        send_zalo_request(request_phone_payload)
+                    else:
+                        send_zalo_message(str(sender_id), "⚠️ Chưa thể mở nút chia sẻ SĐT vì SERVER_DOMAIN chưa được cấu hình bằng URL HTTPS công khai. Vui lòng liên hệ quản trị viên.")
                     return {"status": "phone_required"}
 
                 room_code = booking_match.group(1).upper()
