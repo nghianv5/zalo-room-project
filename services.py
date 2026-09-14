@@ -1335,20 +1335,53 @@ def normalize_gemini_json_text(raw_text: str) -> str:
     return cleaned.strip()
 
 
+def repair_common_gemini_json_errors(raw_text: str) -> str:
+    """Sửa có giới hạn lỗi thiếu/dư dấu phẩy mà Gemini đôi khi tạo ra."""
+    cleaned = normalize_gemini_json_text(raw_text)
+    cleaned = cleaned.replace("“", '"').replace("”", '"')
+    cleaned = re.sub(r",\s*([}\]])", r"\1", cleaned)
+    json_value = r'("(?:\\.|[^"\\])*"|true|false|null|-?\d+(?:\.\d+)?|[}\]])'
+    next_key = r'(\s*)(?="[^"\\]+"\s*:)'
+    return re.sub(json_value + next_key, r"\1,\2", cleaned)
+
+
+def build_gemini_generation_config(mime_type: str, max_output_tokens: int):
+    """Tắt AFC/thinking khi SDK hỗ trợ vì luồng này chỉ cần JSON, không gọi tool."""
+    base_options = {
+        "temperature": 0.0,
+        "max_output_tokens": max_output_tokens,
+    }
+    if mime_type:
+        base_options["response_mime_type"] = mime_type
+
+    optimized_options = dict(base_options)
+    automatic_config = getattr(types, "AutomaticFunctionCallingConfig", None)
+    thinking_config = getattr(types, "ThinkingConfig", None)
+    if automatic_config:
+        optimized_options["automatic_function_calling"] = automatic_config(disable=True)
+    if thinking_config:
+        optimized_options["thinking_config"] = thinking_config(thinking_budget=0)
+    try:
+        return types.GenerateContentConfig(**optimized_options)
+    except (TypeError, ValueError):
+        # Tương thích các bản google-genai cũ chưa có hai tùy chọn trên.
+        return types.GenerateContentConfig(**base_options)
+
+
+class GeminiOutputError(RuntimeError):
+    """Gemini có phản hồi nhưng không tạo được JSON dùng được sau khi phục hồi."""
+
+
 def generate_content_with_retry(prompt: str, mime_type: str = "application/json", retries: int = GEMINI_TEXT_RETRIES) -> str:
     if not gemini_client:
         return ""
     last_error = None
+    current_prompt = prompt
     for attempt in range(retries):
         try:
-            config = types.GenerateContentConfig(
-                temperature=0.1,
-                max_output_tokens=GEMINI_MAX_OUTPUT_TOKENS,
-            )
-            if mime_type:
-                config.response_mime_type = mime_type
+            config = build_gemini_generation_config(mime_type, GEMINI_MAX_OUTPUT_TOKENS)
             response = gemini_client.models.generate_content(
-                model=GEMINI_TEXT_MODEL, contents=prompt, config=config
+                model=GEMINI_TEXT_MODEL, contents=current_prompt, config=config
             )
             _log_gemini_usage(response, "generate_content", GEMINI_TEXT_MODEL)
             if response and response.text:
@@ -1358,10 +1391,20 @@ def generate_content_with_retry(prompt: str, mime_type: str = "application/json"
                     try:
                         json.loads(response_text)
                     except json.JSONDecodeError as exc:
-                        last_error = exc
+                        repaired_text = repair_common_gemini_json_errors(response_text)
+                        try:
+                            json.loads(repaired_text)
+                            return repaired_text
+                        except json.JSONDecodeError:
+                            last_error = exc
                         print(
                             f"⚠️ [GEMINI JSON INVALID] thử {attempt + 1}/{retries}: {exc}",
                             flush=True,
+                        )
+                        current_prompt = (
+                            "Sửa JSON dưới đây thành JSON hợp lệ. Giữ nguyên dữ liệu và khóa, "
+                            "chỉ sửa cú pháp. Chỉ trả về JSON, không giải thích:\n"
+                            f"{response_text}"
                         )
                         continue
                 return response_text
@@ -1892,10 +1935,8 @@ def ai_validate_and_extract_room_batch(rows_list: List[dict]) -> List[Optional[d
                 response = gemini_client.models.generate_content(
                     model=model_name,
                     contents=prompt,
-                    config=types.GenerateContentConfig(
-                        response_mime_type="application/json",
-                        temperature=0.1,
-                        max_output_tokens=GEMINI_EXCEL_MAX_OUTPUT_TOKENS,
+                    config=build_gemini_generation_config(
+                        "application/json", GEMINI_EXCEL_MAX_OUTPUT_TOKENS
                     )
                 )
                 _log_gemini_usage(response, "excel_normalization", model_name)
@@ -2314,15 +2355,24 @@ def process_zalo_ai_logic(
         }}
         """
                 
-        raw_text = generate_content_with_retry(system_prompt, mime_type="application/json")
-        if not raw_text:
-            raise Exception("Gemini không phản hồi dữ liệu.")
-            
-        # Clean chuỗi trước khi load JSON
-        cleaned_text = clean_json_string(raw_text)
-        if not cleaned_text:
-            raise ValueError("Phản hồi từ Gemini bị rỗng sau khi làm sạch.")
-        result_data = json.loads(cleaned_text)
+        if listing_intent:
+            # Tin đăng rõ ràng được xử lý nội bộ, không tốn token và không phụ thuộc JSON Gemini.
+            result_data = {
+                "action": "ADD_ROOM",
+                "is_valid_search": False,
+                "extracted_search": {"location_search": "", "min_price": 0, "max_price": 0},
+                "extracted_data": apply_direct_room_listing_fallbacks({}, message_text),
+                "ai_reply": "Dạ em đã ghi nhận thông tin đăng phòng.",
+            }
+        else:
+            raw_text = generate_content_with_retry(system_prompt, mime_type="application/json")
+            if not raw_text:
+                raise GeminiOutputError("Gemini không tạo được JSON hợp lệ sau khi phục hồi.")
+
+            cleaned_text = clean_json_string(raw_text)
+            if not cleaned_text:
+                raise GeminiOutputError("Phản hồi Gemini bị rỗng sau khi làm sạch.")
+            result_data = json.loads(cleaned_text)
         ai_reply = result_data.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
         print(f"ai_reply 1: {ai_reply}")
         action = result_data.get("action")
@@ -2534,6 +2584,13 @@ def process_zalo_ai_logic(
                 new_status = extracted.get("status") or "ĐÃ CHO THUÊ"
                 update_room_status_in_db(point_id=existing_point_id, new_status=new_status)
 
+    except GeminiOutputError:
+        ai_reply = (
+            "⚠️ Tôi chưa đọc được đầy đủ yêu cầu. Bạn vui lòng gửi lại ngắn gọn, ví dụ:\n"
+            "• Tìm phòng Phan Thị Hành giá 5 triệu\n"
+            "• Cho thuê phòng ở 15 Phan Thị Hành, 20m2, giá 5 triệu"
+        )
+        urls_to_send = []
     except Exception as err:
         report_error("Xử lý AI Zalo thất bại", err, "process_zalo_ai_logic")
         ai_reply = "Dạ hệ thống đang bận một chút, anh/chị chờ em vài giây rồi nhắn lại giúp em nhé!"

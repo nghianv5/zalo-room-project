@@ -231,6 +231,23 @@ def test_malformed_gemini_json_is_validated_before_business_logic():
     assert '"max_price": 0' in services_source
     assert '"is_valid_search": true/false' not in services_source
     assert '"ai_reply": "Mô tả chi tiết dạng văn bản đẹp mắt..."' not in services_source
+    assert "def repair_common_gemini_json_errors" in services_source
+    assert "repaired_text = repair_common_gemini_json_errors(response_text)" in services_source
+    assert "Sửa JSON dưới đây thành JSON hợp lệ" in services_source
+    assert "class GeminiOutputError" in services_source
+    assert "except GeminiOutputError:" in services_source
+
+
+def test_gemini_json_calls_disable_unneeded_afc_and_thinking():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    assert "def build_gemini_generation_config" in services_source
+    assert 'automatic_config(disable=True)' in services_source
+    assert 'thinking_config(thinking_budget=0)' in services_source
+    assert 'contents=current_prompt' in services_source
+    assert 'config=build_gemini_generation_config(' in services_source
+    assert "if listing_intent:" in services_source
+    assert '"action": "ADD_ROOM"' in services_source
+    assert "Tin đăng rõ ràng được xử lý nội bộ" in services_source
 
 
 def test_zalo_media_urls_are_public_and_invalid_images_do_not_break_text():
