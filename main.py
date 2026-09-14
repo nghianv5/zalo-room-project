@@ -192,20 +192,53 @@ async def register_user(data: RegisterModel, request: Request, db: Session = Dep
     
 # --- ROOM MANAGEMENT ROUTES ---
 @app.delete("/api/rooms/{point_id}")
-def delete_room_from_web(point_id: str, user: Principal = Depends(get_current_user)):
+def delete_room_from_web(
+    point_id: str,
+    user: Principal = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     try:
-        records = qdrant_client.retrieve(collection_name=COLLECTION_NAME, ids=[point_id])
-        if not records or not records[0].payload:
+        records = qdrant_client.retrieve(
+            collection_name=COLLECTION_NAME,
+            ids=[point_id],
+            with_payload=True,
+            with_vectors=False,
+        )
+        qdrant_room = records[0] if records and records[0].payload else None
+        mirror_room = db.query(RoomRecord).filter(RoomRecord.id == str(point_id)).first()
+        if not qdrant_room and not mirror_room:
             raise HTTPException(status_code=404, detail="Không tìm thấy phòng.")
-        owner = records[0].payload.get("landlord_phone")
+        owner = qdrant_room.payload.get("landlord_phone") if qdrant_room else mirror_room.landlord_phone
         if user.role != "SUPER_ADMIN" and owner != user.username:
             raise HTTPException(status_code=403, detail="Bạn không có quyền xóa phòng này.")
-        qdrant_client.set_payload(collection_name=COLLECTION_NAME, payload={"status": "ĐÃ XÓA", "deleted_at": datetime.now(VN_TZ).isoformat()}, points=[point_id], wait=True)
-        write_audit_log(user.username, "ROOM_SOFT_DELETE", point_id)
-        return {"status": "success", "message": "Đã chuyển phòng vào thùng rác!"}
+
+        if qdrant_room:
+            qdrant_client.delete(
+                collection_name=COLLECTION_NAME,
+                points_selector=qdrant_models.PointIdsList(points=[point_id]),
+                wait=True,
+            )
+        room_code = str(
+            qdrant_room.payload.get("room_code") if qdrant_room
+            else mirror_room.room_code or ""
+        )
+        if mirror_room:
+            db.delete(mirror_room)
+        db.commit()
+
+        write_audit_log(
+            user.username,
+            "ROOM_PERMANENT_DELETE",
+            point_id,
+            {"room_code": room_code, "landlord_phone": owner},
+        )
+        return {"status": "success", "message": "Đã xóa vĩnh viễn phòng khỏi hệ thống!"}
     except HTTPException:
+        db.rollback()
         raise
     except Exception as e:
+        db.rollback()
+        report_error("Xóa vĩnh viễn phòng thất bại", e, f"room:{point_id}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

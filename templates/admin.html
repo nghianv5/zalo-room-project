@@ -669,7 +669,7 @@
           $("deleteSelectedBtn").classList.toggle("hidden",!n)
       }
       async function deleteRoom(id,confirming=true) {
-          if(confirming&&!confirm("Xác nhận xóa phòng?"))return false;
+          if(confirming&&!confirm("Xóa vĩnh viễn phòng này khỏi Qdrant và PostgreSQL? Dữ liệu phòng sẽ không thể khôi phục."))return false;
           let r=await api(`/api/rooms/${encodeURIComponent(id)}`, {
               method:"DELETE"
           }
@@ -683,7 +683,7 @@
       }
       async function deleteSelected() {
           let ids=[...document.querySelectorAll(".roomCheck:checked")].map(x=>x.value);
-          if(!ids.length||!confirm(`Xóa ${ids.length} phòng?`))return;
+          if(!ids.length||!confirm(`Xóa vĩnh viễn ${ids.length} phòng khỏi Qdrant và PostgreSQL? Thao tác này không thể khôi phục.`))return;
           for(let id of ids)if(!await deleteRoom(id,false))break;
           loadRooms()
       }

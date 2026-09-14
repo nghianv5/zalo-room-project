@@ -295,6 +295,25 @@ def test_admin_rooms_show_all_records_with_server_pagination():
     assert "limit:\"100\"" not in html
 
 
+def test_admin_room_delete_is_permanent_in_qdrant_and_postgres():
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
+    readme = (ROOT / "README.md").read_text(encoding="utf-8")
+    route_start = main_source.index('@app.delete("/api/rooms/{point_id}")')
+    route_end = main_source.index('@app.post("/api/rooms")', route_start)
+    delete_route = main_source[route_start:route_end]
+    assert "db: Session = Depends(get_db)" in delete_route
+    assert "qdrant_client.delete(" in delete_route
+    assert "qdrant_models.PointIdsList(points=[point_id])" in delete_route
+    assert "db.delete(mirror_room)" in delete_route
+    assert '"ROOM_PERMANENT_DELETE"' in delete_route
+    assert "qdrant_client.set_payload" not in delete_route
+    assert '"ROOM_SOFT_DELETE"' not in delete_route
+    assert "Xóa vĩnh viễn phòng này" in html
+    assert "Xóa vĩnh viễn ${ids.length} phòng" in html
+    assert "xóa vĩnh viễn bản ghi khỏi cả Qdrant" in readme
+
+
 def test_excel_dialog_resets_previous_result_before_reopen():
     html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
     assert 'onclick="openExcelModal()"' in html
