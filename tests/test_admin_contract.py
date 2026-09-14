@@ -242,8 +242,8 @@ def test_zalo_media_urls_are_public_and_invalid_images_do_not_break_text():
     assert "def get_zalo_request_image_url" in services_source
     assert "def is_valid_zalo_media_url" in services_source
     assert 'res_data.get("error") == -201' in services_source
-    assert "request_image_url = get_zalo_request_image_url()" in services_source
-    assert "request_image_url = get_zalo_request_image_url()" in main_source
+    assert "request_image_url = get_zalo_request_image_url(public_base_url)" in services_source
+    assert "request_image_url = get_zalo_request_image_url(public_request_base_url)" in main_source
     assert "your-render-service.onrender.com" in env_source
 
 
@@ -347,6 +347,38 @@ def test_room_media_is_grouped_by_room_and_all_media_is_displayed():
     assert "/\\/video\\/upload\\//i" in html
     assert "MAX_MEDIA_PER_ROOM=0" in env_source
     assert "MAX_SEARCH_MEDIA_PER_ROOM=0" in env_source
+
+
+def test_zalo_phone_share_uses_render_and_webhook_https_fallbacks():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    env_source = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert 'def get_public_server_domain(fallback_url: str = "")' in services_source
+    assert 'os.getenv("RENDER_EXTERNAL_URL", "")' in services_source
+    assert 'def get_zalo_request_image_url(fallback_url: str = "")' in services_source
+    assert 'public_base_url: str = ""' in services_source
+    assert "get_zalo_request_image_url(public_base_url)" in services_source
+    assert "public_request_base_url = str(request.base_url)" in main_source
+    assert "get_zalo_request_image_url(public_request_base_url)" in main_source
+    assert "public_base_url=public_request_base_url" in main_source
+    assert "RENDER_EXTERNAL_URL=" in env_source
+
+
+def test_detailed_vietnamese_location_search_is_accent_tolerant():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    env_source = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "def normalize_location_search" in services_source
+    assert "unicodedata.normalize(\"NFD\"" in services_source
+    assert "def get_location_match_level" in services_source
+    assert 'str(location_search or "").split(",", 1)[0]' in services_source
+    assert "accepted_level = best_level if best_level >= 2 else 1" in services_source
+    assert "rooms.sort(key=parse_price_safe, reverse=True)" in services_source
+    search_start = services_source.index("def search_rooms_with_filter(")
+    search_end = services_source.index("def refresh_zalo_tokens", search_start)
+    search_source = services_source[search_start:search_end]
+    assert "MatchText(text=location_search)" not in search_source
+    assert "get_text_embedding(query_text)" not in search_source
+    assert "SEARCH_CANDIDATE_LIMIT=2000" in env_source
 
 
 def test_excel_dialog_resets_previous_result_before_reopen():

@@ -8,6 +8,7 @@ import re
 import random
 import hashlib
 import ipaddress
+import unicodedata
 from urllib.parse import urlparse
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta, timezone
@@ -95,6 +96,7 @@ Base = declarative_base()
 # External Clients
 QDRANT_TIMEOUT_SECONDS = float(os.getenv("QDRANT_TIMEOUT_SECONDS", "30"))
 QDRANT_SEARCH_RETRIES = max(1, int(os.getenv("QDRANT_SEARCH_RETRIES", "3")))
+SEARCH_CANDIDATE_LIMIT = max(100, int(os.getenv("SEARCH_CANDIDATE_LIMIT", "2000")))
 qdrant_client = QdrantClient(
     url=os.environ.get("QDRANT_URL"),
     api_key=os.environ.get("QDRANT_API_KEY"),
@@ -124,26 +126,33 @@ MAX_IMAGE_UPLOAD_BYTES = max(1, int(os.getenv("MAX_IMAGE_UPLOAD_MB", "15"))) * 1
 MAX_VIDEO_UPLOAD_BYTES = max(1, int(os.getenv("MAX_VIDEO_UPLOAD_MB", "80"))) * 1024 * 1024
 
 
-def get_public_server_domain() -> str:
-    """Trả về origin HTTPS công khai để Zalo có thể tải tệp static."""
-    domain = os.getenv("SERVER_DOMAIN", "").strip().rstrip("/")
-    try:
-        parsed = urlparse(domain)
-        host = (parsed.hostname or "").lower()
-        if parsed.scheme != "https" or not host or host == "localhost":
-            return ""
+def get_public_server_domain(fallback_url: str = "") -> str:
+    """Lấy origin HTTPS công khai từ cấu hình Render hoặc request hiện tại."""
+    candidates = (
+        os.getenv("SERVER_DOMAIN", ""),
+        os.getenv("RENDER_EXTERNAL_URL", ""),
+        fallback_url,
+    )
+    for candidate in candidates:
         try:
-            if ipaddress.ip_address(host).is_private:
-                return ""
-        except ValueError:
-            pass
-        return domain
-    except Exception:
-        return ""
+            parsed = urlparse(str(candidate or "").strip())
+            host = (parsed.hostname or "").lower()
+            if parsed.scheme != "https" or not host or host == "localhost" or not parsed.netloc:
+                continue
+            try:
+                if ipaddress.ip_address(host).is_private:
+                    continue
+            except ValueError:
+                pass
+            # Chỉ giữ scheme + host/port; loại path/query có thể bị nhập nhầm.
+            return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+        except Exception:
+            continue
+    return ""
 
 
-def get_zalo_request_image_url() -> str:
-    domain = get_public_server_domain()
+def get_zalo_request_image_url(fallback_url: str = "") -> str:
+    domain = get_public_server_domain(fallback_url)
     return f"{domain}/static/icon_zalo_room.png" if domain else ""
 
 
@@ -1918,7 +1927,13 @@ def process_excel_file(file_url: str, sender_id: str) -> str:
             os.remove(temp_file)
         return "Lỗi trong quá trình xử lý file Excel."
 
-def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: str = "SYSTEM", db: Session = None):
+def process_zalo_ai_logic(
+    message_text: str,
+    media_items: list = None,
+    user_id: str = "SYSTEM",
+    db: Session = None,
+    public_base_url: str = "",
+):
     incoming_media_urls = []
     for item in (media_items or []):
         saved_url = save_media_file(item["url"], is_video=item.get("is_video", False))
@@ -2275,7 +2290,7 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
           
                 if not phone:
                     save_pending_room(user_id, extracted)
-                    request_image_url = get_zalo_request_image_url()
+                    request_image_url = get_zalo_request_image_url(public_base_url)
                     # 🚨 BẮT BUỘC: Nếu chưa có SĐT -> Chặn lại và yêu cầu chia sẻ SĐT
                     request_phone_message = {
                             "recipient": {"user_id": user_id},
@@ -2732,6 +2747,40 @@ def parse_price_safe(room: dict) -> float:
         pass
         
     return 999_999_999.0
+
+
+def normalize_location_search(value: str) -> str:
+    """Chuẩn hóa dấu tiếng Việt, dấu câu và khoảng trắng để so khớp địa chỉ."""
+    text_value = str(value or "").strip().lower().replace("đ", "d")
+    text_value = "".join(
+        char for char in unicodedata.normalize("NFD", text_value)
+        if unicodedata.category(char) != "Mn"
+    )
+    text_value = re.sub(r"\b(?:tp\.?\s*hcm|tphcm|sai\s*gon)\b", "ho chi minh", text_value)
+    text_value = re.sub(r"[^a-z0-9]+", " ", text_value)
+    return re.sub(r"\s+", " ", text_value).strip()
+
+
+def get_location_match_level(address: str, location_search: str) -> int:
+    """3: khớp đầy đủ; 2: đủ từ khóa; 1: khớp tên đường; 0: không khớp."""
+    normalized_address = normalize_location_search(address)
+    normalized_query = normalize_location_search(location_search)
+    if not normalized_address or not normalized_query:
+        return 0
+    if normalized_query in normalized_address:
+        return 3
+
+    ignored_tokens = {"duong", "phuong", "quan", "huyen", "thi", "xa", "thanh", "pho", "tp"}
+    query_tokens = [token for token in normalized_query.split() if token not in ignored_tokens]
+    address_tokens = set(normalized_address.split())
+    if query_tokens and all(token in address_tokens for token in query_tokens):
+        return 2
+
+    first_component = normalize_location_search(str(location_search or "").split(",", 1)[0])
+    first_component = re.sub(r"^\s*(?:duong)\s+", "", first_component).strip()
+    if first_component and first_component in normalized_address:
+        return 1
+    return 0
     
     
     
@@ -2751,14 +2800,6 @@ def search_rooms_with_filter(
     ]
 
 
-    if location_search:
-        must_conditions.append(
-            qdrant_models.FieldCondition(
-                key="address",
-                match=qdrant_models.MatchText(text=location_search) # Tìm tương đối tên đường/quận trong address
-            )
-        )
-
     # 🆕 Bổ sung lọc theo khoảng Giá tối thiểu - Giá tối đa
     price_range = {}
     if min_price > 0:
@@ -2775,54 +2816,47 @@ def search_rooms_with_filter(
         )
 
     status_filter = qdrant_models.Filter(must=must_conditions)
-    query_vector = get_text_embedding(query_text)
     print(f"query_text : {query_text}")
     safe_top_k = min(max(int(top_k or 20), 1), 100)
-    rooms = []
-
-    if query_vector:
-        for attempt in range(1, QDRANT_SEARCH_RETRIES + 1):
-            try:
-                search_result = qdrant_client.query_points(
-                    collection_name=COLLECTION_NAME,
-                    query=query_vector,
-                    query_filter=status_filter,
-                    limit=safe_top_k,
-                    with_payload=True
-                )
-                rooms = [
-                    hit.payload | {"id": str(hit.id)}
-                    for hit in search_result.points
-                    if hit.payload
-                ]
-                break
-            except Exception as exc:
-                print(f"⚠️ [QDRANT VECTOR SEARCH {attempt}/{QDRANT_SEARCH_RETRIES}]: {exc}")
-                if attempt < QDRANT_SEARCH_RETRIES:
-                    time.sleep(min(2 ** (attempt - 1), 4))
-
-    # Fallback không dùng vector nhưng vẫn giữ nguyên lọc địa chỉ, giá và trạng thái.
-    if not rooms:
-        try:
-            records, _ = qdrant_client.scroll(
+    candidates = []
+    try:
+        scroll_offset = None
+        while len(candidates) < SEARCH_CANDIDATE_LIMIT:
+            records, next_offset = qdrant_client.scroll(
                 collection_name=COLLECTION_NAME,
                 scroll_filter=status_filter,
-                limit=safe_top_k,
+                limit=min(256, SEARCH_CANDIDATE_LIMIT - len(candidates)),
+                offset=scroll_offset,
                 with_payload=True,
                 with_vectors=False
             )
-            rooms = [
+            candidates.extend(
                 record.payload | {"id": str(record.id)}
                 for record in records
                 if record.payload
-            ]
-            if rooms:
-                print(f"✅ [QDRANT FALLBACK]: Tìm thấy {len(rooms)} phòng bằng bộ lọc.")
-        except Exception as exc:
-            report_error("Qdrant search fallback thất bại", exc, "search_rooms_by_filter")
-            return []
+            )
+            if next_offset is None or next_offset == scroll_offset:
+                break
+            scroll_offset = next_offset
+    except Exception as exc:
+        report_error("Qdrant search filter thất bại", exc, "search_rooms_by_filter")
+        return []
 
-    rooms.sort(key=parse_price_safe)
+    if location_search:
+        match_levels = [
+            (get_location_match_level(room.get("address"), location_search), room)
+            for room in candidates
+        ]
+        # Ưu tiên địa chỉ đầy đủ. Chỉ fallback tên đường nếu không có bản ghi nào
+        # khớp toàn bộ, tránh câu tìm chi tiết bị trả rỗng vì khác dấu/cách viết.
+        best_level = max((level for level, _ in match_levels), default=0)
+        accepted_level = best_level if best_level >= 2 else 1
+        rooms = [room for level, room in match_levels if level >= accepted_level]
+    else:
+        rooms = candidates
+
+    # Với truy vấn "6tr", giá tối đa đã lọc ở Qdrant; ưu tiên phòng gần 6tr nhất.
+    rooms.sort(key=parse_price_safe, reverse=True)
     return rooms[:safe_top_k]
         
 

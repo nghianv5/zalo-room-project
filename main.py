@@ -859,6 +859,7 @@ def delete_admin_order(
 # --- WEBHOOK ZALO ---
 @app.post("/webhook/zalo")
 async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: Session = Depends(get_db)):
+    public_request_base_url = str(request.base_url)
     try:
         await verify_zalo_webhook(request)
         data = await request.json()
@@ -997,7 +998,7 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                 tenant_phone = get_phone_by_user_id(db, str(sender_id))
                 # 🚨 Nếu chưa xác thực SĐT -> Yêu cầu chia sẻ lại SĐT
                 if not tenant_phone or tenant_phone in ["Chưa xác thực SĐT", "Chưa cập nhật", ""]:
-                    request_image_url = get_zalo_request_image_url()
+                    request_image_url = get_zalo_request_image_url(public_request_base_url)
                     request_phone_payload = {
                         "recipient": {"user_id": str(sender_id)},
                         "message": {
@@ -1052,7 +1053,13 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
             def handle_zalo_message():
                 task_db = SessionLocal()
                 try:
-                    process_zalo_ai_logic(text, media_items, sender_id, task_db)
+                    process_zalo_ai_logic(
+                        text,
+                        media_items,
+                        sender_id,
+                        task_db,
+                        public_base_url=public_request_base_url,
+                    )
                 except Exception as exc:
                     report_error("Xử lý tin nhắn Zalo nền thất bại", exc, f"zalo_user:{sender_id}")
                 finally:

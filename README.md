@@ -14,7 +14,7 @@ Không chạy nhiều worker có scheduler riêng. Khóa Redis đã hạn chế 
 
 `ZALO_APP_ID` phải là App ID của ứng dụng liên kết OA trên Zalo Developers. Không dùng `ZALO_OA_ID` hoặc phần số trong link OA thay cho App ID. `ZALO_SECRET_KEY` phải thuộc cùng ứng dụng với `ZALO_APP_ID`; refresh token cũng phải được cấp cho đúng cặp ứng dụng/OA đó. Route `/` hỗ trợ cả GET và HEAD để health check của Render nhận HTTP 200.
 
-`SERVER_DOMAIN` phải là origin HTTPS công khai của Web Service Render, ví dụ `https://zalo-room-app.onrender.com`. Tệp `/static/icon_zalo_room.png` phải mở được công khai và trả HTTP 200. Hệ thống loại URL local/không HTTPS, bỏ qua media bị Zalo trả lỗi `-201` nhưng vẫn gửi nội dung phòng, và không lưu lại URL media tạm của webhook khi quá trình lưu bền vững thất bại.
+`SERVER_DOMAIN` phải là origin HTTPS công khai của Web Service Render, ví dụ `https://zalo-room-app.onrender.com`, không phải URL PostgreSQL. Tệp `/static/icon_zalo_room.png` phải mở được công khai và trả HTTP 200. Nếu thiếu `SERVER_DOMAIN`, source lần lượt dùng `RENDER_EXTERNAL_URL` và HTTPS base URL của webhook làm dự phòng. Hệ thống loại URL local/không HTTPS, bỏ qua media bị Zalo trả lỗi `-201` nhưng vẫn gửi nội dung phòng, và không lưu lại URL media tạm của webhook khi quá trình lưu bền vững thất bại.
 
 ## Tối ưu chi phí Gemini
 
@@ -41,6 +41,8 @@ Trang Admin cho phép tích chọn nhiều phòng để xóa theo danh sách đa
 Khi tìm phòng, hệ thống không in đường dẫn `media_urls`. Mỗi phòng được gửi thành một cụm riêng theo thứ tự: thông tin phòng, tiêu đề ghi đúng mã phòng, toàn bộ ảnh/video, rồi thông báo kết thúc cụm trước khi chuyển sang phòng tiếp theo. Admin cũng hiển thị gallery riêng trong từng dòng phòng; ảnh và video được phân loại, video có trình phát. `MAX_MEDIA_PER_ROOM=0`, `MAX_SEARCH_MEDIA_PER_ROOM=0` và `MAX_SEARCH_MEDIA=0` nghĩa là không giới hạn media; `MAX_SEARCH_ROOMS` vẫn giới hạn số phòng của một lượt tìm để tránh gửi quá nhiều phòng không liên quan.
 
 Tìm kiếm Qdrant dùng timeout 30 giây và retry 3 lần theo mặc định. Nếu vector search vẫn lỗi hoặc timeout, hệ thống fallback sang `scroll` với cùng bộ lọc trạng thái, địa chỉ và giá. Có thể chỉnh bằng `QDRANT_TIMEOUT_SECONDS` và `QDRANT_SEARCH_RETRIES`.
+
+Tìm địa chỉ dài được chuẩn hóa dấu tiếng Việt (`hoà/hòa`), dấu câu và khoảng trắng rồi đối chiếu theo các thành phần đường–phường–quận. Hệ thống lọc Qdrant theo trạng thái và giá trước; nếu không có địa chỉ khớp đầy đủ mới fallback theo tên đường. Vì vậy `xem phòng phan thị hành, phú thọ hoà, tân phú 6tr` vẫn tìm được dữ liệu có cách viết tương đương. `SEARCH_CANDIDATE_LIMIT` giới hạn số bản ghi được kiểm tra trong một lượt (mặc định 2.000).
 
 ## Quản trị phòng và đặt phòng
 
