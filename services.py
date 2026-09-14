@@ -1136,38 +1136,65 @@ def submit_zalo_room_report(db: Session, user_id: str, room_code: str, content: 
         return "⚠️ Chưa thể lưu report lúc này. Bạn vui lòng thử lại sau."
 
 
-def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
-    """Gửi mỗi phòng thành một cụm riêng và hiển thị toàn bộ media của phòng."""
+def send_zalo_search_results(
+    user_id: str,
+    search_results: List[dict],
+) -> bool:
+    """
+    Hiển thị từng phòng thành một nhóm riêng:
+
+    1. Gửi toàn bộ ảnh/video của phòng.
+    2. Gửi thông tin phòng.
+    3. Sau đó mới chuyển sang phòng tiếp theo.
+    """
     rooms = list(search_results or [])[:MAX_SEARCH_ROOMS]
     if not rooms:
         return False
 
-    intro = f"🔎 Tìm thấy {len(search_results)} phòng phù hợp. Dưới đây là các phòng nổi bật:"
+    intro = (
+        f"🔎 Tìm thấy {len(search_results)} phòng phù hợp. "
+        "Dưới đây là các phòng nổi bật:"
+    )
     if not send_zalo_message(user_id, intro):
         return False
 
     for position, room in enumerate(rooms, start=1):
-        room_code = str(room.get("room_code") or f"PHÒNG {position}").strip().upper()
+        room_code = str(
+            room.get("room_code") or f"PHÒNG {position}"
+        ).strip().upper()
+
         room_media = _normalise_room_media(room, 0)
+
         if room_media:
             room_message = (
                 f"{format_room_search_message(room, position)}\n"
-                f"📸 Ảnh/video phòng {room_code}: {len(room_media)} tệp"
+                f"📸 Đã hiển thị {len(room_media)} ảnh/video "
+                f"của phòng {room_code} ở phía trên."
             )
+
+            # Gửi toàn bộ media trước, sau đó mới gửi nội dung phòng.
             if not send_zalo_message(
-                user_id,
-                room_message,
+                user_id=user_id,
+                ai_reply=room_message,
                 media_urls=room_media,
-                combine_first_media=True,
+                media_first=True,
             ):
                 return False
-            if not send_zalo_message(user_id, f"✅ Đã hiển thị hết ảnh/video của phòng {room_code}."):
-                return False
         else:
-            room_message = f"{format_room_search_message(room, position)}\n📷 Phòng {room_code} chưa có ảnh/video."
-            if not send_zalo_message(user_id, room_message):
+            room_message = (
+                f"{format_room_search_message(room, position)}\n"
+                f"📷 Phòng {room_code} chưa có ảnh/video."
+            )
+
+            if not send_zalo_message(
+                user_id=user_id,
+                ai_reply=room_message,
+            ):
                 return False
-        time.sleep(0.3)
+
+        # Tách rõ phòng hiện tại với phòng tiếp theo.
+        time.sleep(0.5)
+
     return True
 
 
@@ -1227,68 +1254,231 @@ def send_zalo_message(
     ai_reply: str,
     media_urls: list = None,
     combine_first_media: bool = False,
+    media_first: bool = False,
 ) -> bool:
+    """
+    Gửi tin nhắn và media lên Zalo.
+
+    media_first=True:
+        Gửi toàn bộ ảnh/video trước, sau đó mới gửi nội dung.
+
+    combine_first_media=True:
+        Ghép ảnh đầu tiên với nội dung như chức năng cũ.
+        Không áp dụng nếu media_first=True.
+    """
     db = SessionLocal()
+
     try:
         data_token = get_current_tokens_from_db(db)
     finally:
         db.close()
+
     if not data_token or not data_token.get("access_token"):
-        report_error("Thiếu Zalo access token để gửi tin nhắn", context="send_zalo_message", notify=False)
+        report_error(
+            "Thiếu Zalo access token để gửi tin nhắn",
+            context="send_zalo_message",
+            notify=False,
+        )
         return False
 
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
     access_token = data_token["access_token"]
-    clean_reply = re.sub(r"(?m)^\s*[-–—_]{5,}\s*", "", str(ai_reply or "")).strip()
-    text_chunks = split_text_by_limit(clean_reply, max_length=1800)
+
+    clean_reply = re.sub(
+        r"(?m)^\s*[-–—_]{5,}\s*",
+        "",
+        str(ai_reply or ""),
+    ).strip()
+
+    text_chunks = (
+        split_text_by_limit(clean_reply, max_length=1800)
+        if clean_reply
+        else []
+    )
+
     unique_media = apply_media_limit([
-        value for value in dict.fromkeys(str(item or "").strip() for item in (media_urls or []))
+        value
+        for value in dict.fromkeys(
+            str(item or "").strip()
+            for item in (media_urls or [])
+        )
         if is_valid_zalo_media_url(value)
     ])
+
     try:
+        def send_media_items(media_items: List[str]) -> bool:
+            """Gửi lần lượt danh sách ảnh/video và giữ đúng thứ tự."""
+            nonlocal access_token
+
+            for media_url in media_items:
+                media_type = (
+                    "video"
+                    if re.search(
+                        r"\.(mp4|mov|webm)(\?|$)",
+                        media_url,
+                        re.IGNORECASE,
+                    )
+                    else "image"
+                )
+
+                media_payload = {
+                    "recipient": {
+                        "user_id": user_id,
+                    },
+                    "message": {
+                        "attachment": {
+                            "type": "template",
+                            "payload": {
+                                "template_type": "media",
+                                "elements": [
+                                    {
+                                        "media_type": media_type,
+                                        "url": media_url,
+                                    }
+                                ],
+                            },
+                        }
+                    },
+                }
+
+                res_data, access_token = _post_zalo_with_token_retry(
+                    url,
+                    media_payload,
+                    access_token,
+                )
+
+                print(f"📩 [ZALO MEDIA RES]: {res_data}")
+
+                if res_data.get("error") == -201:
+                    report_error(
+                        f"Zalo từ chối media không hợp lệ: {media_url}",
+                        context="send_zalo_message",
+                        notify=False,
+                    )
+                    continue
+
+                if res_data.get("error") != 0:
+                    return False
+
+                # Giữ đúng thứ tự hiển thị giữa các media.
+                time.sleep(0.2)
+
+            return True
+
+        # Trường hợp tìm phòng: gửi tất cả media trước.
+        if media_first and unique_media:
+            if not send_media_items(unique_media):
+                return False
+
+            # Không gửi lại media lần thứ hai.
+            unique_media = []
+            combine_first_media = False
+
+        # Gửi phần nội dung văn bản.
         for idx, chunk in enumerate(text_chunks):
-            message_payload = {"text": chunk}
-            # Kết quả tìm phòng: ghép nội dung và ảnh đầu tiên trong cùng request Zalo.
-            if combine_first_media and idx == 0 and unique_media:
+            message_payload = {
+                "text": chunk,
+            }
+
+            # Giữ tương thích với những chức năng cũ cần ghép ảnh đầu tiên.
+            if (
+                combine_first_media
+                and not media_first
+                and idx == 0
+                and unique_media
+            ):
                 first_media = unique_media[0]
-                first_media_type = "video" if re.search(
-                    r"\.(mp4|mov|webm)(\?|$)", first_media, re.I
-                ) else "image"
+
+                first_media_type = (
+                    "video"
+                    if re.search(
+                        r"\.(mp4|mov|webm)(\?|$)",
+                        first_media,
+                        re.IGNORECASE,
+                    )
+                    else "image"
+                )
+
                 message_payload["attachment"] = {
                     "type": "template",
                     "payload": {
                         "template_type": "media",
-                        "elements": [{"media_type": first_media_type, "url": first_media}],
+                        "elements": [
+                            {
+                                "media_type": first_media_type,
+                                "url": first_media,
+                            }
+                        ],
                     },
                 }
-            payload = {"recipient": {"user_id": user_id}, "message": message_payload}
-            res_data, access_token = _post_zalo_with_token_retry(url, payload, access_token)
-            # Một số phiên bản OA không nhận text + media chung: tự fallback an toàn.
-            if res_data.get("error") != 0 and "attachment" in message_payload:
-                if res_data.get("error") == -201 and unique_media:
+
+            payload = {
+                "recipient": {
+                    "user_id": user_id,
+                },
+                "message": message_payload,
+            }
+
+            res_data, access_token = _post_zalo_with_token_retry(
+                url,
+                payload,
+                access_token,
+            )
+
+            # Nếu OA không hỗ trợ ghép nội dung với media,
+            # gửi lại riêng phần nội dung.
+            if (
+                res_data.get("error") != 0
+                and "attachment" in message_payload
+            ):
+                if (
+                    res_data.get("error") == -201
+                    and unique_media
+                ):
                     unique_media.pop(0)
-                payload = {"recipient": {"user_id": user_id}, "message": {"text": chunk}}
-                res_data, access_token = _post_zalo_with_token_retry(url, payload, access_token)
+
+                fallback_payload = {
+                    "recipient": {
+                        "user_id": user_id,
+                    },
+                    "message": {
+                        "text": chunk,
+                    },
+                }
+
+                res_data, access_token = _post_zalo_with_token_retry(
+                    url,
+                    fallback_payload,
+                    access_token,
+                )
+
                 combine_first_media = False
+
             if res_data.get("error") != 0:
                 return False
+
             if len(text_chunks) > 1:
                 time.sleep(0.3)
 
-        media_to_send = unique_media[1:] if combine_first_media and unique_media else unique_media
-        for media_url in media_to_send:
-            media_type = "video" if re.search(r"\.(mp4|mov|webm)(\?|$)", media_url, re.I) else "image"
-            payload = {"recipient": {"user_id": user_id}, "message": {"attachment": {"type": "template", "payload": {"template_type": "media", "elements": [{"media_type": media_type, "url": media_url}]}}}}
-            res_data, access_token = _post_zalo_with_token_retry(url, payload, access_token)
-            print(f"📩 [ZALO MEDIA RES]: {res_data}")
-            if res_data.get("error") == -201:
-                report_error(f"Zalo từ chối media không hợp lệ: {media_url}", context="send_zalo_message", notify=False)
-                continue
-            if res_data.get("error") != 0:
-                return False
+        # Các chức năng cũ vẫn gửi media sau văn bản như trước.
+        media_to_send = (
+            unique_media[1:]
+            if combine_first_media and unique_media
+            else unique_media
+        )
+
+        if media_to_send:
+            return send_media_items(media_to_send)
+
         return True
-    except Exception as e:
-        report_error("Gửi tin nhắn Zalo thất bại", e, "send_zalo_message", notify=False)
+
+    except Exception as exc:
+        report_error(
+            "Gửi tin nhắn Zalo thất bại",
+            exc,
+            "send_zalo_message",
+            notify=False,
+        )
         return False
 
 
