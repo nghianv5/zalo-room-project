@@ -116,10 +116,10 @@ GEMINI_EXCEL_MAX_OUTPUT_TOKENS = max(2048, int(os.getenv("GEMINI_EXCEL_MAX_OUTPU
 
 # Bộ nhớ đệm tạm thời
 CACHE_TTL_SECONDS = 600
-MAX_MEDIA_PER_ROOM = int(os.getenv("MAX_MEDIA_PER_ROOM", "10"))
-MAX_SEARCH_MEDIA = int(os.getenv("MAX_SEARCH_MEDIA", "10"))
+MAX_MEDIA_PER_ROOM = max(0, int(os.getenv("MAX_MEDIA_PER_ROOM", "0")))
+MAX_SEARCH_MEDIA = max(0, int(os.getenv("MAX_SEARCH_MEDIA", "0")))
 MAX_SEARCH_ROOMS = max(1, int(os.getenv("MAX_SEARCH_ROOMS", "5")))
-MAX_SEARCH_MEDIA_PER_ROOM = max(1, int(os.getenv("MAX_SEARCH_MEDIA_PER_ROOM", "3")))
+MAX_SEARCH_MEDIA_PER_ROOM = max(0, int(os.getenv("MAX_SEARCH_MEDIA_PER_ROOM", "0")))
 MAX_IMAGE_UPLOAD_BYTES = max(1, int(os.getenv("MAX_IMAGE_UPLOAD_MB", "15"))) * 1024 * 1024
 MAX_VIDEO_UPLOAD_BYTES = max(1, int(os.getenv("MAX_VIDEO_UPLOAD_MB", "80"))) * 1024 * 1024
 
@@ -160,6 +160,12 @@ def is_valid_zalo_media_url(value: str) -> bool:
             return True
     except Exception:
         return False
+
+
+def apply_media_limit(items: List[str], limit: int = MAX_MEDIA_PER_ROOM) -> List[str]:
+    """limit=0 nghĩa là giữ toàn bộ media, không cắt danh sách."""
+    values = list(items or [])
+    return values if limit <= 0 else values[:limit]
 
 # Initializing Qdrant Collection & Index
 try:
@@ -309,6 +315,10 @@ class AdminChangePasswordSchema(BaseModel):
 
 class RequestOTPModel(BaseModel):
     phone: str
+
+
+class DeleteAllRoomsSchema(BaseModel):
+    confirmation: str
 
 class RoomCreateUpdateSchema(BaseModel):
     room_code: Optional[str] = Field(default=None, description="Mã phòng 6 ký tự")
@@ -583,7 +593,7 @@ def get_get_and_clear_pending_media(user_id: str) -> list:
 def add_pending_media(user_id: str, new_urls: list):
     cache_key = f"pending_media:{user_id}"
     existing = get_pending_media(user_id)
-    merged = list(dict.fromkeys(existing + list(new_urls or [])))[:MAX_MEDIA_PER_ROOM]
+    merged = apply_media_limit(list(dict.fromkeys(existing + list(new_urls or []))))
     redis_client.set(cache_key, json.dumps(merged), ex=CACHE_TTL_SECONDS)
     return merged
 
@@ -773,7 +783,7 @@ def attach_media_to_owned_room(landlord_phone: str, room_code: str, media_urls: 
     old_media = room_payload.get("media_urls") or []
     if isinstance(old_media, str):
         old_media = [item.strip() for item in old_media.split(",") if item.strip()]
-    merged_media = list(dict.fromkeys(list(old_media) + unique_new_media))[:MAX_MEDIA_PER_ROOM]
+    merged_media = apply_media_limit(list(dict.fromkeys(list(old_media) + unique_new_media)))
     updated_at = vietnam_now().strftime("%Y-%m-%d %H:%M:%S")
     qdrant_client.set_payload(
         collection_name=COLLECTION_NAME,
@@ -826,7 +836,7 @@ def collect_search_media_urls(search_results: List[dict], limit: int = MAX_SEARC
             clean_url = str(media_url or "").strip()
             if clean_url.startswith(("https://", "http://")) and clean_url not in collected:
                 collected.append(clean_url)
-                if len(collected) >= max(0, limit):
+                if limit > 0 and len(collected) >= limit:
                     return collected
     return collected
 
@@ -842,7 +852,7 @@ def _normalise_room_media(room: dict, limit: int = MAX_SEARCH_MEDIA_PER_ROOM) ->
         clean_url = str(item or "").strip()
         if clean_url.startswith(("https://", "http://")) and clean_url not in valid_media:
             valid_media.append(clean_url)
-            if len(valid_media) >= max(0, limit):
+            if limit > 0 and len(valid_media) >= limit:
                 break
     return valid_media
 
@@ -934,7 +944,7 @@ def format_room_search_message(room: dict, position: int) -> str:
 
 
 def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
-    """Gửi từng phòng theo cặp: nội dung phòng rồi đến media của chính phòng đó."""
+    """Gửi mỗi phòng thành một cụm riêng và hiển thị toàn bộ media của phòng."""
     rooms = list(search_results or [])[:MAX_SEARCH_ROOMS]
     if not rooms:
         return False
@@ -943,21 +953,20 @@ def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
     if not send_zalo_message(user_id, intro):
         return False
 
-    total_media_sent = 0
     for position, room in enumerate(rooms, start=1):
-        remaining_media = max(0, MAX_SEARCH_MEDIA - total_media_sent)
-        room_media = (
-            _normalise_room_media(room, min(MAX_SEARCH_MEDIA_PER_ROOM, remaining_media))
-            if remaining_media else []
-        )
-        if not send_zalo_message(
-            user_id,
-            format_room_search_message(room, position),
-            media_urls=room_media,
-            combine_first_media=True,
-        ):
+        room_code = str(room.get("room_code") or f"PHÒNG {position}").strip().upper()
+        if not send_zalo_message(user_id, format_room_search_message(room, position)):
             return False
-        total_media_sent += len(room_media)
+        room_media = _normalise_room_media(room, 0)
+        if room_media:
+            media_header = f"📸 ẢNH/VIDEO CỦA PHÒNG {room_code}\nTổng cộng: {len(room_media)} tệp"
+            if not send_zalo_message(user_id, media_header, media_urls=room_media):
+                return False
+            if not send_zalo_message(user_id, f"✅ Đã hiển thị hết ảnh/video của phòng {room_code}."):
+                return False
+        else:
+            if not send_zalo_message(user_id, f"📷 Phòng {room_code} chưa có ảnh/video."):
+                return False
         time.sleep(0.3)
     return True
 
@@ -1032,10 +1041,10 @@ def send_zalo_message(
     access_token = data_token["access_token"]
     clean_reply = re.sub(r"(?m)^\s*[-–—_]{5,}\s*", "", str(ai_reply or "")).strip()
     text_chunks = split_text_by_limit(clean_reply, max_length=1800)
-    unique_media = [
+    unique_media = apply_media_limit([
         value for value in dict.fromkeys(str(item or "").strip() for item in (media_urls or []))
         if is_valid_zalo_media_url(value)
-    ][:MAX_MEDIA_PER_ROOM]
+    ])
     try:
         for idx, chunk in enumerate(text_chunks):
             message_payload = {"text": chunk}
@@ -1326,7 +1335,7 @@ def merge_room_partial_update(old_payload: dict, new_data: dict, media_urls: Opt
         old_media = old_payload.get("media_urls") or []
         if isinstance(old_media, str):
             old_media = [item.strip() for item in old_media.split(",") if item.strip()]
-        merged["media_urls"] = list(dict.fromkeys(list(old_media) + list(incoming_media)))[:MAX_MEDIA_PER_ROOM]
+        merged["media_urls"] = apply_media_limit(list(dict.fromkeys(list(old_media) + list(incoming_media))))
     return merged
 
 

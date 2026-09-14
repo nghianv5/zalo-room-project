@@ -314,6 +314,41 @@ def test_admin_room_delete_is_permanent_in_qdrant_and_postgres():
     assert "xóa vĩnh viễn bản ghi khỏi cả Qdrant" in readme
 
 
+def test_admin_can_select_many_and_delete_all_authorized_rooms():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
+    assert "class DeleteAllRoomsSchema" in services_source
+    assert '@app.post("/api/admin/rooms/delete-all")' in main_source
+    assert 'data.confirmation.strip().upper() != "XOA TOAN BO"' in main_source
+    assert 'owner_phone = None if user.role == "SUPER_ADMIN" else user.username' in main_source
+    assert "mirror_query.delete(synchronize_session=False)" in main_source
+    assert '"ROOM_DELETE_ALL"' in main_source
+    assert 'id="deleteSelectedBtn"' in html
+    assert "Xóa phòng đã chọn" in html
+    assert 'id="deleteAllRoomsBtn"' in html
+    assert "function deleteAllRooms()" in html
+    assert 'confirmation!=="XOA TOAN BO"' in html
+
+
+def test_room_media_is_grouped_by_room_and_all_media_is_displayed():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
+    env_source = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "def apply_media_limit" in services_source
+    assert "return values if limit <= 0 else values[:limit]" in services_source
+    assert '_normalise_room_media(room, 0)' in services_source
+    assert "ẢNH/VIDEO CỦA PHÒNG" in services_source
+    assert "Đã hiển thị hết ảnh/video của phòng" in services_source
+    assert "remaining_media" not in services_source
+    assert "total_media_sent" not in services_source
+    assert "📸 Ảnh/video phòng ${val(r.room_code)}" in html
+    assert "<video src=" in html
+    assert "/\\/video\\/upload\\//i" in html
+    assert "MAX_MEDIA_PER_ROOM=0" in env_source
+    assert "MAX_SEARCH_MEDIA_PER_ROOM=0" in env_source
+
+
 def test_excel_dialog_resets_previous_result_before_reopen():
     html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
     assert 'onclick="openExcelModal()"' in html
