@@ -437,6 +437,19 @@ def test_landlord_listing_intent_has_priority_over_room_search():
     assert 'extracted["price"] = number *' in services_source
     assert 'extracted["room_size"]' in services_source
     assert '"wardrobe": ("tủ quần áo", "tủ áo", "giường tủ")' in services_source
+    assert 'r"^(?:(?:toi|minh|em|anh|chi)\\s+)?cho thue' in services_source
+
+
+def test_media_choice_message_and_admin_reload_after_batch_delete():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
+    assert '"Bạn hãy gửi thông tin phòng (tên phòng, địa chỉ, giá...) để tạo phòng mới"' in services_source
+    assert '"Hoặc xác nhận phòng cần cập nhật bằng cách nhắn: CẬP NHẬT ẢNH <MÃ PHÒNG>"' in services_source
+    assert 'lines.append(f"{index}. 🏠 {code} — {name}\\n   📍 {address}")' in services_source
+    assert 'lines.append("\\nVí dụ: CẬP NHẬT ẢNH SP840D")' in services_source
+    assert 'cache:"no-store"' in html
+    assert "roomPage=1;" in html
+    assert "await loadRooms(true);" in html
 
 
 def test_admin_report_management_screen_and_crud_exist():

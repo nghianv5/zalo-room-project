@@ -574,7 +574,7 @@
           ),t=localStorage.getItem("accessToken");
           if(t)h.set("Authorization",`Bearer ${t}`);
           let r=await fetch(url, {
-              ...opt,headers:h
+              ...opt,headers:h,cache:"no-store"
           }
           );
           if(r.status===401&&!url.includes("/api/login"))logout();
@@ -765,8 +765,9 @@
                   body:JSON.stringify({room_ids:ids})
               }),d=await data(r);
               if(!r.ok)return alert(err(d));
-              alert(d.message||`Đã xóa ${ids.length} phòng đã chọn.`);
-              await loadRooms()
+              roomPage=1;
+              await loadRooms(true);
+              alert(d.message||`Đã xóa ${ids.length} phòng đã chọn.`)
           } finally {
               busy("deleteSelectedBtn",false)
           }

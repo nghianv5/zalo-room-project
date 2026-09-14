@@ -695,7 +695,8 @@ def format_room_media_choices(rooms: List[dict], pending_count: int) -> str:
         )
     lines = [
         f"📸 Đã lưu tạm {pending_count} ảnh/video.",
-        "Vui lòng xác nhận phòng cần cập nhật bằng cách nhắn: CẬP NHẬT ẢNH <MÃ PHÒNG>",
+        "Bạn hãy gửi thông tin phòng (tên phòng, địa chỉ, giá...) để tạo phòng mới",
+        "Hoặc xác nhận phòng cần cập nhật bằng cách nhắn: CẬP NHẬT ẢNH <MÃ PHÒNG>",
         "",
         "Các phòng thuộc SĐT của bạn:",
     ]
@@ -773,8 +774,12 @@ def is_room_listing_request(message_text: str) -> bool:
     listing_patterns = (
         r"\b(?:toi|minh|em|anh|chi)\s+(?:(?:can|muon|co nhu cau)\s+)?(?:dang|cho thue)\s+(?:mot\s+)?(?:phong|phong tro)\b",
         r"^(?:can|muon|co nhu cau)\s+(?:dang|cho thue)\s+(?:mot\s+)?(?:phong|phong tro)\b",
-        r"\b(?:dang tin|dang bai|dang ky)\s+(?:cho thue\s+)?(?:phong|phong tro)\b",
+        r"^(?:(?:toi|minh|em|anh|chi)\s+)?cho thue\s+(?:mot\s+)?(?:phong|phong tro)\b",
+        r"\b(?:dang|rao)\s+(?:(?:tin|bai)\s+)?(?:cho thue\s+)?(?:phong|phong tro)\b",
+        r"\bdang ky\s+(?:cho thue\s+)?(?:phong|phong tro)\b",
         r"\b(?:toi|minh|em|anh|chi)\s+co\s+(?:mot\s+)?(?:phong|phong tro).*\b(?:can|muon)\s+cho thue\b",
+        r"\bco\s+(?:mot\s+)?(?:phong|phong tro).*\b(?:cho thue|can nguoi thue|tim nguoi thue)\b",
+        r"\b(?:phong|phong tro).*\b(?:can|muon)\s+(?:cho thue|tim nguoi thue)\b",
     )
     return any(re.search(pattern, clean_text) for pattern in listing_patterns)
 

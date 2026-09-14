@@ -38,6 +38,8 @@ Trang Admin cho phép tích chọn một hoặc nhiều phòng rồi bấm **Xó
 
 Luồng Zalo ưu tiên nhận dạng câu đăng phòng của chủ nhà như `tôi cần cho thuê phòng ở ...` là `ADD_ROOM`, không chuyển nhầm sang tìm phòng khi câu có địa chỉ và giá. Hệ thống bổ sung trực tiếp địa chỉ, giá, diện tích và các tiện ích được nói rõ nếu kết quả AI bỏ sót.
 
+Các cách nói thông dụng như `cho thuê phòng ở...`, `cần cho thuê phòng...`, `đăng phòng...`, `rao phòng...`, `có phòng cần người thuê...` cũng được ưu tiên là đăng phòng. Sau khi Admin xóa nhiều phòng, danh sách được tải lại từ trang đầu với cache bị vô hiệu hóa để dữ liệu đã xóa biến mất ngay.
+
 Mỗi phòng trên Admin có nút **Xem phòng** để mở toàn bộ dữ liệu/media dạng chỉ đọc và nút **Report phòng**. Hộp thoại report khóa mã phòng, tên phòng, địa chỉ; người dùng chỉ nhập nội dung phản ánh. Report được lưu vào PostgreSQL `room_reports`, giới hạn 2.000 ký tự và có API quản trị `GET /api/admin/room-reports`.
 
 Super Admin có tab **Report phòng** để lọc theo mã phòng, người gửi và trạng thái; có thể chuyển report giữa `MỚI`, `ĐANG XỬ LÝ`, `ĐÃ XỬ LÝ`, `BỎ QUA` hoặc xóa report. Câu tìm phòng có đủ địa chỉ và giá được parser nội bộ ưu tiên xử lý trước kết quả Gemini, ví dụ `xem phòng phan thị hành, phú thọ hoà, tân phú 6tr` được hiểu là địa chỉ `phan thị hành, phú thọ hoà, tân phú`, giá từ 0 đến 6.000.000 đồng.
