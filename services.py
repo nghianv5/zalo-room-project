@@ -935,7 +935,7 @@ def _is_enabled_amenity(value) -> bool:
     return normalized in {"có", "co", "yes", "true", "1", "x"}
 
 
-def format_room_search_message(room: dict, position: int, include_action_instructions: bool = True) -> str:
+def format_room_search_message(room: dict, position: int) -> str:
     """Tạo nội dung ổn định từ DB để ghép đúng với ảnh của từng phòng."""
     lines = [f"🏠 PHÒNG {position}"]
     room_name = room.get("room_name")
@@ -996,7 +996,7 @@ def format_room_search_message(room: dict, position: int, include_action_instruc
     if amenities:
         lines.append(f"✅ Tiện nghi: {', '.join(amenities)}")
 
-    if room_code and include_action_instructions:
+    if room_code:
         normalized_code = str(room_code).strip().upper()
         lines.append(f"📅 Đặt lịch xem phòng: nhắn “XEM PHÒNG {normalized_code}”")
         lines.append(f"🚩 Report phòng: nhắn “REPORT PHÒNG {normalized_code}”")
@@ -1005,66 +1005,6 @@ def format_room_search_message(room: dict, position: int, include_action_instruc
     message = "\n".join(lines)
     # Loại bỏ các đường gạch dài bị chèn trước emoji khi format/paste source.
     return re.sub(r"(?m)^\s*[-–—_]{5,}\s*", "", message).strip()
-
-
-def send_zalo_room_action_buttons(user_id: str, room_code: str) -> bool:
-    """Gửi hai nút oa.query.show; tự chuyển sang câu lệnh chữ nếu OA từ chối template."""
-    normalized_code = str(room_code or "").strip().upper()
-    fallback_text = (
-        f"📅 Đặt lịch xem phòng: nhắn “XEM PHÒNG {normalized_code}”\n"
-        f"🚩 Report phòng: nhắn “REPORT PHÒNG {normalized_code}”"
-    )
-    if not re.fullmatch(r"[A-Z0-9]{6}", normalized_code):
-        return send_zalo_message(user_id, fallback_text)
-
-    db = SessionLocal()
-    try:
-        token_data = get_current_tokens_from_db(db)
-    finally:
-        db.close()
-    if not token_data or not token_data.get("access_token"):
-        return send_zalo_message(user_id, fallback_text)
-
-    payload = {
-        "recipient": {"user_id": str(user_id)},
-        "message": {
-            "text": f"Bạn muốn thao tác gì với phòng {normalized_code}?",
-            "attachment": {
-                "type": "template",
-                "payload": {
-                    "template_type": "button",
-                    "buttons": [
-                        {
-                            "title": "📅 Đặt lịch xem phòng",
-                            "type": "oa.query.show",
-                            "payload": f"XEM PHÒNG {normalized_code}",
-                        },
-                        {
-                            "title": "🚩 Report phòng",
-                            "type": "oa.query.show",
-                            "payload": f"REPORT PHÒNG {normalized_code}",
-                        },
-                    ],
-                },
-            },
-        },
-    }
-    try:
-        response_data, _ = _post_zalo_with_token_retry(
-            "https://openapi.zalo.me/v3.0/oa/message/cs",
-            payload,
-            token_data["access_token"],
-        )
-        if response_data.get("error") == 0:
-            return True
-        report_error(
-            f"Zalo từ chối button template: {response_data}",
-            context="send_zalo_room_action_buttons",
-            notify=False,
-        )
-    except Exception as exc:
-        report_error("Gửi nút thao tác phòng Zalo thất bại", exc, "send_zalo_room_action_buttons", notify=False)
-    return send_zalo_message(user_id, fallback_text)
 
 
 def get_room_for_zalo_action(room_code: str) -> Optional[dict]:
@@ -1211,7 +1151,7 @@ def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
         room_media = _normalise_room_media(room, 0)
         if room_media:
             room_message = (
-                f"{format_room_search_message(room, position, include_action_instructions=False)}\n"
+                f"{format_room_search_message(room, position)}\n"
                 f"📸 Ảnh/video phòng {room_code}: {len(room_media)} tệp"
             )
             if not send_zalo_message(
@@ -1224,11 +1164,9 @@ def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
             if not send_zalo_message(user_id, f"✅ Đã hiển thị hết ảnh/video của phòng {room_code}."):
                 return False
         else:
-            room_message = f"{format_room_search_message(room, position, include_action_instructions=False)}\n📷 Phòng {room_code} chưa có ảnh/video."
+            room_message = f"{format_room_search_message(room, position)}\n📷 Phòng {room_code} chưa có ảnh/video."
             if not send_zalo_message(user_id, room_message):
                 return False
-        if not send_zalo_room_action_buttons(user_id, room_code):
-            return False
         time.sleep(0.3)
     return True
 
