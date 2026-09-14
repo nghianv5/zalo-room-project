@@ -431,10 +431,18 @@ def test_zalo_room_text_and_first_image_are_combined_with_fallback():
     search_start = services_source.index("def send_zalo_search_results")
     search_end = services_source.index("def _refresh_zalo_token_after_invalid", search_start)
     search_source = services_source[search_start:search_end]
-    assert "format_room_search_message(room, position)" in search_source
+    assert "format_room_search_message(room, position, include_action_instructions=False)" in search_source
     assert "media_urls=room_media" in search_source
     assert "combine_first_media=True" in search_source
     assert "Đã hiển thị hết ảnh/video của phòng" in search_source
+    assert "def send_zalo_room_action_buttons" in services_source
+    assert '"template_type": "button"' in services_source
+    assert '"type": "oa.query.show"' in services_source
+    assert '"payload": f"XEM PHÒNG {normalized_code}"' in services_source
+    assert '"payload": f"REPORT PHÒNG {normalized_code}"' in services_source
+    assert "send_zalo_room_action_buttons(user_id, room_code)" in search_source
+    assert "include_action_instructions=False" in search_source
+    assert "return send_zalo_message(user_id, fallback_text)" in services_source
 
 
 def test_natural_search_overrides_invalid_gemini_extraction():
