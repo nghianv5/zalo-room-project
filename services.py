@@ -355,17 +355,6 @@ class DeleteSelectedRoomsSchema(BaseModel):
         return room_ids
 
 
-class RoomReportCreateSchema(BaseModel):
-    content: str = Field(..., min_length=5, max_length=2000)
-
-    @validator("content", pre=True)
-    def validate_report_content(cls, value):
-        clean_value = re.sub(r"\s+", " ", str(value or "")).strip()
-        if len(clean_value) < 5:
-            raise ValueError("Nội dung report phải có ít nhất 5 ký tự.")
-        return clean_value
-
-
 class RoomReportStatusSchema(BaseModel):
     status: str
 
@@ -1008,12 +997,143 @@ def format_room_search_message(room: dict, position: int) -> str:
         lines.append(f"✅ Tiện nghi: {', '.join(amenities)}")
 
     if room_code:
-        lines.append(f"👉 Đặt lịch: nhắn “Đặt lịch {room_code}”")
+        normalized_code = str(room_code).strip().upper()
+        lines.append(f"📅 Đặt lịch xem phòng: nhắn “XEM PHÒNG {normalized_code}”")
+        lines.append(f"🚩 Report phòng: nhắn “REPORT PHÒNG {normalized_code}”")
     else:
         lines.append("👉 Nhắn OA để được tư vấn phòng này.")
     message = "\n".join(lines)
     # Loại bỏ các đường gạch dài bị chèn trước emoji khi format/paste source.
     return re.sub(r"(?m)^\s*[-–—_]{5,}\s*", "", message).strip()
+
+
+def get_room_for_zalo_action(room_code: str) -> Optional[dict]:
+    """Lấy một phòng theo mã để xem/report trực tiếp trên Zalo."""
+    normalized_code = str(room_code or "").strip().upper()
+    if not re.fullmatch(r"[A-Z0-9]{6}", normalized_code):
+        return None
+    records, _ = qdrant_client.scroll(
+        collection_name=COLLECTION_NAME,
+        scroll_filter=qdrant_models.Filter(
+            must=[
+                qdrant_models.FieldCondition(
+                    key="room_code",
+                    match=qdrant_models.MatchValue(value=normalized_code),
+                )
+            ]
+        ),
+        limit=1,
+        with_payload=True,
+        with_vectors=False,
+    )
+    if not records or not records[0].payload:
+        return None
+    room = dict(records[0].payload)
+    room["id"] = str(records[0].id)
+    room["room_code"] = normalized_code
+    return room
+
+
+def get_pending_zalo_room_report(user_id: str) -> Optional[dict]:
+    try:
+        raw_value = redis_client.get(f"pending:room_report:{user_id}")
+        return json.loads(raw_value) if raw_value else None
+    except Exception:
+        return None
+
+
+def clear_pending_zalo_room_report(user_id: str) -> None:
+    try:
+        redis_client.delete(f"pending:room_report:{user_id}")
+    except Exception:
+        pass
+
+
+def start_zalo_room_report(user_id: str, room_code: str) -> str:
+    """Khóa mã/tên/địa chỉ phòng và yêu cầu người dùng nhập nội dung report."""
+    try:
+        room = get_room_for_zalo_action(room_code)
+    except Exception as exc:
+        report_error("Tra cứu phòng để report thất bại", exc, "start_zalo_room_report", notify=False)
+        return "⚠️ Chưa thể mở report lúc này. Bạn vui lòng thử lại sau."
+    if not room:
+        return f"❌ Không tìm thấy phòng có mã {str(room_code).strip().upper()}."
+
+    pending_data = {
+        "room_code": room["room_code"],
+        "room_id": room["id"],
+    }
+    try:
+        redis_client.set(
+            f"pending:room_report:{user_id}",
+            json.dumps(pending_data, ensure_ascii=False),
+            ex=900,
+        )
+    except Exception as exc:
+        report_error("Lưu report Zalo chờ nhập thất bại", exc, "start_zalo_room_report", notify=False)
+        return "⚠️ Chưa thể mở report lúc này. Bạn vui lòng thử lại sau."
+
+    room_name = str(room.get("room_name") or "[chưa có tên]").strip()
+    address = str(room.get("address") or "[chưa có địa chỉ]").strip()
+    return (
+        "🚩 REPORT PHÒNG\n"
+        f"🔖 Mã phòng: {room['room_code']}\n"
+        f"🛏️ Tên phòng: {room_name}\n"
+        f"📍 Địa chỉ: {address}\n\n"
+        "Ba thông tin trên được lấy từ hệ thống và không thể chỉnh sửa.\n"
+        "Bạn hãy nhập nội dung cần report trong tin nhắn tiếp theo (5–2000 ký tự).\n"
+        "Nhắn HỦY REPORT nếu không muốn tiếp tục."
+    )
+
+
+def submit_zalo_room_report(db: Session, user_id: str, room_code: str, content: str) -> str:
+    """Lưu report do khách gửi trên Zalo vào cùng bảng quản lý của Admin."""
+    clean_content = re.sub(r"\s+", " ", str(content or "")).strip()
+    if len(clean_content) < 5:
+        return "⚠️ Nội dung report phải có ít nhất 5 ký tự. Bạn vui lòng nhập rõ hơn."
+    if len(clean_content) > 2000:
+        return "⚠️ Nội dung report không được vượt quá 2000 ký tự."
+
+    try:
+        rate_key = f"rate:room-report:{user_id}"
+        report_count = redis_client.incr(rate_key)
+        if report_count == 1:
+            redis_client.expire(rate_key, 3600)
+        if report_count > 10:
+            return "⚠️ Bạn đã gửi quá nhiều report trong một giờ. Vui lòng thử lại sau."
+    except Exception:
+        pass
+
+    try:
+        room = get_room_for_zalo_action(room_code)
+        if not room:
+            clear_pending_zalo_room_report(user_id)
+            return f"❌ Phòng {str(room_code).strip().upper()} không còn tồn tại."
+        reporter = get_phone_by_user_id(db, str(user_id)) or f"ZALO:{user_id}"
+        room_report = RoomReport(
+            room_id=room["id"],
+            room_code=room["room_code"],
+            room_name=str(room.get("room_name") or "").strip() or None,
+            address=str(room.get("address") or "[chưa có địa chỉ]").strip(),
+            reporter_username=reporter,
+            content=clean_content,
+            status="MỚI",
+        )
+        db.add(room_report)
+        db.commit()
+        db.refresh(room_report)
+        clear_pending_zalo_room_report(user_id)
+        write_audit_log(
+            reporter,
+            "ROOM_REPORT_CREATE_ZALO",
+            room["id"],
+            {"report_id": room_report.id, "room_code": room["room_code"], "zalo_user_id": str(user_id)},
+        )
+        return f"✅ Đã gửi report phòng {room['room_code']}. Quản trị viên sẽ kiểm tra và xử lý."
+    except Exception as exc:
+        db.rollback()
+        report_error("Lưu report phòng từ Zalo thất bại", exc, "submit_zalo_room_report")
+        return "⚠️ Chưa thể lưu report lúc này. Bạn vui lòng thử lại sau."
 
 
 def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:

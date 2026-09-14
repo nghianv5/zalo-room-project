@@ -326,45 +326,6 @@ def delete_room_from_web(
         raise HTTPException(status_code=500, detail=str(e))
 
 
-@app.post("/api/rooms/{point_id}/reports")
-def create_room_report(
-    point_id: str,
-    data: RoomReportCreateSchema,
-    user: Principal = Depends(get_current_user),
-    db: Session = Depends(get_db),
-):
-    enforce_rate_limit(redis_client, f"room-report:{user.username}", 10, 3600)
-    records = qdrant_client.retrieve(
-        collection_name=COLLECTION_NAME,
-        ids=[point_id],
-        with_payload=True,
-        with_vectors=False,
-    )
-    if not records or not records[0].payload:
-        raise HTTPException(status_code=404, detail="Không tìm thấy phòng để report.")
-
-    room = dict(records[0].payload)
-    report = RoomReport(
-        room_id=str(point_id),
-        room_code=str(room.get("room_code") or "CHƯA CÓ MÃ").strip().upper(),
-        room_name=str(room.get("room_name") or "").strip() or None,
-        address=str(room.get("address") or "Chưa có địa chỉ").strip(),
-        reporter_username=user.username,
-        content=data.content,
-        status="MỚI",
-    )
-    db.add(report)
-    db.commit()
-    db.refresh(report)
-    write_audit_log(
-        user.username,
-        "ROOM_REPORT_CREATE",
-        str(point_id),
-        {"report_id": report.id, "room_code": report.room_code},
-    )
-    return {"status": "success", "message": "Đã gửi report phòng.", "report_id": report.id}
-
-
 @app.get("/api/admin/room-reports")
 def list_room_reports(
     page: int = 1,
@@ -1114,8 +1075,46 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                     reply_text = "Cú pháp không đúng! Vui lòng nhắn theo cú pháp: OTP <Số thoại điện> (Ví dụ: OTP 0333593681)"
                     send_zalo_message(user_id=sender_id, ai_reply=reply_text)
                     return {"status": "invalid_syntax"}
+
+            report_match = re.search(
+                r'(?:report|báo cáo|phản ánh)\s*(?:phòng|mã phòng)?\s*([a-zA-Z0-9]{6})\b(?:\s*[-:–—]\s*(.+))?$',
+                raw_message.strip(),
+                re.IGNORECASE,
+            )
+            if report_match:
+                room_code = report_match.group(1).upper()
+                inline_content = str(report_match.group(2) or "").strip()
+                if inline_content:
+                    reply_text = submit_zalo_room_report(
+                        db, str(sender_id), room_code, inline_content
+                    )
+                else:
+                    reply_text = start_zalo_room_report(str(sender_id), room_code)
+                send_zalo_message(str(sender_id), reply_text)
+                return {"status": "success", "message": "Processed room report"}
+
+            pending_report = get_pending_zalo_room_report(str(sender_id))
+            if pending_report and clean_message in {"hủy report", "huỷ report", "huy report", "hủy báo cáo", "huy bao cao"}:
+                clear_pending_zalo_room_report(str(sender_id))
+                send_zalo_message(str(sender_id), "✅ Đã hủy report phòng.")
+                return {"status": "success", "message": "Cancelled room report"}
+            booking_candidate = re.search(
+                r'(?:đặt lịch|xem phòng|mã phòng|đặt phòng)\s*([a-zA-Z0-9]{6})\b',
+                clean_message,
+                re.IGNORECASE,
+            )
+            if pending_report and raw_message.strip() and not booking_candidate:
+                reply_text = submit_zalo_room_report(
+                    db,
+                    str(sender_id),
+                    str(pending_report.get("room_code") or ""),
+                    raw_message,
+                )
+                send_zalo_message(str(sender_id), reply_text)
+                return {"status": "success", "message": "Submitted room report"}
+
             # 2. Xử lý Đặt lịch xem phòng theo mã phòng 6 ký tự
-            booking_match = re.search(r'(?:đặt lịch|xem phòng|mã phòng|đặt phòng)\s*([a-zA-Z0-9]{6})\b', clean_message, re.IGNORECASE)
+            booking_match = booking_candidate
             if booking_match:
                 # 🎯 Lấy SĐT khách từ DB bằng sender_id chuẩn hóa chuỗi
                 tenant_phone = get_phone_by_user_id(db, str(sender_id))

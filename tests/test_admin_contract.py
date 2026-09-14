@@ -400,24 +400,30 @@ def test_detailed_vietnamese_location_search_is_accent_tolerant():
     assert "SEARCH_CANDIDATE_LIMIT=2000" in env_source
 
 
-def test_room_view_report_dialog_and_persistence_exist():
+def test_room_view_and_report_are_on_zalo_while_admin_manages_reports():
     services_source = (ROOT / "services.py").read_text(encoding="utf-8")
     main_source = (ROOT / "main.py").read_text(encoding="utf-8")
     html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
     assert "class RoomReport(Base)" in services_source
     assert '__tablename__ = "room_reports"' in services_source
-    assert "class RoomReportCreateSchema" in services_source
-    assert '@app.post("/api/rooms/{point_id}/reports")' in main_source
+    assert "class RoomReportCreateSchema" not in services_source
+    assert '@app.post("/api/rooms/{point_id}/reports")' not in main_source
     assert '@app.get("/api/admin/room-reports")' in main_source
-    assert '"ROOM_REPORT_CREATE"' in main_source
-    assert 'id="roomViewModal"' in html
-    assert 'id="roomReportModal"' in html
-    assert 'id="reportRoomCode" readonly' in html
-    assert 'id="reportRoomName" readonly' in html
-    assert 'id="reportRoomAddress" readonly' in html
-    assert "function viewRoom(id)" in html
-    assert "function openRoomReport(id)" in html
-    assert "function saveRoomReport(event)" in html
+    assert 'id="roomViewModal"' not in html
+    assert 'id="roomReportModal"' not in html
+    assert "function viewRoom(id)" not in html
+    assert "function openRoomReport(id)" not in html
+    assert "def start_zalo_room_report" in services_source
+    assert "def submit_zalo_room_report" in services_source
+    assert '"ROOM_REPORT_CREATE_ZALO"' in services_source
+    assert '📅 Đặt lịch xem phòng: nhắn “XEM PHÒNG {normalized_code}”' in services_source
+    assert '🚩 Report phòng: nhắn “REPORT PHÒNG {normalized_code}”' in services_source
+    assert "report_match = re.search(" in main_source
+    assert "get_pending_zalo_room_report" in main_source
+    assert "clear_pending_zalo_room_report" in main_source
+    assert "submit_zalo_room_report(" in main_source
+    assert "booking_match = booking_candidate" in main_source
+    assert "process_room_booking(tenant_zalo_id=str(sender_id)" in main_source
 
 
 def test_zalo_room_text_and_first_image_are_combined_with_fallback():
