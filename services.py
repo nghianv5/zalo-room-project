@@ -340,8 +340,19 @@ class RequestOTPModel(BaseModel):
     phone: str
 
 
-class DeleteAllRoomsSchema(BaseModel):
-    confirmation: str
+class DeleteSelectedRoomsSchema(BaseModel):
+    room_ids: List[str] = Field(..., min_items=1, max_items=500)
+
+    @validator("room_ids", pre=True)
+    def validate_room_ids(cls, value):
+        if not isinstance(value, list):
+            raise ValueError("Danh sách phòng không hợp lệ.")
+        room_ids = list(dict.fromkeys(str(item).strip() for item in value if str(item).strip()))
+        if not room_ids:
+            raise ValueError("Vui lòng chọn ít nhất một phòng.")
+        if len(room_ids) > 500:
+            raise ValueError("Chỉ được xóa tối đa 500 phòng trong một lần.")
+        return room_ids
 
 
 class RoomReportCreateSchema(BaseModel):
@@ -754,6 +765,18 @@ def is_my_rooms_request(message_text: str) -> bool:
         "những phòng nào", "các phòng nào", "tôi có phòng nào",
     )
     return owner_signal and any(list_phrase in clean_text for list_phrase in list_phrases)
+
+
+def is_room_listing_request(message_text: str) -> bool:
+    """Nhận dạng chủ nhà muốn đăng/cho thuê phòng, ưu tiên trước ý định tìm phòng."""
+    clean_text = normalize_location_search(message_text)
+    listing_patterns = (
+        r"\b(?:toi|minh|em|anh|chi)\s+(?:(?:can|muon|co nhu cau)\s+)?(?:dang|cho thue)\s+(?:mot\s+)?(?:phong|phong tro)\b",
+        r"^(?:can|muon|co nhu cau)\s+(?:dang|cho thue)\s+(?:mot\s+)?(?:phong|phong tro)\b",
+        r"\b(?:dang tin|dang bai|dang ky)\s+(?:cho thue\s+)?(?:phong|phong tro)\b",
+        r"\b(?:toi|minh|em|anh|chi)\s+co\s+(?:mot\s+)?(?:phong|phong tro).*\b(?:can|muon)\s+cho thue\b",
+    )
+    return any(re.search(pattern, clean_text) for pattern in listing_patterns)
 
 
 def format_my_rooms_overview(rooms: List[dict]) -> str:
@@ -1418,7 +1441,7 @@ def infer_explicit_boolean_room_updates(message_text: str) -> dict:
         ),
         "parking_info": ("chỗ để xe", "nơi để xe", "bãi xe", "để xe"),
         "bed": ("giường",),
-        "wardrobe": ("tủ quần áo", "tủ áo"),
+        "wardrobe": ("tủ quần áo", "tủ áo", "giường tủ"),
     }
     inferred = {}
     for field, keywords in field_keywords.items():
@@ -1435,6 +1458,37 @@ def infer_explicit_boolean_room_updates(message_text: str) -> dict:
         )
         inferred[field] = "Không" if any(phrase in clean_text for phrase in negative_phrases) else "Có"
     return inferred
+
+
+def apply_direct_room_listing_fallbacks(data: dict, message_text: str) -> dict:
+    """Bổ sung các trường rõ ràng trong tin đăng nếu AI phân loại/trích xuất thiếu."""
+    extracted = dict(data or {})
+    raw_text = re.sub(r"\s+", " ", str(message_text or "").strip())
+
+    address_match = re.search(
+        r"\b(?:ở|tại)\s+(.+?)(?=\s+(?:phòng\s+)?\d+(?:[.,]\d+)?\s*m(?:2|²)\b|\s+giá\b|$)",
+        raw_text,
+        flags=re.IGNORECASE,
+    )
+    if address_match and not has_room_update_value(extracted.get("address")):
+        extracted["address"] = address_match.group(1).strip(" ,.;-")
+
+    size_match = re.search(r"(?<!\d)(\d+(?:[.,]\d+)?)\s*m(?:2|²)\b", raw_text, re.IGNORECASE)
+    if size_match and not has_room_update_value(extracted.get("room_size")):
+        extracted["room_size"] = f"{size_match.group(1).replace(',', '.')}m2"
+
+    price_match = re.search(
+        r"\b(?:giá|gia)\s*(\d+(?:[.,]\d+)?)\s*(triệu|trieu|tr|k|nghìn|nghin)\b",
+        raw_text,
+        flags=re.IGNORECASE,
+    )
+    if price_match and is_missing_required_room_price(extracted.get("price")):
+        number = float(price_match.group(1).replace(",", "."))
+        unit = normalize_location_search(price_match.group(2))
+        extracted["price"] = number * (1_000 if unit in {"k", "nghin"} else 1_000_000)
+
+    extracted.update(infer_explicit_boolean_room_updates(raw_text))
+    return extracted
 
 
 def keep_only_explicit_room_updates(data: dict, message_text: str) -> dict:
@@ -2105,10 +2159,12 @@ def process_zalo_ai_logic(
 
     # Câu tìm phòng đã có cả địa chỉ và giá được xử lý trực tiếp trước Gemini.
     # Điều này tránh lỗi phân loại/JSON/timeout làm mất một truy vấn hợp lệ.
+    listing_intent = is_room_listing_request(message_text)
     direct_search = extract_natural_room_search(message_text)
     direct_search_intent = normalize_location_search(message_text)
     if (
-        direct_search.get("location_search")
+        not listing_intent
+        and direct_search.get("location_search")
         and direct_search.get("max_price", 0) > 0
         and re.search(r"\b(?:xem|tim|kiem|thue|can)\s+(?:phong|phong tro)\b", direct_search_intent)
     ):
@@ -2267,13 +2323,19 @@ def process_zalo_ai_logic(
         action = result_data.get("action")
         natural_search = extract_natural_room_search(message_text)
         normalized_intent = normalize_location_search(message_text)
+        listing_intent = is_room_listing_request(message_text)
         if (
+            not listing_intent
+            and
             natural_search.get("location_search")
             and natural_search.get("max_price", 0) > 0
             and re.search(r"\b(?:xem|tim|kiem|thue|can)\s+(?:phong|phong tro)\b", normalized_intent)
         ):
             action = "SEARCH_ROOM"
         extracted = result_data.get("extracted_data", {})
+        if listing_intent:
+            action = "ADD_ROOM"
+            extracted = apply_direct_room_listing_fallbacks(extracted, message_text)
         update_command = is_room_update_command(message_text)
         direct_room_code = extract_room_code_for_media(message_text) if update_command else None
         if direct_room_code:

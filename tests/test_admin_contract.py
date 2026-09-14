@@ -314,21 +314,23 @@ def test_admin_room_delete_is_permanent_in_qdrant_and_postgres():
     assert "xóa vĩnh viễn bản ghi khỏi cả Qdrant" in readme
 
 
-def test_admin_can_select_many_and_delete_all_authorized_rooms():
+def test_admin_can_select_and_delete_many_rooms_in_one_request():
     services_source = (ROOT / "services.py").read_text(encoding="utf-8")
     main_source = (ROOT / "main.py").read_text(encoding="utf-8")
     html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
-    assert "class DeleteAllRoomsSchema" in services_source
-    assert '@app.post("/api/admin/rooms/delete-all")' in main_source
-    assert 'data.confirmation.strip().upper() != "XOA TOAN BO"' in main_source
-    assert 'owner_phone = None if user.role == "SUPER_ADMIN" else user.username' in main_source
-    assert "mirror_query.delete(synchronize_session=False)" in main_source
-    assert '"ROOM_DELETE_ALL"' in main_source
+    assert "class DeleteSelectedRoomsSchema" in services_source
+    assert '@app.post("/api/admin/rooms/delete-selected")' in main_source
+    assert "RoomRecord.id.in_(room_ids)" in main_source
+    assert "qdrant_models.PointIdsList(points=qdrant_ids)" in main_source
+    assert '"ROOM_DELETE_SELECTED"' in main_source
     assert 'id="deleteSelectedBtn"' in html
-    assert "Xóa phòng đã chọn" in html
-    assert 'id="deleteAllRoomsBtn"' in html
-    assert "function deleteAllRooms()" in html
-    assert 'confirmation!=="XOA TOAN BO"' in html
+    assert "Xóa các phòng đã chọn" in html
+    assert 'api("/api/admin/rooms/delete-selected"' in html
+    assert "body:JSON.stringify({room_ids:ids})" in html
+    assert 'id="deleteAllRoomsBtn"' not in html
+    assert "function deleteAllRooms()" not in html
+    assert "class DeleteAllRoomsSchema" not in services_source
+    assert '@app.post("/api/admin/rooms/delete-all")' not in main_source
 
 
 def test_room_media_is_grouped_by_room_and_all_media_is_displayed():
@@ -423,6 +425,18 @@ def test_natural_search_overrides_invalid_gemini_extraction():
     gemini_start = services_source.index('system_prompt = f"""', direct_start)
     assert direct_start < gemini_start
     assert "send_zalo_search_results(user_id, search_results)" in services_source[direct_start:gemini_start]
+
+
+def test_landlord_listing_intent_has_priority_over_room_search():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    assert "def is_room_listing_request" in services_source
+    assert "not listing_intent" in services_source
+    assert 'action = "ADD_ROOM"' in services_source
+    assert "apply_direct_room_listing_fallbacks(extracted, message_text)" in services_source
+    assert 'extracted["address"] = address_match.group(1)' in services_source
+    assert 'extracted["price"] = number *' in services_source
+    assert 'extracted["room_size"]' in services_source
+    assert '"wardrobe": ("tủ quần áo", "tủ áo", "giường tủ")' in services_source
 
 
 def test_admin_report_management_screen_and_crud_exist():

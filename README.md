@@ -34,7 +34,9 @@ Render dùng filesystem tạm nếu chưa gắn Persistent Disk, vì vậy file 
 
 Hai bảng `room_records` và `audit_logs` được tự tạo khi khởi động. Qdrant vẫn là nguồn tìm kiếm để không thay đổi chức năng cốt lõi; `room_records` là bản sao dữ liệu phòng. Xóa phòng trên web là xóa vĩnh viễn bản ghi khỏi cả Qdrant và `room_records`; `audit_logs` chỉ giữ mã phòng, chủ sở hữu và người thực hiện để phục vụ kiểm tra. Đơn đặt phòng lịch sử không bị xóa theo phòng.
 
-Trang Admin cho phép tích chọn nhiều phòng để xóa theo danh sách đang xem và có nút **Xóa toàn bộ phòng**. Xóa toàn bộ yêu cầu nhập chính xác `XOA TOAN BO`; Super Admin xóa toàn hệ thống, còn user thường chỉ xóa những phòng có `landlord_phone` trùng tài khoản đăng nhập.
+Trang Admin cho phép tích chọn một hoặc nhiều phòng rồi bấm **Xóa các phòng đã chọn**. Nút và API xóa toàn bộ phòng đã được loại bỏ để tránh xóa nhầm; thao tác xóa nhiều gửi một yêu cầu duy nhất, kiểm tra quyền với toàn bộ danh sách trước khi xóa khỏi Qdrant và PostgreSQL.
+
+Luồng Zalo ưu tiên nhận dạng câu đăng phòng của chủ nhà như `tôi cần cho thuê phòng ở ...` là `ADD_ROOM`, không chuyển nhầm sang tìm phòng khi câu có địa chỉ và giá. Hệ thống bổ sung trực tiếp địa chỉ, giá, diện tích và các tiện ích được nói rõ nếu kết quả AI bỏ sót.
 
 Mỗi phòng trên Admin có nút **Xem phòng** để mở toàn bộ dữ liệu/media dạng chỉ đọc và nút **Report phòng**. Hộp thoại report khóa mã phòng, tên phòng, địa chỉ; người dùng chỉ nhập nội dung phản ánh. Report được lưu vào PostgreSQL `room_reports`, giới hạn 2.000 ký tự và có API quản trị `GET /api/admin/room-reports`.
 

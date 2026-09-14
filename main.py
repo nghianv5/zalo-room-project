@@ -191,81 +191,88 @@ async def register_user(data: RegisterModel, request: Request, db: Session = Dep
     return {"status": "success", "message": "Đăng ký tài khoản thành công!"}
     
 # --- ROOM MANAGEMENT ROUTES ---
-@app.post("/api/admin/rooms/delete-all")
-def delete_all_rooms_from_web(
-    data: DeleteAllRoomsSchema,
+@app.post("/api/admin/rooms/delete-selected")
+def delete_selected_rooms_from_web(
+    data: DeleteSelectedRoomsSchema,
     user: Principal = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    if data.confirmation.strip().upper() != "XOA TOAN BO":
-        raise HTTPException(status_code=400, detail="Mã xác nhận không chính xác.")
-
+    room_ids = data.room_ids
     try:
-        owner_phone = None if user.role == "SUPER_ADMIN" else user.username
-        must_conditions = []
-        if owner_phone:
-            must_conditions.append(
-                qdrant_models.FieldCondition(
-                    key="landlord_phone",
-                    match=qdrant_models.MatchValue(value=owner_phone),
-                )
+        qdrant_records = qdrant_client.retrieve(
+            collection_name=COLLECTION_NAME,
+            ids=room_ids,
+            with_payload=True,
+            with_vectors=False,
+        )
+        qdrant_by_id = {
+            str(record.id): record
+            for record in qdrant_records
+            if record.payload
+        }
+        mirror_rooms = db.query(RoomRecord).filter(RoomRecord.id.in_(room_ids)).all()
+        mirror_by_id = {str(room.id): room for room in mirror_rooms}
+
+        missing_ids = [
+            room_id for room_id in room_ids
+            if room_id not in qdrant_by_id and room_id not in mirror_by_id
+        ]
+        if missing_ids:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Không tìm thấy {len(missing_ids)} phòng đã chọn. Vui lòng tải lại danh sách.",
             )
-        room_filter = qdrant_models.Filter(must=must_conditions) if must_conditions else None
 
-        qdrant_ids = []
-        scroll_offset = None
-        while True:
-            records, next_offset = qdrant_client.scroll(
-                collection_name=COLLECTION_NAME,
-                scroll_filter=room_filter,
-                limit=256,
-                offset=scroll_offset,
-                with_payload=False,
-                with_vectors=False,
+        unauthorized_ids = []
+        for room_id in room_ids:
+            qdrant_room = qdrant_by_id.get(room_id)
+            mirror_room = mirror_by_id.get(room_id)
+            owner = (
+                qdrant_room.payload.get("landlord_phone")
+                if qdrant_room
+                else mirror_room.landlord_phone
             )
-            qdrant_ids.extend(str(record.id) for record in records)
-            if next_offset is None or next_offset == scroll_offset:
-                break
-            scroll_offset = next_offset
+            if user.role != "SUPER_ADMIN" and owner != user.username:
+                unauthorized_ids.append(room_id)
+        if unauthorized_ids:
+            raise HTTPException(
+                status_code=403,
+                detail="Bạn không có quyền xóa một hoặc nhiều phòng đã chọn.",
+            )
 
-        mirror_query = db.query(RoomRecord)
-        if owner_phone:
-            mirror_query = mirror_query.filter(RoomRecord.landlord_phone == owner_phone)
-        mirror_count = mirror_query.count()
-        total_ids = set(qdrant_ids)
-        total_ids.update(row_id for (row_id,) in mirror_query.with_entities(RoomRecord.id).all())
-
-        for start in range(0, len(qdrant_ids), 256):
+        qdrant_ids = list(qdrant_by_id)
+        if qdrant_ids:
             qdrant_client.delete(
                 collection_name=COLLECTION_NAME,
-                points_selector=qdrant_models.PointIdsList(points=qdrant_ids[start:start + 256]),
+                points_selector=qdrant_models.PointIdsList(points=qdrant_ids),
                 wait=True,
             )
-        mirror_query.delete(synchronize_session=False)
+        if mirror_by_id:
+            db.query(RoomRecord).filter(RoomRecord.id.in_(list(mirror_by_id))).delete(
+                synchronize_session=False
+            )
         db.commit()
 
         write_audit_log(
             user.username,
-            "ROOM_DELETE_ALL",
-            details={
-                "deleted_count": len(total_ids),
-                "qdrant_count": len(qdrant_ids),
-                "room_records_count": mirror_count,
-                "scope": "ALL" if user.role == "SUPER_ADMIN" else owner_phone,
-            },
+            "ROOM_DELETE_SELECTED",
+            details={"room_ids": room_ids, "deleted_count": len(room_ids)},
         )
         return {
             "status": "success",
-            "message": f"Đã xóa vĩnh viễn {len(total_ids)} phòng.",
-            "deleted_count": len(total_ids),
+            "message": f"Đã xóa vĩnh viễn {len(room_ids)} phòng đã chọn.",
+            "deleted_count": len(room_ids),
         }
     except HTTPException:
         db.rollback()
         raise
     except Exception as exc:
         db.rollback()
-        report_error("Xóa toàn bộ phòng thất bại", exc, f"actor:{user.username}")
-        raise HTTPException(status_code=500, detail="Không thể xóa toàn bộ phòng. Vui lòng thử lại.") from exc
+        report_error("Xóa nhiều phòng thất bại", exc, f"actor:{user.username}")
+        raise HTTPException(
+            status_code=500,
+            detail="Không thể xóa các phòng đã chọn. Vui lòng thử lại.",
+        ) from exc
 
 
 @app.delete("/api/rooms/{point_id}")

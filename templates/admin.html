@@ -71,14 +71,11 @@
             </b>
             <div class="flex flex-wrap justify-end gap-2">
               <button id="deleteSelectedBtn" onclick="deleteSelected()" class="mr-2 hidden rounded bg-red-600 px-3 py-2 text-xs font-bold text-white">
-                Xóa phòng đã chọn (
+                Xóa các phòng đã chọn (
                 <span id="selectedCount">
                   0
                 </span>
                 )
-              </button>
-              <button id="deleteAllRoomsBtn" onclick="deleteAllRooms()" class="rounded bg-red-900 px-3 py-2 text-xs font-bold text-white">
-                Xóa toàn bộ phòng
               </button>
               <button onclick="openRoom()" class="rounded bg-blue-600 px-3 py-2 text-xs font-bold text-white">
                 + Thêm phòng
@@ -760,29 +757,18 @@
       async function deleteSelected() {
           let ids=[...document.querySelectorAll(".roomCheck:checked")].map(x=>x.value);
           if(!ids.length||!confirm(`Xóa vĩnh viễn ${ids.length} phòng khỏi Qdrant và PostgreSQL? Thao tác này không thể khôi phục.`))return;
-          for(let id of ids)if(!await deleteRoom(id,false))break;
-          loadRooms()
-      }
-      async function deleteAllRooms() {
-          let countResponse=await api("/api/admin/rooms?page=1&page_size=1&include_deleted=true"),countData=await data(countResponse);
-          if(!countResponse.ok)return alert(err(countData));
-          const total=Number(countData.total)||0;
-          if(!total)return alert("Không có phòng nào để xóa.");
-          const confirmation=prompt(`Bạn sắp xóa vĩnh viễn toàn bộ ${total} phòng mà tài khoản này có quyền quản lý.\n\nDữ liệu sẽ bị xóa khỏi Qdrant và PostgreSQL, không thể khôi phục.\n\nNhập XOA TOAN BO để xác nhận:`);
-          if(confirmation!=="XOA TOAN BO")return;
-          busy("deleteAllRoomsBtn",true);
+          busy("deleteSelectedBtn",true);
           try {
-              let r=await api("/api/admin/rooms/delete-all", {
+              let r=await api("/api/admin/rooms/delete-selected", {
                   method:"POST",
                   headers:{"Content-Type":"application/json"},
-                  body:JSON.stringify({confirmation})
+                  body:JSON.stringify({room_ids:ids})
               }),d=await data(r);
               if(!r.ok)return alert(err(d));
-              alert(d.message||"Đã xóa toàn bộ phòng.");
-              roomPage=1;
-              loadRooms(true)
+              alert(d.message||`Đã xóa ${ids.length} phòng đã chọn.`);
+              await loadRooms()
           } finally {
-              busy("deleteAllRoomsBtn",false)
+              busy("deleteSelectedBtn",false)
           }
       }
       function choices() {
