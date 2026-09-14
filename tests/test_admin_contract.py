@@ -338,7 +338,7 @@ def test_room_media_is_grouped_by_room_and_all_media_is_displayed():
     assert "def apply_media_limit" in services_source
     assert "return values if limit <= 0 else values[:limit]" in services_source
     assert '_normalise_room_media(room, 0)' in services_source
-    assert "ẢNH/VIDEO CỦA PHÒNG" in services_source
+    assert "Ảnh/video phòng {room_code}" in services_source
     assert "Đã hiển thị hết ảnh/video của phòng" in services_source
     assert "remaining_media" not in services_source
     assert "total_media_sent" not in services_source
@@ -379,6 +379,67 @@ def test_detailed_vietnamese_location_search_is_accent_tolerant():
     assert "MatchText(text=location_search)" not in search_source
     assert "get_text_embedding(query_text)" not in search_source
     assert "SEARCH_CANDIDATE_LIMIT=2000" in env_source
+
+
+def test_room_view_report_dialog_and_persistence_exist():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
+    assert "class RoomReport(Base)" in services_source
+    assert '__tablename__ = "room_reports"' in services_source
+    assert "class RoomReportCreateSchema" in services_source
+    assert '@app.post("/api/rooms/{point_id}/reports")' in main_source
+    assert '@app.get("/api/admin/room-reports")' in main_source
+    assert '"ROOM_REPORT_CREATE"' in main_source
+    assert 'id="roomViewModal"' in html
+    assert 'id="roomReportModal"' in html
+    assert 'id="reportRoomCode" readonly' in html
+    assert 'id="reportRoomName" readonly' in html
+    assert 'id="reportRoomAddress" readonly' in html
+    assert "function viewRoom(id)" in html
+    assert "function openRoomReport(id)" in html
+    assert "function saveRoomReport(event)" in html
+
+
+def test_zalo_room_text_and_first_image_are_combined_with_fallback():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    search_start = services_source.index("def send_zalo_search_results")
+    search_end = services_source.index("def _refresh_zalo_token_after_invalid", search_start)
+    search_source = services_source[search_start:search_end]
+    assert "format_room_search_message(room, position)" in search_source
+    assert "media_urls=room_media" in search_source
+    assert "combine_first_media=True" in search_source
+    assert "Đã hiển thị hết ảnh/video của phòng" in search_source
+
+
+def test_natural_search_overrides_invalid_gemini_extraction():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    assert "def extract_natural_room_search" in services_source
+    assert 'action = "SEARCH_ROOM"' in services_source
+    assert "search_params.update(natural_search)" in services_source
+    assert 'natural_search.get("max_price", 0) > 0' in services_source
+    assert 'print(f"📩 [ZALO RES Part' not in services_source
+    direct_start = services_source.index("direct_search = extract_natural_room_search(message_text)")
+    gemini_start = services_source.index('system_prompt = f"""', direct_start)
+    assert direct_start < gemini_start
+    assert "send_zalo_search_results(user_id, search_results)" in services_source[direct_start:gemini_start]
+
+
+def test_admin_report_management_screen_and_crud_exist():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
+    assert "class RoomReportStatusSchema" in services_source
+    assert '@app.patch("/api/admin/room-reports/{report_id}/status")' in main_source
+    assert '@app.delete("/api/admin/room-reports/{report_id}")' in main_source
+    assert "RoomReport.room_code.ilike" in main_source
+    assert "RoomReport.reporter_username.ilike" in main_source
+    assert 'id="reportsTab"' in html
+    assert 'id="reportsPage"' in html
+    assert 'id="reportBody"' in html
+    assert "function loadReports()" in html
+    assert "function updateReportStatus(id,status)" in html
+    assert "function deleteReport(id)" in html
 
 
 def test_excel_dialog_resets_previous_result_before_reopen():

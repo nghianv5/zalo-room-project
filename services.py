@@ -274,6 +274,20 @@ class RoomRecord(Base):
     created_at = Column(DateTime, default=vietnam_now)
     updated_at = Column(DateTime, default=vietnam_now, onupdate=vietnam_now)
 
+
+class RoomReport(Base):
+    __tablename__ = "room_reports"
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    room_id = Column(String, index=True, nullable=False)
+    room_code = Column(String, index=True, nullable=False)
+    room_name = Column(String, nullable=True)
+    address = Column(String, nullable=False)
+    reporter_username = Column(String, index=True, nullable=False)
+    content = Column(String, nullable=False)
+    status = Column(String, nullable=False, default="MỚI")
+    created_at = Column(DateTime, default=vietnam_now, index=True)
+    updated_at = Column(DateTime, default=vietnam_now, onupdate=vietnam_now)
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -328,6 +342,28 @@ class RequestOTPModel(BaseModel):
 
 class DeleteAllRoomsSchema(BaseModel):
     confirmation: str
+
+
+class RoomReportCreateSchema(BaseModel):
+    content: str = Field(..., min_length=5, max_length=2000)
+
+    @validator("content", pre=True)
+    def validate_report_content(cls, value):
+        clean_value = re.sub(r"\s+", " ", str(value or "")).strip()
+        if len(clean_value) < 5:
+            raise ValueError("Nội dung report phải có ít nhất 5 ký tự.")
+        return clean_value
+
+
+class RoomReportStatusSchema(BaseModel):
+    status: str
+
+    @validator("status", pre=True)
+    def validate_report_status(cls, value):
+        clean_value = str(value or "").strip().upper()
+        if clean_value not in {"MỚI", "ĐANG XỬ LÝ", "ĐÃ XỬ LÝ", "BỎ QUA"}:
+            raise ValueError("Trạng thái report không hợp lệ.")
+        return clean_value
 
 class RoomCreateUpdateSchema(BaseModel):
     room_code: Optional[str] = Field(default=None, description="Mã phòng 6 ký tự")
@@ -964,17 +1000,24 @@ def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
 
     for position, room in enumerate(rooms, start=1):
         room_code = str(room.get("room_code") or f"PHÒNG {position}").strip().upper()
-        if not send_zalo_message(user_id, format_room_search_message(room, position)):
-            return False
         room_media = _normalise_room_media(room, 0)
         if room_media:
-            media_header = f"📸 ẢNH/VIDEO CỦA PHÒNG {room_code}\nTổng cộng: {len(room_media)} tệp"
-            if not send_zalo_message(user_id, media_header, media_urls=room_media):
+            room_message = (
+                f"{format_room_search_message(room, position)}\n"
+                f"📸 Ảnh/video phòng {room_code}: {len(room_media)} tệp"
+            )
+            if not send_zalo_message(
+                user_id,
+                room_message,
+                media_urls=room_media,
+                combine_first_media=True,
+            ):
                 return False
             if not send_zalo_message(user_id, f"✅ Đã hiển thị hết ảnh/video của phòng {room_code}."):
                 return False
         else:
-            if not send_zalo_message(user_id, f"📷 Phòng {room_code} chưa có ảnh/video."):
+            room_message = f"{format_room_search_message(room, position)}\n📷 Phòng {room_code} chưa có ảnh/video."
+            if not send_zalo_message(user_id, room_message):
                 return False
         time.sleep(0.3)
     return True
@@ -1072,7 +1115,6 @@ def send_zalo_message(
                 }
             payload = {"recipient": {"user_id": user_id}, "message": message_payload}
             res_data, access_token = _post_zalo_with_token_retry(url, payload, access_token)
-            print(f"📩 [ZALO RES Part {idx+1}/{len(text_chunks)}]: {res_data}")
             # Một số phiên bản OA không nhận text + media chung: tự fallback an toàn.
             if res_data.get("error") != 0 and "attachment" in message_payload:
                 if res_data.get("error") == -201 and unique_media:
@@ -2061,6 +2103,35 @@ def process_zalo_ai_logic(
             send_zalo_message(user_id, f"❌ Không thể cập nhật phòng {direct_room_code}: {result}")
         return
 
+    # Câu tìm phòng đã có cả địa chỉ và giá được xử lý trực tiếp trước Gemini.
+    # Điều này tránh lỗi phân loại/JSON/timeout làm mất một truy vấn hợp lệ.
+    direct_search = extract_natural_room_search(message_text)
+    direct_search_intent = normalize_location_search(message_text)
+    if (
+        direct_search.get("location_search")
+        and direct_search.get("max_price", 0) > 0
+        and re.search(r"\b(?:xem|tim|kiem|thue|can)\s+(?:phong|phong tro)\b", direct_search_intent)
+    ):
+        add_chat_history(user_id=user_id, user_message=message_text, ai_reply=None)
+        location_search = direct_search["location_search"]
+        min_p = float(direct_search.get("min_price") or 0)
+        max_p = float(direct_search.get("max_price") or 0)
+        search_results = search_rooms_with_filter(
+            query_text=message_text,
+            location_search=location_search,
+            min_price=min_p,
+            max_price=max_p,
+            top_k=10,
+        )
+        if search_results:
+            send_zalo_search_results(user_id, search_results)
+        else:
+            send_zalo_message(
+                user_id,
+                f"Dạ chưa tìm thấy phòng ở {location_search} với giá từ {min_p:,.0f}đ đến {max_p:,.0f}đ.",
+            )
+        return
+
     try:
         
         system_prompt = f"""
@@ -2194,6 +2265,14 @@ def process_zalo_ai_logic(
         ai_reply = result_data.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
         print(f"ai_reply 1: {ai_reply}")
         action = result_data.get("action")
+        natural_search = extract_natural_room_search(message_text)
+        normalized_intent = normalize_location_search(message_text)
+        if (
+            natural_search.get("location_search")
+            and natural_search.get("max_price", 0) > 0
+            and re.search(r"\b(?:xem|tim|kiem|thue|can)\s+(?:phong|phong tro)\b", normalized_intent)
+        ):
+            action = "SEARCH_ROOM"
         extracted = result_data.get("extracted_data", {})
         update_command = is_room_update_command(message_text)
         direct_room_code = extract_room_code_for_media(message_text) if update_command else None
@@ -2217,7 +2296,13 @@ def process_zalo_ai_logic(
             return
         elif action == "SEARCH_ROOM":
             add_chat_history(user_id=user_id, user_message=message_text, ai_reply=None)
-            is_valid_search = result_data.get("is_valid_search", False)
+            search_params = dict(result_data.get("extracted_search") or {})
+            if natural_search.get("location_search") and natural_search.get("max_price", 0) > 0:
+                search_params.update(natural_search)
+            is_valid_search = bool(
+                search_params.get("location_search")
+                and float(search_params.get("max_price") or 0) > 0
+            )
         
             # 🚨 TRƯỜNG HỢP 1: THIẾU THÔNG TIN BẮT BUỘC
             if not is_valid_search:
@@ -2231,10 +2316,9 @@ def process_zalo_ai_logic(
 
             # ✅ TRƯỜNG HỢP 2: ĐÃ ĐỦ THÔNG TIN -> TIẾN HÀNH TÌM KIẾM
             else:
-                search_params = result_data.get("extracted_search", {})
                 location_search = search_params.get("location_search", "")
-                min_p = search_params.get("min_price", 0)
-                max_p = search_params.get("max_price", 0)
+                min_p = float(search_params.get("min_price") or 0)
+                max_p = float(search_params.get("max_price") or 0)
                 print(f"min_p : {min_p}")
                 print(f"max_p : {max_p}")
                 
@@ -2781,6 +2865,48 @@ def get_location_match_level(address: str, location_search: str) -> int:
     if first_component and first_component in normalized_address:
         return 1
     return 0
+
+
+def extract_natural_room_search(message_text: str) -> dict:
+    """Tách địa chỉ và khoảng giá trực tiếp, không phụ thuộc kết quả Gemini."""
+    raw_text = str(message_text or "").strip()
+    price_pattern = re.compile(
+        r"(?<!\d)(\d+(?:[.,]\d+)?)\s*(triệu|trieu|tr|k|nghìn|nghin)(?![a-zA-Z])",
+        re.IGNORECASE,
+    )
+    prices = []
+
+    def parse_price_match(match) -> str:
+        number = float(match.group(1).replace(",", "."))
+        unit = normalize_location_search(match.group(2))
+        multiplier = 1_000 if unit in {"k", "nghin"} else 1_000_000
+        prices.append(number * multiplier)
+        return " "
+
+    location_text = price_pattern.sub(parse_price_match, raw_text)
+    for match in re.finditer(r"(?<!\d)(\d{6,})(?!\d)", location_text):
+        prices.append(float(match.group(1)))
+    location_text = re.sub(r"(?<!\d)\d{6,}(?!\d)", " ", location_text)
+    location_text = re.sub(
+        r"^\s*(?:cho\s+(?:tôi|toi|mình|minh)\s+)?"
+        r"(?:(?:xem|tìm|tim|kiếm|kiem|cần|can|thuê|thue)\s+)*"
+        r"(?:phòng\s*trọ|phong\s*tro|phòng|phong)\s*",
+        "",
+        location_text,
+        flags=re.IGNORECASE,
+    )
+    location_text = re.sub(
+        r"\b(?:giá|gia)\s*(?:từ|tu|đến|den|dưới|duoi|tối đa|toi da|khoảng|khoang)?\s*$",
+        "",
+        location_text,
+        flags=re.IGNORECASE,
+    )
+    location_text = re.sub(r"^[\s,:;.-]+|[\s,:;.-]+$", "", location_text).strip()
+    return {
+        "location_search": location_text,
+        "min_price": min(prices) if len(prices) > 1 else 0,
+        "max_price": max(prices) if prices else 0,
+    }
     
     
     

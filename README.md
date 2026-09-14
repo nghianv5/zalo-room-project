@@ -36,6 +36,10 @@ Hai bảng `room_records` và `audit_logs` được tự tạo khi khởi độn
 
 Trang Admin cho phép tích chọn nhiều phòng để xóa theo danh sách đang xem và có nút **Xóa toàn bộ phòng**. Xóa toàn bộ yêu cầu nhập chính xác `XOA TOAN BO`; Super Admin xóa toàn hệ thống, còn user thường chỉ xóa những phòng có `landlord_phone` trùng tài khoản đăng nhập.
 
+Mỗi phòng trên Admin có nút **Xem phòng** để mở toàn bộ dữ liệu/media dạng chỉ đọc và nút **Report phòng**. Hộp thoại report khóa mã phòng, tên phòng, địa chỉ; người dùng chỉ nhập nội dung phản ánh. Report được lưu vào PostgreSQL `room_reports`, giới hạn 2.000 ký tự và có API quản trị `GET /api/admin/room-reports`.
+
+Super Admin có tab **Report phòng** để lọc theo mã phòng, người gửi và trạng thái; có thể chuyển report giữa `MỚI`, `ĐANG XỬ LÝ`, `ĐÃ XỬ LÝ`, `BỎ QUA` hoặc xóa report. Câu tìm phòng có đủ địa chỉ và giá được parser nội bộ ưu tiên xử lý trước kết quả Gemini, ví dụ `xem phòng phan thị hành, phú thọ hoà, tân phú 6tr` được hiểu là địa chỉ `phan thị hành, phú thọ hoà, tân phú`, giá từ 0 đến 6.000.000 đồng.
+
 `landlord_phone` là trường bắt buộc cho mọi lần tạo/cập nhật phòng từ web, Zalo và Excel. Giá trị phải là số điện thoại Việt Nam 10 chữ số hợp lệ. Các bản ghi Qdrant cũ từng thiếu trường này cần được bổ sung trước khi cập nhật lại.
 
 Khi tìm phòng, hệ thống không in đường dẫn `media_urls`. Mỗi phòng được gửi thành một cụm riêng theo thứ tự: thông tin phòng, tiêu đề ghi đúng mã phòng, toàn bộ ảnh/video, rồi thông báo kết thúc cụm trước khi chuyển sang phòng tiếp theo. Admin cũng hiển thị gallery riêng trong từng dòng phòng; ảnh và video được phân loại, video có trình phát. `MAX_MEDIA_PER_ROOM=0`, `MAX_SEARCH_MEDIA_PER_ROOM=0` và `MAX_SEARCH_MEDIA=0` nghĩa là không giới hạn media; `MAX_SEARCH_ROOMS` vẫn giới hạn số phòng của một lượt tìm để tránh gửi quá nhiều phòng không liên quan.

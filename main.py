@@ -319,6 +319,122 @@ def delete_room_from_web(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.post("/api/rooms/{point_id}/reports")
+def create_room_report(
+    point_id: str,
+    data: RoomReportCreateSchema,
+    user: Principal = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    enforce_rate_limit(redis_client, f"room-report:{user.username}", 10, 3600)
+    records = qdrant_client.retrieve(
+        collection_name=COLLECTION_NAME,
+        ids=[point_id],
+        with_payload=True,
+        with_vectors=False,
+    )
+    if not records or not records[0].payload:
+        raise HTTPException(status_code=404, detail="Không tìm thấy phòng để report.")
+
+    room = dict(records[0].payload)
+    report = RoomReport(
+        room_id=str(point_id),
+        room_code=str(room.get("room_code") or "CHƯA CÓ MÃ").strip().upper(),
+        room_name=str(room.get("room_name") or "").strip() or None,
+        address=str(room.get("address") or "Chưa có địa chỉ").strip(),
+        reporter_username=user.username,
+        content=data.content,
+        status="MỚI",
+    )
+    db.add(report)
+    db.commit()
+    db.refresh(report)
+    write_audit_log(
+        user.username,
+        "ROOM_REPORT_CREATE",
+        str(point_id),
+        {"report_id": report.id, "room_code": report.room_code},
+    )
+    return {"status": "success", "message": "Đã gửi report phòng.", "report_id": report.id}
+
+
+@app.get("/api/admin/room-reports")
+def list_room_reports(
+    page: int = 1,
+    page_size: int = 50,
+    report_status: Optional[str] = Query(default=None, alias="status"),
+    room_code: Optional[str] = None,
+    reporter: Optional[str] = None,
+    user: Principal = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    query = db.query(RoomReport)
+    if report_status:
+        query = query.filter(RoomReport.status == report_status.strip().upper())
+    if room_code:
+        query = query.filter(RoomReport.room_code.ilike(f"%{room_code.strip()}%"))
+    if reporter:
+        query = query.filter(RoomReport.reporter_username.ilike(f"%{reporter.strip()}%"))
+    total = query.count()
+    safe_size = min(max(page_size, 1), 100)
+    safe_page = max(page, 1)
+    reports = query.order_by(RoomReport.created_at.desc()).offset((safe_page - 1) * safe_size).limit(safe_size).all()
+    return {
+        "data": [
+            {
+                "id": item.id,
+                "room_id": item.room_id,
+                "room_code": item.room_code,
+                "room_name": item.room_name,
+                "address": item.address,
+                "reporter_username": item.reporter_username,
+                "content": item.content,
+                "status": item.status,
+                "created_at": vietnam_datetime_iso(item.created_at),
+                "updated_at": vietnam_datetime_iso(item.updated_at),
+            }
+            for item in reports
+        ],
+        "total": total,
+        "page": safe_page,
+        "page_size": safe_size,
+    }
+
+
+@app.patch("/api/admin/room-reports/{report_id}/status")
+def update_room_report_status(
+    report_id: str,
+    data: RoomReportStatusSchema,
+    user: Principal = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    report = db.query(RoomReport).filter(RoomReport.id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Không tìm thấy report.")
+    old_status = report.status
+    report.status = data.status
+    report.updated_at = vietnam_now()
+    db.commit()
+    write_audit_log(user.username, "ROOM_REPORT_STATUS", report_id, {"from": old_status, "to": data.status})
+    return {"status": "success", "message": "Đã cập nhật trạng thái report."}
+
+
+@app.delete("/api/admin/room-reports/{report_id}")
+def delete_room_report(
+    report_id: str,
+    user: Principal = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    report = db.query(RoomReport).filter(RoomReport.id == report_id).first()
+    if not report:
+        raise HTTPException(status_code=404, detail="Không tìm thấy report.")
+    audit_details = {"room_code": report.room_code, "reporter": report.reporter_username}
+    db.delete(report)
+    db.commit()
+    write_audit_log(user.username, "ROOM_REPORT_DELETE", report_id, audit_details)
+    return {"status": "success", "message": "Đã xóa report."}
+
+
 @app.post("/api/rooms")
 async def save_or_update_room(
     data: RoomCreateUpdateSchema, 
