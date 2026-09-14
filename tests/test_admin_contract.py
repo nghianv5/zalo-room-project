@@ -247,6 +247,54 @@ def test_zalo_media_urls_are_public_and_invalid_images_do_not_break_text():
     assert "your-render-service.onrender.com" in env_source
 
 
+def test_missing_room_price_is_user_input_error_not_system_exception():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    assert 'ROOM_PRICE_REQUIRED = "ROOM_PRICE_REQUIRED"' in services_source
+    assert "def is_missing_required_room_price" in services_source
+    assert 'return ROOM_PRICE_REQUIRED' in services_source
+    assert 'elif message == ROOM_PRICE_REQUIRED:' in services_source
+    assert "save_pending_room(user_id, data_to_save)" in services_source
+    assert "Thông tin phòng đã được lưu tạm" in services_source
+    assert "Lỗi: 'price' không được để trống hoặc null!" not in services_source
+    price_check = services_source.index('if is_missing_required_room_price(data.get("price"))')
+    embedding_call = services_source.index("vector = get_text_embedding(text_to_embed)", price_check)
+    assert price_check < embedding_call
+
+
+def test_empty_zalo_media_is_user_input_error_without_admin_alert():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    env_source = (ROOT / ".env.example").read_text(encoding="utf-8")
+    assert "if not media_bytes:" in services_source
+    assert "Zalo trả về tệp rỗng" in services_source
+    assert "io.BytesIO(bytes(media_bytes))" in services_source
+    assert "Ảnh/video bạn gửi đang rỗng" in services_source
+    assert '"Cloudinary upload thất bại; chuyển lưu local", e, "save_media_file", notify=False' in services_source
+    assert "None if is_video else payload.get(\"thumbnailUrl\")" in main_source
+    assert 'media_items.append({"url": "", "is_video": event_name == "user_send_video"})' in main_source
+    assert "MAX_IMAGE_UPLOAD_MB=15" in env_source
+    assert "MAX_VIDEO_UPLOAD_MB=80" in env_source
+
+
+def test_admin_rooms_show_all_records_with_server_pagination():
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
+    assert "page: int = 1" in main_source
+    assert "page_size: int = 25" in main_source
+    assert "while True:" in main_source
+    assert 'limit=256' in main_source
+    assert '"total": total' in main_source
+    assert '"total_pages": total_pages' in main_source
+    assert 'id="roomPaginationInfo"' in html
+    assert 'id="roomPageSize"' in html
+    assert 'id="roomPrevBtn"' in html
+    assert 'id="roomNextBtn"' in html
+    assert "function changeRoomPage(delta)" in html
+    assert "function updateRoomPagination()" in html
+    assert 'page_size:$(\'roomPageSize\')?.value||"25"' in html
+    assert "limit:\"100\"" not in html
+
+
 def test_excel_dialog_resets_previous_result_before_reopen():
     html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
     assert 'onclick="openExcelModal()"' in html

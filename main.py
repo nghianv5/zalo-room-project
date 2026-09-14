@@ -451,8 +451,12 @@ async def get_rooms_filter(
     to_date: Optional[str] = None,
     status: Optional[str] = None,
     username: Optional[str] = None,
-    limit: int = 50,
-    offset: Optional[str] = None,
+    address: Optional[str] = None,
+    room_query: Optional[str] = None,
+    landlord_phone: Optional[str] = None,
+    has_ac: Optional[str] = None,
+    page: int = 1,
+    page_size: int = 25,
     include_deleted: bool = False,
     user: Principal = Depends(get_current_user)
 ):
@@ -461,6 +465,8 @@ async def get_rooms_filter(
     effective_username = username if user.role == "SUPER_ADMIN" else user.username
     if effective_username and effective_username != os.getenv("ADMIN_USERNAME", "adminpro"):
         must_conditions.append(qdrant_models.FieldCondition(key="landlord_phone", match=qdrant_models.MatchValue(value=effective_username)))
+    elif user.role == "SUPER_ADMIN" and landlord_phone:
+        must_conditions.append(qdrant_models.FieldCondition(key="landlord_phone", match=qdrant_models.MatchValue(value=landlord_phone.strip())))
     if not include_deleted:
         must_not_conditions.append(qdrant_models.FieldCondition(key="status", match=qdrant_models.MatchValue(value="ĐÃ XÓA")))
 
@@ -487,17 +493,60 @@ async def get_rooms_filter(
         must_conditions.append(qdrant_models.FieldCondition(key="move_in_timestamp", range=qdrant_models.Range(**time_range)))
 
     query_filter = qdrant_models.Filter(must=must_conditions, must_not=must_not_conditions)
-    safe_limit = min(max(limit, 1), 100)
-    records, next_offset = qdrant_client.scroll(collection_name=COLLECTION_NAME, scroll_filter=query_filter, limit=safe_limit, offset=offset)
+    # Đọc hết các bản ghi thỏa bộ lọc Qdrant theo từng batch, sau đó áp dụng
+    # tìm kiếm chứa chuỗi và phân trang ổn định. Không còn giới hạn ngầm 10/100 phòng.
+    all_results = []
+    scroll_offset = None
+    while True:
+        records, next_offset = qdrant_client.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=query_filter,
+            limit=256,
+            offset=scroll_offset,
+            with_payload=True,
+            with_vectors=False,
+        )
+        for rec in records:
+            if rec.payload:
+                payload_data = dict(rec.payload)
+                payload_data["id"] = str(rec.id)
+                all_results.append(payload_data)
+        if next_offset is None or next_offset == scroll_offset:
+            break
+        scroll_offset = next_offset
 
-    results = []
-    for rec in records:
-        if rec.payload:
-            payload_data = dict(rec.payload)
-            payload_data["id"] = str(rec.id)
-            results.append(payload_data)
-            
-    return {"data": results, "next_offset": str(next_offset) if next_offset else None}
+    address_text = str(address or "").strip().lower()
+    query_text = str(room_query or "").strip().lower()
+    ac_text = str(has_ac or "").strip().lower()
+    if address_text:
+        all_results = [item for item in all_results if address_text in str(item.get("address") or "").lower()]
+    if query_text:
+        all_results = [
+            item for item in all_results
+            if query_text in f"{item.get('room_name') or ''} {item.get('room_code') or ''}".lower()
+        ]
+    if ac_text:
+        all_results = [item for item in all_results if str(item.get("has_ac") or "").strip().lower() == ac_text]
+
+    all_results.sort(
+        key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""),
+        reverse=True,
+    )
+    safe_page_size = min(max(page_size, 1), 100)
+    total = len(all_results)
+    total_pages = max(1, (total + safe_page_size - 1) // safe_page_size)
+    safe_page = min(max(page, 1), total_pages)
+    start = (safe_page - 1) * safe_page_size
+    results = all_results[start:start + safe_page_size]
+
+    return {
+        "data": results,
+        "total": total,
+        "page": safe_page,
+        "page_size": safe_page_size,
+        "total_pages": total_pages,
+        "next_offset": None,
+    }
 
 
 def _serialize_order(order: OrderRoom) -> dict:
@@ -879,12 +928,17 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
             
             for item in attachments:
                 payload = item.get("payload", {})
-                media_url = payload.get("url") or payload.get("thumbnailUrl")
+                is_video = (item.get("type") == "video") or ("user_send_video" in event_name)
+                # thumbnailUrl của video chỉ là ảnh xem trước, không được upload
+                # như video. Nếu thiếu URL gốc, gửi marker rỗng để báo người dùng.
+                media_url = payload.get("url") or (None if is_video else payload.get("thumbnailUrl"))
                 if media_url:
                     media_items.append({
                         "url": media_url,
-                        "is_video": (item.get("type") == "video") or ("user_send_video" in event_name)
+                        "is_video": is_video,
                     })
+            if attachments and not media_items and event_name in {"user_send_image", "user_send_video"}:
+                media_items.append({"url": "", "is_video": event_name == "user_send_video"})
             def handle_zalo_message():
                 task_db = SessionLocal()
                 try:

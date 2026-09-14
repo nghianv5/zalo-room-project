@@ -80,11 +80,11 @@
             </div>
           </div>
           <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-5">
-            <input id="fAddress" oninput="filterRooms()" class="rounded border p-2" placeholder="Địa chỉ">
-            <input id="fName" oninput="filterRooms()" class="rounded border p-2" placeholder="Tên / mã phòng">
-            <input id="fMin" type="number" onchange="loadRooms()" class="rounded border p-2" placeholder="Giá từ">
-            <input id="fMax" type="number" onchange="loadRooms()" class="rounded border p-2" placeholder="Giá đến">
-            <select id="fStatus" onchange="loadRooms()" class="rounded border p-2">
+            <input id="fAddress" oninput="scheduleRoomReload()" class="rounded border p-2" placeholder="Địa chỉ">
+            <input id="fName" oninput="scheduleRoomReload()" class="rounded border p-2" placeholder="Tên / mã phòng">
+            <input id="fMin" type="number" onchange="changeRoomFilter()" class="rounded border p-2" placeholder="Giá từ">
+            <input id="fMax" type="number" onchange="changeRoomFilter()" class="rounded border p-2" placeholder="Giá đến">
+            <select id="fStatus" onchange="changeRoomFilter()" class="rounded border p-2">
               <option value="">
                 Mọi trạng thái
               </option>
@@ -98,10 +98,10 @@
                 ĐÃ XÓA
               </option>
             </select>
-            <input id="fFrom" type="date" onchange="loadRooms()" class="rounded border p-2">
-            <input id="fTo" type="date" onchange="loadRooms()" class="rounded border p-2">
-            <input id="fPhone" oninput="filterRooms()" class="rounded border p-2" placeholder="SĐT chủ nhà">
-            <select id="fAC" onchange="filterRooms()" class="rounded border p-2">
+            <input id="fFrom" type="date" onchange="changeRoomFilter()" class="rounded border p-2">
+            <input id="fTo" type="date" onchange="changeRoomFilter()" class="rounded border p-2">
+            <input id="fPhone" oninput="scheduleRoomReload()" class="rounded border p-2" placeholder="SĐT chủ nhà">
+            <select id="fAC" onchange="changeRoomFilter()" class="rounded border p-2">
               <option value="">
                 Điều hòa: tất cả
               </option>
@@ -144,6 +144,21 @@
             <tbody id="roomBody">
             </tbody>
           </table>
+        </div>
+        <div class="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-2xl bg-white p-3 shadow">
+          <div id="roomPaginationInfo" class="text-sm text-slate-600">Đang tải danh sách phòng...</div>
+          <div class="flex items-center gap-2">
+            <label for="roomPageSize" class="text-sm">Số phòng/trang</label>
+            <select id="roomPageSize" onchange="changeRoomPageSize()" class="rounded border p-2 text-sm">
+              <option>10</option>
+              <option selected>25</option>
+              <option>50</option>
+              <option>100</option>
+            </select>
+            <button id="roomPrevBtn" onclick="changeRoomPage(-1)" class="rounded border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50">← Trước</button>
+            <span id="roomPageLabel" class="min-w-[100px] text-center text-sm font-bold">Trang 1 / 1</span>
+            <button id="roomNextBtn" onclick="changeRoomPage(1)" class="rounded border px-3 py-2 text-sm disabled:cursor-not-allowed disabled:opacity-50">Sau →</button>
+          </div>
         </div>
       </section>
       <section id="ordersPage" class="hidden">
@@ -482,7 +497,7 @@
     </style>
     <script>
       const ZALO_OA_URL={{ ZALO_OA_URL | tojson }},$=id=>document.getElementById(id),roomFields=["room_code","address","room_name","price","floor","room_size","max_occupants","move_in_date","status","landlord_phone","is_private_bathroom","has_ac","has_heater","has_washer","has_fridge","allow_pets","has_balcony","has_window","has_fingerprint_lock","bed","wardrobe","parking_info","other_amenities","service_fees"];
-      let rooms=[],orders=[];
+      let rooms=[],orders=[],roomPage=1,roomTotal=0,roomTotalPages=1,roomReloadTimer=null;
       const esc=v=>String(v??"").replace(/[&<>"']/g,c=>( {
           "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
       }
@@ -574,24 +589,56 @@
           $("ordersPage").classList.toggle("hidden",p!=="orders");
           p==="rooms"?loadRooms():loadOrders()
       }
-      async function loadRooms() {
+      async function loadRooms(resetPage=false) {
+          if(resetPage)roomPage=1;
           let p=new URLSearchParams( {
-              limit:"100"
+              page:String(roomPage),page_size:$('roomPageSize')?.value||"25"
           }
           );
           [["min_price","fMin"],["max_price","fMax"],["from_date","fFrom"],["to_date","fTo"],["status","fStatus"]].forEach(([k,id])=> {
               $(id).value&&p.set(k,$(id).value)
           }
           );
+          [["address","fAddress"],["room_query","fName"],["landlord_phone","fPhone"],["has_ac","fAC"]].forEach(([k,id])=> {
+              $(id).value.trim()&&p.set(k,$(id).value.trim())
+          });
           if($("fStatus").value==="ĐÃ XÓA")p.set("include_deleted","true");
           let r=await api(`/api/admin/rooms?${p}`),d=await data(r);
           if(!r.ok)return alert(err(d));
           rooms=Array.isArray(d.data)?d.data:[];
-          filterRooms()
+          roomPage=Number(d.page)||1;
+          roomTotal=Number(d.total)||0;
+          roomTotalPages=Number(d.total_pages)||1;
+          renderRooms(rooms);
+          updateRoomPagination()
       }
       function filterRooms() {
-          let a=$("fAddress").value.toLowerCase(),n=$("fName").value.toLowerCase(),p=$("fPhone").value,x=$("fAC").value;
-          renderRooms(rooms.filter(r=>(!a||String(r.address||"").toLowerCase().includes(a))&&(!n||`${r.room_name||""} ${r.room_code||""}`.toLowerCase().includes(n))&&(!p||String(r.landlord_phone||"").includes(p))&&(!x||r.has_ac===x)))
+          loadRooms(true)
+      }
+      function changeRoomFilter() {
+          loadRooms(true)
+      }
+      function scheduleRoomReload() {
+          clearTimeout(roomReloadTimer);
+          roomReloadTimer=setTimeout(()=>loadRooms(true),350)
+      }
+      function changeRoomPage(delta) {
+          const next=roomPage+delta;
+          if(next<1||next>roomTotalPages)return;
+          roomPage=next;
+          loadRooms()
+      }
+      function changeRoomPageSize() {
+          loadRooms(true)
+      }
+      function updateRoomPagination() {
+          const pageSize=Number($("roomPageSize").value)||25;
+          const from=roomTotal?(roomPage-1)*pageSize+1:0;
+          const to=Math.min(roomPage*pageSize,roomTotal);
+          $("roomPaginationInfo").textContent=`Hiển thị ${from}–${to} trong tổng số ${roomTotal} phòng`;
+          $("roomPageLabel").textContent=`Trang ${roomPage} / ${roomTotalPages}`;
+          $("roomPrevBtn").disabled=roomPage<=1;
+          $("roomNextBtn").disabled=roomPage>=roomTotalPages
       }
       function renderRooms(list) {
           $("selectAll").checked=false;
@@ -610,7 +657,7 @@
           ["fAddress","fName","fMin","fMax","fFrom","fTo","fPhone"].forEach(id=>$(id).value="");
           $("fStatus").value="";
           $("fAC").value="";
-          loadRooms()
+          loadRooms(true)
       }
       function selectAll(e) {
           document.querySelectorAll(".roomCheck").forEach(c=>c.checked=e.checked);

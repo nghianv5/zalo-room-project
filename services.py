@@ -1,4 +1,5 @@
 import os
+import io
 import json
 import requests
 import uuid
@@ -119,6 +120,8 @@ MAX_MEDIA_PER_ROOM = int(os.getenv("MAX_MEDIA_PER_ROOM", "10"))
 MAX_SEARCH_MEDIA = int(os.getenv("MAX_SEARCH_MEDIA", "10"))
 MAX_SEARCH_ROOMS = max(1, int(os.getenv("MAX_SEARCH_ROOMS", "5")))
 MAX_SEARCH_MEDIA_PER_ROOM = max(1, int(os.getenv("MAX_SEARCH_MEDIA_PER_ROOM", "3")))
+MAX_IMAGE_UPLOAD_BYTES = max(1, int(os.getenv("MAX_IMAGE_UPLOAD_MB", "15"))) * 1024 * 1024
+MAX_VIDEO_UPLOAD_BYTES = max(1, int(os.getenv("MAX_VIDEO_UPLOAD_MB", "80"))) * 1024 * 1024
 
 
 def get_public_server_domain() -> str:
@@ -1095,31 +1098,72 @@ def write_audit_log(actor: str, action: str, target_id: str = None, details: dic
 def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
     if not zalo_media_url:
         return ""
+
+    # Tải một lần và xác nhận có dữ liệu thật trước khi chuyển sang Cloudinary.
+    # URL media của webhook Zalo có thể hết hạn hoặc trả HTTP 200 nhưng body rỗng.
+    max_bytes = MAX_VIDEO_UPLOAD_BYTES if is_video else MAX_IMAGE_UPLOAD_BYTES
+    media_bytes = bytearray()
+    content_type = ""
+    try:
+        response = requests.get(
+            zalo_media_url,
+            timeout=(5, 30),
+            stream=True,
+            headers={"User-Agent": "ZaloRoomApp/1.0"},
+        )
+        response.raise_for_status()
+        content_type = str(response.headers.get("Content-Type") or "").split(";", 1)[0].lower()
+        for chunk in response.iter_content(chunk_size=64 * 1024):
+            if not chunk:
+                continue
+            media_bytes.extend(chunk)
+            if len(media_bytes) > max_bytes:
+                print(f"⚠️ [MEDIA USER INPUT] Tệp vượt giới hạn {max_bytes} bytes", flush=True)
+                return ""
+    except requests.RequestException as exc:
+        print(f"⚠️ [MEDIA USER INPUT] Không tải được media Zalo: {exc}", flush=True)
+        return ""
+
+    if not media_bytes:
+        print("⚠️ [MEDIA USER INPUT] Zalo trả về tệp rỗng; yêu cầu người dùng gửi lại", flush=True)
+        return ""
+
+    expected_prefix = "video/" if is_video else "image/"
+    if content_type and not (
+        content_type.startswith(expected_prefix)
+        or content_type == "application/octet-stream"
+    ):
+        print(f"⚠️ [MEDIA USER INPUT] Sai định dạng media: {content_type}", flush=True)
+        return ""
+
     resource_type = "video" if is_video else "image"
     if CLOUDINARY_URL:
         try:
-            res = cloudinary.uploader.upload(zalo_media_url, resource_type=resource_type, folder="zalo_room_media")
+            res = cloudinary.uploader.upload(
+                io.BytesIO(bytes(media_bytes)),
+                resource_type=resource_type,
+                folder="zalo_room_media",
+            )
             url = res.get("secure_url", "")
             if url:
                 return url
         except Exception as e:
-            report_error("Cloudinary upload thất bại; chuyển lưu local", e, "save_media_file")
+            # Có dữ liệu hợp lệ nên đây là lỗi lưu trữ; fallback local và chỉ ghi log,
+            # tránh gửi hai cảnh báo cho cùng một media.
+            report_error("Cloudinary upload thất bại; chuyển lưu local", e, "save_media_file", notify=False)
 
     try:
-        response = requests.get(zalo_media_url, timeout=15, stream=True)
-        if response.status_code == 200:
-            ext = ".mp4" if is_video else ".jpg"
-            filename = f"{uuid.uuid4().hex}{ext}"
-            filepath = os.path.join(MEDIA_DIR, filename)
-            with open(filepath, "wb") as f:
-                for chunk in response.iter_content(chunk_size=8192):
-                    f.write(chunk)
-            server_domain = get_public_server_domain()
-            if server_domain:
-                return f"{server_domain}/static/media/{filename}"
-            report_error("Đã lưu media local nhưng SERVER_DOMAIN chưa phải URL HTTPS công khai", context="save_media_file", notify=False)
+        ext = ".mp4" if is_video else ".jpg"
+        filename = f"{uuid.uuid4().hex}{ext}"
+        filepath = os.path.join(MEDIA_DIR, filename)
+        with open(filepath, "wb") as media_file:
+            media_file.write(media_bytes)
+        server_domain = get_public_server_domain()
+        if server_domain:
+            return f"{server_domain}/static/media/{filename}"
+        report_error("Đã lưu media local nhưng SERVER_DOMAIN chưa phải URL HTTPS công khai", context="save_media_file", notify=False)
     except Exception as e:
-        report_error("Lưu media local thất bại", e, "save_media_file")
+        report_error("Lưu media local thất bại", e, "save_media_file", notify=False)
     return ""
 
 def _log_gemini_usage(response, operation: str, model_name: str) -> None:
@@ -1386,6 +1430,17 @@ def can_update_amenities_without_ai(message_text: str) -> bool:
     return not any(keyword in clean_text for keyword in complex_field_keywords)
 
 
+ROOM_PRICE_REQUIRED = "ROOM_PRICE_REQUIRED"
+
+
+def is_missing_required_room_price(value) -> bool:
+    """Nhận diện giá bị thiếu do người dùng hoặc AI trả về giá trị rỗng."""
+    if value is None:
+        return True
+    clean_value = str(value).strip().lower()
+    return clean_value in {"", "none", "null", "nan", "undefined", "chưa rõ", "chưa cập nhật"}
+
+
 def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[List[str]] = None, current_excel_row: int = 0, type_process: str = None,  landlord_phone: str = None) -> Optional[str]:
     try:
         data = dict(data or {})
@@ -1438,6 +1493,13 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
                 return f"Địa chỉ thiếu hoặc địa chỉ không đúng."
             else:
                 return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Địa chỉ thiếu hoặc địa chỉ không đúng."
+
+        # Đây là lỗi dữ liệu người dùng, không phải lỗi Qdrant/hệ thống.
+        # Kiểm tra trước khi gọi embedding để tránh phát sinh chi phí Gemini vô ích.
+        if is_missing_required_room_price(data.get("price")):
+            if type_process == "EXCEL":
+                return f"❌ Dòng {current_excel_row}: Giá phòng là trường bắt buộc."
+            return ROOM_PRICE_REQUIRED
 
         media_list = media_urls if media_urls is not None else data.get("media_urls", [])
         if isinstance(media_list, str):
@@ -1519,10 +1581,6 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         if not address_clean or address_clean.lower() in ["none", "null"]:
             raise ValueError("Lỗi: 'address' không được để trống hoặc null!")
             
-        price = str(data.get("price", "Chưa rõ"))
-        if not price or price.lower() in ["none", "null"]:
-            raise ValueError("Lỗi: 'price' không được để trống hoặc null!")
-
         # 2. Đảm bảo room_code không null
         room_code = data.get("room_code")
         if not room_code or str(room_code).strip().lower() in ["none", "null", ""]:
@@ -1857,6 +1915,12 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
         saved_url = save_media_file(item["url"], is_video=item.get("is_video", False))
         if saved_url:
             incoming_media_urls.append(saved_url)
+    if media_items and not incoming_media_urls and not str(message_text or "").strip():
+        send_zalo_message(
+            user_id,
+            "⚠️ Ảnh/video bạn gửi đang rỗng, hết hạn hoặc không đúng định dạng nên hệ thống chưa lưu được. Bạn vui lòng gửi lại tệp khác.",
+        )
+        return
     if incoming_media_urls:
         add_pending_media(user_id, incoming_media_urls)
 
@@ -2247,6 +2311,16 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                         keep_only_explicit_room_updates(extracted, message_text)
                         if update_command else extracted
                     )
+                    # Khi người dùng đang bổ sung trường còn thiếu, ghép với dữ
+                    # liệu phòng đã lưu tạm để họ không phải nhập lại từ đầu.
+                    if not update_command and pending_room:
+                        data_to_save = {
+                            **pending_room,
+                            **{
+                                key: value for key, value in data_to_save.items()
+                                if has_room_update_value(value)
+                            },
+                        }
                     message = upsert_room_to_db(
                         data=data_to_save,
                         media_urls=all_current_media,
@@ -2263,6 +2337,16 @@ def process_zalo_ai_logic(message_text: str, media_items: list = None, user_id: 
                             ai_reply = f"✅ Đã cập nhật thông tin phòng{code_text} thành công."
                         else:
                             ai_reply = "✅ Bạn đã đăng ký phòng thành công."
+                    elif message == ROOM_PRICE_REQUIRED:
+                        save_pending_room(user_id, data_to_save)
+                        urls_to_send = []
+                        ai_reply = (
+                            "⚠️ Phòng chưa được đăng vì bạn chưa cung cấp giá thuê.\n\n"
+                            "Bạn vui lòng nhập giá, ví dụ:\n"
+                            "• Giá 4,5 triệu/tháng\n"
+                            "• Giá 3.800.000 đồng/tháng\n\n"
+                            "Thông tin phòng đã được lưu tạm, bạn không cần nhập lại từ đầu."
+                        )
                     else:
                         ai_reply = message
             else:
