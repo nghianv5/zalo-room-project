@@ -44,6 +44,8 @@ Các tin đăng phòng rõ ràng được trích xuất nội bộ mà không g�
 
 Chức năng **Xem phòng** (tạo đơn đặt lịch trong `order_room`) và **Report phòng** dành cho khách đã được chuyển khỏi danh sách phòng trên web Admin sang kết quả tìm kiếm Zalo. Mỗi phòng hướng dẫn hai câu lệnh `XEM PHÒNG <MÃ>` và `REPORT PHÒNG <MÃ>`. Report hỗ trợ nhập nội dung ở tin nhắn kế tiếp hoặc gửi một dòng dạng `REPORT PHÒNG SP840D - giá hiển thị không đúng`; mã, tên và địa chỉ luôn được lấy từ dữ liệu phòng, còn Admin tiếp tục quản lý trạng thái/xóa report tại tab Report.
 
+Kết quả tìm kiếm Zalo hiển thị hai nút chọn **Đặt lịch xem phòng** và **Report phòng** bằng `oa.query.show`; payload của từng nút chứa đúng mã phòng nên đi vào webhook hiện có. Nếu OA từ chối button template, hệ thống tự gửi lại hai câu lệnh dạng chữ để khách vẫn thao tác được.
+
 Mỗi phòng trên Admin có nút **Xem phòng** để mở toàn bộ dữ liệu/media dạng chỉ đọc và nút **Report phòng**. Hộp thoại report khóa mã phòng, tên phòng, địa chỉ; người dùng chỉ nhập nội dung phản ánh. Report được lưu vào PostgreSQL `room_reports`, giới hạn 2.000 ký tự và có API quản trị `GET /api/admin/room-reports`.
 
 Super Admin có tab **Report phòng** để lọc theo mã phòng, người gửi và trạng thái; có thể chuyển report giữa `MỚI`, `ĐANG XỬ LÝ`, `ĐÃ XỬ LÝ`, `BỎ QUA` hoặc xóa report. Câu tìm phòng có đủ địa chỉ và giá được parser nội bộ ưu tiên xử lý trước kết quả Gemini, ví dụ `xem phòng phan thị hành, phú thọ hoà, tân phú 6tr` được hiểu là địa chỉ `phan thị hành, phú thọ hoà, tân phú`, giá từ 0 đến 6.000.000 đồng.

@@ -388,7 +388,7 @@ class RoomCreateUpdateSchema(BaseModel):
     other_amenities: Optional[str] = "Chưa rõ"       
     service_fees: Optional[str] = "Chưa rõ"           
     media_urls: Optional[List[str]] = Field(default_factory=list)
-    move_in_date: Optional[str] = "Vào ở ngay"
+    move_in_date: Optional[str] = None
     status: Optional[str] = "TRỐNG"
     landlord_phone: str = Field(..., min_length=10, description="Số điện thoại người đăng / chủ nhà (bắt buộc)")
 
@@ -539,44 +539,97 @@ def format_national_phone(phone_str: str, default_region: str = "VN") -> str:
         return "0" + clean_digits[2:]
     return clean_digits
 
-def parse_move_in_date(date_str=None) -> float:
-    """
-    Chuyển move_in_date thành Unix timestamp theo giờ Việt Nam.
+MOVE_IN_EMPTY_VALUES = {"", "none", "null", "nan", "chưa rõ", "undefined", "[chưa cập nhật]"}
 
-    Nếu không có ngày cụ thể:
-    -> sử dụng thời điểm hiện tại.
-    """
-    now_vn = datetime.now(VN_TZ)
-    # Không có dữ liệu
-    if date_str is None:
-        return now_vn.timestamp()
-    text = str(date_str).strip()
-    if text.lower() in [
-        "",
-        "none",
-        "null",
-        "nan",
-        "chưa rõ",
-        "vào ở ngay",
-        "ngay",
-        "ở ngay",
-        "có thể vào ngay"
-    ]:
-        return now_vn.timestamp()
-    # Có ngày cụ thể
-    for fmt in (
-        "%d/%m/%Y",
-        "%Y-%m-%d",
-        "%d-%m-%Y"
+
+def normalize_move_in_date(date_value=None, now_value: Optional[datetime] = None) -> tuple:
+    """Chuẩn hóa ngày vào ở thành ``dd/mm/YYYY`` và timestamp 00:00 giờ Việt Nam."""
+    raw_text = str(date_value or "").strip()
+    lowered = raw_text.lower()
+    if lowered in MOVE_IN_EMPTY_VALUES:
+        return "", None
+
+    now_vn = now_value or datetime.now(VN_TZ)
+    if now_vn.tzinfo is None:
+        now_vn = VN_TZ.localize(now_vn)
+    else:
+        now_vn = now_vn.astimezone(VN_TZ)
+
+    relative_days = None
+    if re.search(r"\b(ngày\s*(mốt|kia)|mốt|kia)\b", lowered):
+        relative_days = 2
+    elif re.search(r"\b(ngày\s*mai|mai)\b", lowered):
+        relative_days = 1
+    elif (
+        re.search(r"\b(hôm\s*nay|ngày\s*nay)\b", lowered)
+        or re.search(r"\b(vào|ở|chuyển|dọn)(?:\s+ở)?\s+ngay\b", lowered)
+        or lowered in {"ngay", "vào ngay", "ở ngay", "vào ở ngay", "có thể vào ngay", "dọn vào ngay"}
     ):
+        relative_days = 0
+
+    if relative_days is not None:
+        target = now_vn + timedelta(days=relative_days)
+        target_midnight = VN_TZ.localize(datetime(target.year, target.month, target.day))
+        return target_midnight.strftime("%d/%m/%Y"), target_midnight.timestamp()
+
+    # Chấp nhận cả dữ liệu từ giao diện HTML (YYYY-MM-DD) và cách nhập phổ biến tại Việt Nam.
+    date_match = re.search(r"\b(\d{1,2})[/-](\d{1,2})(?:[/-](\d{2,4}))?\b", lowered)
+    candidates = []
+    if date_match:
+        day, month = int(date_match.group(1)), int(date_match.group(2))
+        year = int(date_match.group(3)) if date_match.group(3) else now_vn.year
+        candidates.append((year + 2000 if year < 100 else year, month, day))
+    iso_match = re.search(r"\b(\d{4})-(\d{1,2})-(\d{1,2})\b", lowered)
+    if iso_match:
+        candidates.insert(0, tuple(map(int, iso_match.groups())))
+
+    for year, month, day in candidates:
         try:
-            dt = datetime.strptime(text, fmt)
-            dt_vn = VN_TZ.localize(dt)
-            return dt_vn.timestamp()
+            target_midnight = VN_TZ.localize(datetime(year, month, day))
+            return target_midnight.strftime("%d/%m/%Y"), target_midnight.timestamp()
         except ValueError:
             continue
-    # Không parse được -> mặc định hiện tại
-    return now_vn.timestamp()
+    return "", None
+
+
+def parse_move_in_date(date_str=None) -> Optional[float]:
+    """Tương thích code cũ; dữ liệu trống hoặc không hợp lệ trả về ``None``."""
+    return normalize_move_in_date(date_str)[1]
+
+
+def extract_move_in_date_from_text(message_text: str, now_value: Optional[datetime] = None) -> str:
+    """Đọc ngày vào ở trực tiếp từ câu người dùng, không phụ thuộc kết quả Gemini."""
+    text_value = str(message_text or "").strip().lower()
+    if not text_value:
+        return ""
+
+    relative_pattern = (
+        r"\b(?:hôm\s*nay|ngày\s*nay|ngày\s*mai|ngày\s*mốt|ngày\s*kia)\b"
+        r"|\b(?:vào|ở|chuyển|dọn)(?:\s+ở)?\s+"
+        r"(?:ngay|hôm\s*nay|ngày\s*nay|ngày\s*mai|mai|ngày\s*mốt|ngày\s*kia|mốt|kia)\b"
+    )
+    relative_match = re.search(relative_pattern, text_value)
+    if relative_match:
+        return normalize_move_in_date(relative_match.group(0), now_value)[0]
+
+    relative_offset_match = re.search(r"\b(\d{1,3})\s*(?:ngày|hôm)\s*nữa\b", text_value)
+    if relative_offset_match:
+        now_vn = now_value or datetime.now(VN_TZ)
+        if now_vn.tzinfo is None:
+            now_vn = VN_TZ.localize(now_vn)
+        target = now_vn.astimezone(VN_TZ) + timedelta(days=int(relative_offset_match.group(1)))
+        return target.strftime("%d/%m/%Y")
+
+    date_token = r"\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|\d{4}-\d{1,2}-\d{1,2}"
+    explicit_patterns = (
+        rf"(?:vào|ở|chuyển|dọn)(?:\s+ở)?[^\n,.]{{0,30}}?\b({date_token})\b",
+        rf"\b({date_token})\b[^\n,.]{{0,30}}?(?:vào|ở|chuyển|dọn)(?:\s+ở)?\b",
+    )
+    for pattern in explicit_patterns:
+        match = re.search(pattern, text_value)
+        if match:
+            return normalize_move_in_date(match.group(1), now_value)[0]
+    return ""
   
 
 def parse_price_to_number(price_str: str) -> float:
@@ -935,7 +988,7 @@ def _is_enabled_amenity(value) -> bool:
     return normalized in {"có", "co", "yes", "true", "1", "x"}
 
 
-def format_room_search_message(room: dict, position: int) -> str:
+def format_room_search_message(room: dict, position: int, include_action_instructions: bool = True) -> str:
     """Tạo nội dung ổn định từ DB để ghép đúng với ảnh của từng phòng."""
     lines = [f"🏠 PHÒNG {position}"]
     room_name = room.get("room_name")
@@ -996,7 +1049,7 @@ def format_room_search_message(room: dict, position: int) -> str:
     if amenities:
         lines.append(f"✅ Tiện nghi: {', '.join(amenities)}")
 
-    if room_code:
+    if room_code and include_action_instructions:
         normalized_code = str(room_code).strip().upper()
         lines.append(f"📅 Đặt lịch xem phòng: nhắn “XEM PHÒNG {normalized_code}”")
         lines.append(f"🚩 Report phòng: nhắn “REPORT PHÒNG {normalized_code}”")
@@ -1005,6 +1058,66 @@ def format_room_search_message(room: dict, position: int) -> str:
     message = "\n".join(lines)
     # Loại bỏ các đường gạch dài bị chèn trước emoji khi format/paste source.
     return re.sub(r"(?m)^\s*[-–—_]{5,}\s*", "", message).strip()
+
+
+def send_zalo_room_action_buttons(user_id: str, room_code: str) -> bool:
+    """Gửi hai nút oa.query.show; tự chuyển sang câu lệnh chữ nếu OA từ chối template."""
+    normalized_code = str(room_code or "").strip().upper()
+    fallback_text = (
+        f"📅 Đặt lịch xem phòng: nhắn “XEM PHÒNG {normalized_code}”\n"
+        f"🚩 Report phòng: nhắn “REPORT PHÒNG {normalized_code}”"
+    )
+    if not re.fullmatch(r"[A-Z0-9]{6}", normalized_code):
+        return send_zalo_message(user_id, fallback_text)
+
+    db = SessionLocal()
+    try:
+        token_data = get_current_tokens_from_db(db)
+    finally:
+        db.close()
+    if not token_data or not token_data.get("access_token"):
+        return send_zalo_message(user_id, fallback_text)
+
+    payload = {
+        "recipient": {"user_id": str(user_id)},
+        "message": {
+            "text": f"Bạn muốn thao tác gì với phòng {normalized_code}?",
+            "attachment": {
+                "type": "template",
+                "payload": {
+                    "template_type": "button",
+                    "buttons": [
+                        {
+                            "title": "📅 Đặt lịch xem phòng",
+                            "type": "oa.query.show",
+                            "payload": f"XEM PHÒNG {normalized_code}",
+                        },
+                        {
+                            "title": "🚩 Report phòng",
+                            "type": "oa.query.show",
+                            "payload": f"REPORT PHÒNG {normalized_code}",
+                        },
+                    ],
+                },
+            },
+        },
+    }
+    try:
+        response_data, _ = _post_zalo_with_token_retry(
+            "https://openapi.zalo.me/v3.0/oa/message/cs",
+            payload,
+            token_data["access_token"],
+        )
+        if response_data.get("error") == 0:
+            return True
+        report_error(
+            f"Zalo từ chối button template: {response_data}",
+            context="send_zalo_room_action_buttons",
+            notify=False,
+        )
+    except Exception as exc:
+        report_error("Gửi nút thao tác phòng Zalo thất bại", exc, "send_zalo_room_action_buttons", notify=False)
+    return send_zalo_message(user_id, fallback_text)
 
 
 def get_room_for_zalo_action(room_code: str) -> Optional[dict]:
@@ -1136,65 +1249,39 @@ def submit_zalo_room_report(db: Session, user_id: str, room_code: str, content: 
         return "⚠️ Chưa thể lưu report lúc này. Bạn vui lòng thử lại sau."
 
 
-def send_zalo_search_results(
-    user_id: str,
-    search_results: List[dict],
-) -> bool:
-    """
-    Hiển thị từng phòng thành một nhóm riêng:
-
-    1. Gửi toàn bộ ảnh/video của phòng.
-    2. Gửi thông tin phòng.
-    3. Sau đó mới chuyển sang phòng tiếp theo.
-    """
+def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
+    """Gửi mỗi phòng thành một cụm riêng và hiển thị toàn bộ media của phòng."""
     rooms = list(search_results or [])[:MAX_SEARCH_ROOMS]
     if not rooms:
         return False
 
-    intro = (
-        f"🔎 Tìm thấy {len(search_results)} phòng phù hợp. "
-        "Dưới đây là các phòng nổi bật:"
-    )
+    intro = f"🔎 Tìm thấy {len(search_results)} phòng phù hợp. Dưới đây là các phòng nổi bật:"
     if not send_zalo_message(user_id, intro):
         return False
 
     for position, room in enumerate(rooms, start=1):
-        room_code = str(
-            room.get("room_code") or f"PHÒNG {position}"
-        ).strip().upper()
-
+        room_code = str(room.get("room_code") or f"PHÒNG {position}").strip().upper()
         room_media = _normalise_room_media(room, 0)
-
         if room_media:
-            room_message = (
-                f"{format_room_search_message(room, position)}\n"
-                f"📸 Đã hiển thị {len(room_media)} ảnh/video "
-                f"của phòng {room_code} ở phía trên."
+            room_message = format_room_search_message(
+                room,
+                position,
+                include_action_instructions=False,
             )
-
-            # Gửi toàn bộ media trước, sau đó mới gửi nội dung phòng.
             if not send_zalo_message(
-                user_id=user_id,
-                ai_reply=room_message,
+                user_id,
+                room_message,
                 media_urls=room_media,
                 media_first=True,
             ):
                 return False
         else:
-            room_message = (
-                f"{format_room_search_message(room, position)}\n"
-                f"📷 Phòng {room_code} chưa có ảnh/video."
-            )
-
-            if not send_zalo_message(
-                user_id=user_id,
-                ai_reply=room_message,
-            ):
+            room_message = f"{format_room_search_message(room, position, include_action_instructions=False)}\n📷 Phòng {room_code} chưa có ảnh/video."
+            if not send_zalo_message(user_id, room_message):
                 return False
-
-        # Tách rõ phòng hiện tại với phòng tiếp theo.
+        if not send_zalo_room_action_buttons(user_id, room_code):
+            return False
         time.sleep(0.5)
-
     return True
 
 
@@ -1256,229 +1343,97 @@ def send_zalo_message(
     combine_first_media: bool = False,
     media_first: bool = False,
 ) -> bool:
-    """
-    Gửi tin nhắn và media lên Zalo.
-
-    media_first=True:
-        Gửi toàn bộ ảnh/video trước, sau đó mới gửi nội dung.
-
-    combine_first_media=True:
-        Ghép ảnh đầu tiên với nội dung như chức năng cũ.
-        Không áp dụng nếu media_first=True.
-    """
     db = SessionLocal()
-
     try:
         data_token = get_current_tokens_from_db(db)
     finally:
         db.close()
-
     if not data_token or not data_token.get("access_token"):
-        report_error(
-            "Thiếu Zalo access token để gửi tin nhắn",
-            context="send_zalo_message",
-            notify=False,
-        )
+        report_error("Thiếu Zalo access token để gửi tin nhắn", context="send_zalo_message", notify=False)
         return False
 
     url = "https://openapi.zalo.me/v3.0/oa/message/cs"
     access_token = data_token["access_token"]
-
-    clean_reply = re.sub(
-        r"(?m)^\s*[-–—_]{5,}\s*",
-        "",
-        str(ai_reply or ""),
-    ).strip()
-
-    text_chunks = (
-        split_text_by_limit(clean_reply, max_length=1800)
-        if clean_reply
-        else []
-    )
-
+    clean_reply = re.sub(r"(?m)^\s*[-–—_]{5,}\s*", "", str(ai_reply or "")).strip()
+    text_chunks = split_text_by_limit(clean_reply, max_length=1800)
     unique_media = apply_media_limit([
-        value
-        for value in dict.fromkeys(
-            str(item or "").strip()
-            for item in (media_urls or [])
-        )
+        value for value in dict.fromkeys(str(item or "").strip() for item in (media_urls or []))
         if is_valid_zalo_media_url(value)
     ])
 
+    def send_media_items(items: list) -> bool:
+        """Gửi media tuần tự để giữ đúng thứ tự hiển thị trên Zalo."""
+        nonlocal access_token
+        for media_url in items:
+            media_type = "video" if re.search(r"\.(mp4|mov|webm)(\?|$)", media_url, re.I) else "image"
+            payload = {
+                "recipient": {"user_id": user_id},
+                "message": {
+                    "attachment": {
+                        "type": "template",
+                        "payload": {
+                            "template_type": "media",
+                            "elements": [{"media_type": media_type, "url": media_url}],
+                        },
+                    }
+                },
+            }
+            res_data, access_token = _post_zalo_with_token_retry(url, payload, access_token)
+            if res_data.get("error") == -201:
+                report_error(
+                    f"Zalo từ chối media không hợp lệ: {media_url}",
+                    context="send_zalo_message",
+                    notify=False,
+                )
+                continue
+            if res_data.get("error") != 0:
+                return False
+            time.sleep(0.3)
+        return True
+
     try:
-        def send_media_items(media_items: List[str]) -> bool:
-            """Gửi lần lượt danh sách ảnh/video và giữ đúng thứ tự."""
-            nonlocal access_token
-
-            for media_url in media_items:
-                media_type = (
-                    "video"
-                    if re.search(
-                        r"\.(mp4|mov|webm)(\?|$)",
-                        media_url,
-                        re.IGNORECASE,
-                    )
-                    else "image"
-                )
-
-                media_payload = {
-                    "recipient": {
-                        "user_id": user_id,
-                    },
-                    "message": {
-                        "attachment": {
-                            "type": "template",
-                            "payload": {
-                                "template_type": "media",
-                                "elements": [
-                                    {
-                                        "media_type": media_type,
-                                        "url": media_url,
-                                    }
-                                ],
-                            },
-                        }
-                    },
-                }
-
-                res_data, access_token = _post_zalo_with_token_retry(
-                    url,
-                    media_payload,
-                    access_token,
-                )
-
-                print(f"📩 [ZALO MEDIA RES]: {res_data}")
-
-                if res_data.get("error") == -201:
-                    report_error(
-                        f"Zalo từ chối media không hợp lệ: {media_url}",
-                        context="send_zalo_message",
-                        notify=False,
-                    )
-                    continue
-
-                if res_data.get("error") != 0:
-                    return False
-
-                # Giữ đúng thứ tự hiển thị giữa các media.
-                time.sleep(0.2)
-
-            return True
-
-        # Trường hợp tìm phòng: gửi tất cả media trước.
+        # Riêng kết quả tìm phòng: gửi hết media trước, rồi mới gửi nội dung phòng.
         if media_first and unique_media:
             if not send_media_items(unique_media):
                 return False
-
-            # Không gửi lại media lần thứ hai.
             unique_media = []
             combine_first_media = False
 
-        # Gửi phần nội dung văn bản.
         for idx, chunk in enumerate(text_chunks):
-            message_payload = {
-                "text": chunk,
-            }
-
-            # Giữ tương thích với những chức năng cũ cần ghép ảnh đầu tiên.
-            if (
-                combine_first_media
-                and not media_first
-                and idx == 0
-                and unique_media
-            ):
+            message_payload = {"text": chunk}
+            # Kết quả tìm phòng: ghép nội dung và ảnh đầu tiên trong cùng request Zalo.
+            if combine_first_media and idx == 0 and unique_media:
                 first_media = unique_media[0]
-
-                first_media_type = (
-                    "video"
-                    if re.search(
-                        r"\.(mp4|mov|webm)(\?|$)",
-                        first_media,
-                        re.IGNORECASE,
-                    )
-                    else "image"
-                )
-
+                first_media_type = "video" if re.search(
+                    r"\.(mp4|mov|webm)(\?|$)", first_media, re.I
+                ) else "image"
                 message_payload["attachment"] = {
                     "type": "template",
                     "payload": {
                         "template_type": "media",
-                        "elements": [
-                            {
-                                "media_type": first_media_type,
-                                "url": first_media,
-                            }
-                        ],
+                        "elements": [{"media_type": first_media_type, "url": first_media}],
                     },
                 }
-
-            payload = {
-                "recipient": {
-                    "user_id": user_id,
-                },
-                "message": message_payload,
-            }
-
-            res_data, access_token = _post_zalo_with_token_retry(
-                url,
-                payload,
-                access_token,
-            )
-
-            # Nếu OA không hỗ trợ ghép nội dung với media,
-            # gửi lại riêng phần nội dung.
-            if (
-                res_data.get("error") != 0
-                and "attachment" in message_payload
-            ):
-                if (
-                    res_data.get("error") == -201
-                    and unique_media
-                ):
+            payload = {"recipient": {"user_id": user_id}, "message": message_payload}
+            res_data, access_token = _post_zalo_with_token_retry(url, payload, access_token)
+            # Một số phiên bản OA không nhận text + media chung: tự fallback an toàn.
+            if res_data.get("error") != 0 and "attachment" in message_payload:
+                if res_data.get("error") == -201 and unique_media:
                     unique_media.pop(0)
-
-                fallback_payload = {
-                    "recipient": {
-                        "user_id": user_id,
-                    },
-                    "message": {
-                        "text": chunk,
-                    },
-                }
-
-                res_data, access_token = _post_zalo_with_token_retry(
-                    url,
-                    fallback_payload,
-                    access_token,
-                )
-
+                payload = {"recipient": {"user_id": user_id}, "message": {"text": chunk}}
+                res_data, access_token = _post_zalo_with_token_retry(url, payload, access_token)
                 combine_first_media = False
-
             if res_data.get("error") != 0:
                 return False
-
             if len(text_chunks) > 1:
                 time.sleep(0.3)
 
-        # Các chức năng cũ vẫn gửi media sau văn bản như trước.
-        media_to_send = (
-            unique_media[1:]
-            if combine_first_media and unique_media
-            else unique_media
-        )
-
-        if media_to_send:
-            return send_media_items(media_to_send)
-
+        media_to_send = unique_media[1:] if combine_first_media and unique_media else unique_media
+        if media_to_send and not send_media_items(media_to_send):
+            return False
         return True
-
-    except Exception as exc:
-        report_error(
-            "Gửi tin nhắn Zalo thất bại",
-            exc,
-            "send_zalo_message",
-            notify=False,
-        )
+    except Exception as e:
+        report_error("Gửi tin nhắn Zalo thất bại", e, "send_zalo_message", notify=False)
         return False
 
 
@@ -1872,7 +1827,10 @@ def keep_only_explicit_room_updates(data: dict, message_text: str) -> dict:
         "max_occupants": ("người ở", "ở tối đa", "số người"),
         "other_amenities": ("tiện ích khác", "tivi", "bếp"),
         "service_fees": ("phí", "tiền điện", "tiền nước", "wifi"),
-        "move_in_date": ("vào ở", "chuyển vào",),
+        "move_in_date": (
+            "vào ở", "vào ngay", "ở ngay", "chuyển vào", "dọn vào",
+            "hôm nay", "ngày mai", "ngày mốt", "ngày kia", "ngày nữa", "hôm nữa",
+        ),
         "status": ("trạng thái", "đã thuê", "đã cho thuê", "còn trống", "phòng trống"),
     }
     explicit = {
@@ -2000,7 +1958,7 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         floor_str = f"Tầng {data.get('floor')}" if data.get("floor") else "Chưa rõ tầng"
         room_size_str = f"{data.get('room_size')} m²" if data.get("room_size") else "Chưa rõ diện tích"
         max_occ_str = f"Tối đa {data.get('max_occupants')} người ở" if data.get("max_occupants") else "Không giới hạn / Chưa rõ"
-        move_in_str = data.get("move_in_date", "Vào ở ngay")
+        move_in_str, normalized_move_in_timestamp = normalize_move_in_date(data.get("move_in_date"))
         status_str = data.get("status", "TRỐNG")
         parking_str = data.get("parking_info", "Chưa rõ thông tin xe")
         other_amenities_str = data.get("other_amenities", "Không có")
@@ -2060,31 +2018,10 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         else:
             room_code = str(room_code).strip().upper()
         
-        raw_move_in = data.get("move_in_date")
-        raw_move_in_text = str(raw_move_in or "").strip()
-        invalid_move_in_values = [
-            "",
-            "none",
-            "null",
-            "nan",
-            "chưa rõ",
-            "vào ở ngay",
-            "ngay"
-        ]
-        # Nếu không nhập ngày chuyển vào
-        # => lấy đúng thời gian hiện tại Việt Nam
-        existing_move_in_timestamp = data.get("move_in_timestamp") if point_id else None
-        if existing_move_in_timestamp is not None:
-            move_in_date_str = raw_move_in_text or "Vào ở ngay"
-            move_in_timestamp = float(existing_move_in_timestamp)
-        elif raw_move_in_text.lower() in invalid_move_in_values:
-            now_vn = datetime.now(VN_TZ)
-            move_in_date_str = "Vào ở ngay"
-            move_in_timestamp = now_vn.timestamp()
-
-        else:
-            move_in_date_str = raw_move_in_text
-            move_in_timestamp = parse_move_in_date(raw_move_in_text)
+        # Ngày vào ở luôn lưu theo ngày Việt Nam, không kèm giờ/phút/giây.
+        # Nếu người dùng không cung cấp thì cả ngày và timestamp đều để trống.
+        move_in_date_str = move_in_str
+        move_in_timestamp = normalized_move_in_timestamp
 
         raw_status = data.get("status")
         if raw_status is None or str(raw_status).strip().lower() in ["","none","null","chưa rõ","undefined"]:
@@ -2599,7 +2536,8 @@ def process_zalo_ai_logic(
         
         CÁC QUY TẮC BẮT BUỘC KHI TRÍCH XUẤT NGÀY CÓ THỂ CHUYỂN VÀO PHÒNG ĐỂ Ở (move_in_date):
         1. Nếu người dùng CÓ NÓI RÕ ngày có thể vào ở:
-           - Trả về đúng ngày người dùng cung cấp.
+           - Hiểu cả ngày cụ thể và cách nói thông dụng như: vào ở ngay, hôm nay, ngày mai, mai, ngày mốt, ngày kia.
+           - Quy đổi thành đúng ngày theo múi giờ Việt Nam.
            - Định dạng: %d/%m/%Y
         2. Nếu người dùng KHÔNG NÓI ngày có thể vào ở:
            - BẮT BUỘC trả về chuỗi rỗng: ""
@@ -2698,6 +2636,9 @@ def process_zalo_ai_logic(
         ):
             action = "SEARCH_ROOM"
         extracted = result_data.get("extracted_data", {})
+        # Không có thông tin ngày trong chính câu người dùng thì bắt buộc để trống.
+        # Cách này cũng ngăn Gemini tự suy đoán ngày vào ở.
+        extracted["move_in_date"] = extract_move_in_date_from_text(message_text)
         if listing_intent:
             action = "ADD_ROOM"
             extracted = apply_direct_room_listing_fallbacks(extracted, message_text)

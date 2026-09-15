@@ -357,8 +357,7 @@ def test_room_media_is_grouped_by_room_and_all_media_is_displayed():
     assert "def apply_media_limit" in services_source
     assert "return values if limit <= 0 else values[:limit]" in services_source
     assert '_normalise_room_media(room, 0)' in services_source
-    assert "Ảnh/video phòng {room_code}" in services_source
-    assert "Đã hiển thị hết ảnh/video của phòng" in services_source
+    assert "Đã hiển thị {len(room_media)} ảnh/video của phòng {room_code} ở phía trên" not in services_source
     assert "remaining_media" not in services_source
     assert "total_media_sent" not in services_source
     assert "📸 Ảnh/video phòng ${val(r.room_code)}" in html
@@ -426,15 +425,42 @@ def test_room_view_and_report_are_on_zalo_while_admin_manages_reports():
     assert "process_room_booking(tenant_zalo_id=str(sender_id)" in main_source
 
 
-def test_zalo_room_text_and_first_image_are_combined_with_fallback():
+def test_zalo_room_media_is_sent_before_room_text():
     services_source = (ROOT / "services.py").read_text(encoding="utf-8")
     search_start = services_source.index("def send_zalo_search_results")
     search_end = services_source.index("def _refresh_zalo_token_after_invalid", search_start)
     search_source = services_source[search_start:search_end]
-    assert "format_room_search_message(room, position)" in search_source
+    assert "format_room_search_message(room, position, include_action_instructions=False)" in search_source
     assert "media_urls=room_media" in search_source
-    assert "combine_first_media=True" in search_source
-    assert "Đã hiển thị hết ảnh/video của phòng" in search_source
+    assert "media_first=True" in search_source
+    assert "combine_first_media=True" not in search_source
+    message_start = services_source.index("def send_zalo_message")
+    message_end = services_source.index("def write_audit_log", message_start)
+    message_source = services_source[message_start:message_end]
+    assert "media_first: bool = False" in message_source
+    assert "def send_media_items(items: list)" in message_source
+    assert message_source.index("if media_first and unique_media:") < message_source.index(
+        "for idx, chunk in enumerate(text_chunks):"
+    )
+    assert "def send_zalo_room_action_buttons" in services_source
+    assert '"template_type": "button"' in services_source
+    assert '"type": "oa.query.show"' in services_source
+    assert '"payload": f"XEM PHÒNG {normalized_code}"' in services_source
+    assert '"payload": f"REPORT PHÒNG {normalized_code}"' in services_source
+    assert "send_zalo_room_action_buttons(user_id, room_code)" in search_source
+    assert "include_action_instructions=False" in search_source
+    assert "return send_zalo_message(user_id, fallback_text)" in services_source
+
+
+def test_move_in_date_defaults_to_empty_and_supports_natural_vietnamese_dates():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    assert 'move_in_date: Optional[str] = None' in services_source
+    assert "def normalize_move_in_date" in services_source
+    assert "def extract_move_in_date_from_text" in services_source
+    assert 'return "", None' in services_source
+    assert 'extracted["move_in_date"] = extract_move_in_date_from_text(message_text)' in services_source
+    assert 'move_in_date_str = "Vào ở ngay"' not in services_source
+    assert 'move_in_timestamp = now_vn.timestamp()' not in services_source
 
 
 def test_natural_search_overrides_invalid_gemini_extraction():
