@@ -600,29 +600,18 @@ async def upload_excel_rooms(
                 validated_data = validated_data[0]
 
             if not validated_data or not isinstance(validated_data, dict):
-                print(f"❌ Dòng {current_excel_row}: AI không phân tích được dữ liệu.")
-                failed_rows_details.append({"row": current_excel_row, "reason": "AI không phân tích được dữ liệu"})
+                failed_rows_details.append({
+                    "row": current_excel_row,
+                    "reason": "Không đọc được dữ liệu tại dòng này",
+                })
                 continue
                 
 
             extracted = validated_data.get("extracted_data", {})
             if not isinstance(extracted, dict):
-                print(f"❌ Dòng {current_excel_row}: Dữ liệu AI trích xuất sai định dạng.")
-                failed_rows_details.append({"row": current_excel_row, "reason": "Dữ liệu AI sai định dạng"})
-                continue
-
-            raw_address = str(extracted.get("address") or "").strip()
-
-            if not raw_address or raw_address.lower() in ["[chưa cập nhật]", "none", "null", "chưa rõ", ""]:
-                print(f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Thiếu hoặc sai địa chỉ.")
-                failed_rows_details.append({"row": current_excel_row, "reason": "Thiếu hoặc sai địa chỉ"})
-                continue
-
-            raw_room_name = str(extracted.get("room_name") or "").strip()
-            if not raw_room_name or raw_room_name.lower() in {"none", "null", "chưa rõ"}:
                 failed_rows_details.append({
                     "row": current_excel_row,
-                    "reason": "Thiếu tên phòng; cần tên phòng để kiểm tra trùng cùng địa chỉ",
+                    "reason": "Dữ liệu dòng không đúng cấu trúc",
                 })
                 continue
 
@@ -635,26 +624,45 @@ async def upload_excel_rooms(
                 excel_owner_phone = user.username
 
             extracted["landlord_phone"] = excel_owner_phone
-            message = upsert_room_to_db(
-                data=extracted,
-                current_excel_row=current_excel_row,
-                type_process="EXCEL",
-                landlord_phone=excel_owner_phone,
-                skip_ai_embedding=not used_ai,
-            )
+            validation_errors = validate_excel_room_data(extracted)
+            if validation_errors:
+                failed_rows_details.append({
+                    "row": current_excel_row,
+                    "reason": f"Có {len(validation_errors)} trường dữ liệu cần sửa",
+                    "field_errors": validation_errors,
+                })
+                continue
+            try:
+                message = upsert_room_to_db(
+                    data=extracted,
+                    current_excel_row=current_excel_row,
+                    type_process="EXCEL",
+                    landlord_phone=excel_owner_phone,
+                    skip_ai_embedding=not used_ai,
+                )
+            except Exception:
+                failed_rows_details.append({
+                    "row": current_excel_row,
+                    "reason": "Hệ thống chưa thể lưu dòng này; vui lòng thử lại",
+                })
+                continue
             if message == "SUCCESS":
                 success_count += 1
             else:
-                print(f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Lỗi DB - {message}")
-                failed_rows_details.append({"row": current_excel_row, "reason": str(message)})
+                clean_reason = re.sub(r"^❌\s*(?:Dòng\s*\d+\s*:\s*)?", "", str(message)).strip()
+                failed_rows_details.append({"row": current_excel_row, "reason": clean_reason})
 
+    error_count = len(failed_rows_details)
+    result_status = "error" if error_count and success_count == 0 else "partial" if error_count else "success"
     return {
-        "status": "success",
+        "status": result_status,
         "message": (
             f"Đã xử lý {'bằng AI do file không đúng mẫu' if used_ai else 'trực tiếp, không dùng AI'}! "
-            f"Thành công: {success_count} phòng; lỗi: {len(failed_rows_details)} dòng."
+            f"Thành công: {success_count} phòng; lỗi: {error_count} dòng."
         ),
         "processing_mode": "AI_FALLBACK" if used_ai else "DIRECT_NO_AI",
+        "success_count": success_count,
+        "error_count": error_count,
         "errors": failed_rows_details[:100]
     }
 

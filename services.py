@@ -2228,12 +2228,120 @@ def extract_standard_excel_rows(dataframe) -> Optional[List[dict]]:
             elif field_name == "status" and value:
                 value = value.upper()
             elif field_name == "move_in_date":
-                value = normalize_move_in_date(value)[0]
+                normalized_date = normalize_move_in_date(value)[0]
+                # Giữ nguyên giá trị sai để bước validate trả đúng lỗi cho người dùng.
+                value = normalized_date if normalized_date or not value else value
             elif field_name == "media_urls" and value:
                 value = ",".join(item.strip() for item in re.split(r"[,;\n]+", value) if item.strip())
             extracted[field_name] = value
         parsed_rows.append(extracted)
     return parsed_rows
+
+
+def validate_excel_room_data(data: dict) -> List[str]:
+    """Trả lỗi theo từng cột, kèm giá trị sai và cách sửa; không ghi log hệ thống."""
+    errors = []
+
+    def shown(value) -> str:
+        text_value = str(value or "").strip()
+        if not text_value:
+            return "[đang để trống]"
+        return f"'{text_value[:80]}{'…' if len(text_value) > 80 else ''}'"
+
+    address = str(data.get("address") or "").strip()
+    room_name = str(data.get("room_name") or "").strip()
+    if not address or address.lower() in ROOM_NULL_VALUES:
+        errors.append(
+            f"Cột “Địa chỉ”: giá trị {shown(address)} không hợp lệ. "
+            "Cách sửa: nhập địa chỉ đầy đủ, ví dụ '20 Phan Thị Hành, Phú Thọ Hòa, Tân Phú'."
+        )
+    if not room_name or room_name.lower() in ROOM_NULL_VALUES:
+        errors.append(
+            f"Cột “Tên phòng”: giá trị {shown(room_name)} không hợp lệ. "
+            "Cách sửa: nhập tên/số phòng, ví dụ 'Phòng 201'."
+        )
+
+    raw_price = data.get("price")
+    if is_missing_required_room_price(raw_price):
+        errors.append(
+            "Cột “Giá thuê”: đang để trống. Cách sửa: nhập số tiền VNĐ, ví dụ 5000000."
+        )
+    elif parse_price_to_number(raw_price) <= 0:
+        errors.append(
+            f"Cột “Giá thuê”: giá trị {shown(raw_price)} không đọc được hoặc không lớn hơn 0. "
+            "Cách sửa: nhập 5000000 hoặc 5 triệu."
+        )
+
+    raw_phone = data.get("landlord_phone")
+    phone = format_national_phone(raw_phone)
+    if not re.fullmatch(r"0[35789][0-9]{8}", phone or ""):
+        errors.append(
+            f"Cột “SĐT chủ nhà”: giá trị {shown(raw_phone)} không phải SĐT Việt Nam hợp lệ. "
+            "Cách sửa: nhập đủ 10 số, bắt đầu bằng 03, 05, 07, 08 hoặc 09; ví dụ 0901234567."
+        )
+
+    status_value = str(data.get("status") or "TRỐNG").strip().upper()
+    if status_value not in {"TRỐNG", "ĐÃ CHO THUÊ"}:
+        errors.append(
+            f"Cột “Trạng thái”: giá trị {shown(data.get('status'))} không hợp lệ. "
+            "Cách sửa: chỉ nhập TRỐNG hoặc ĐÃ CHO THUÊ."
+        )
+
+    raw_move_in = str(data.get("move_in_date") or "").strip()
+    if raw_move_in and normalize_move_in_date(raw_move_in)[0] == "":
+        errors.append(
+            f"Cột “Ngày có thể vào ở”: giá trị {shown(raw_move_in)} không phải ngày hợp lệ. "
+            "Cách sửa: nhập ngày/tháng/năm, ví dụ 25/09/2026; nếu chưa xác định thì để trống."
+        )
+
+    boolean_field_labels = {
+        "is_private_bathroom": "WC riêng",
+        "has_ac": "Điều hòa",
+        "has_heater": "Nóng lạnh",
+        "has_washer": "Máy giặt",
+        "has_fridge": "Tủ lạnh",
+        "allow_pets": "Cho nuôi thú cưng",
+        "has_balcony": "Ban công",
+        "has_window": "Cửa sổ",
+        "has_fingerprint_lock": "Khóa vân tay",
+        "bed": "Giường",
+        "wardrobe": "Tủ quần áo",
+    }
+    allowed_boolean_values = {"", "co", "khong", "chua ro"}
+    for field_name, column_label in boolean_field_labels.items():
+        raw_value = data.get(field_name)
+        if normalize_excel_header(raw_value) not in allowed_boolean_values:
+            errors.append(
+                f"Cột “{column_label}”: giá trị {shown(raw_value)} không hợp lệ. "
+                "Cách sửa: chọn Có, Không hoặc Chưa rõ."
+            )
+
+    raw_max_occupants = str(data.get("max_occupants") or "").strip()
+    if raw_max_occupants and not re.fullmatch(r"[1-9][0-9]*", raw_max_occupants):
+        errors.append(
+            f"Cột “Số người tối đa”: giá trị {shown(raw_max_occupants)} không hợp lệ. "
+            "Cách sửa: nhập số nguyên lớn hơn 0, ví dụ 2."
+        )
+
+    raw_room_size = str(data.get("room_size") or "").strip()
+    if raw_room_size and not re.fullmatch(r"\d+(?:[.,]\d+)?\s*(?:m2|m²)?", raw_room_size, re.IGNORECASE):
+        errors.append(
+            f"Cột “Diện tích”: giá trị {shown(raw_room_size)} không hợp lệ. "
+            "Cách sửa: nhập 20m2 hoặc 20."
+        )
+
+    media_value = data.get("media_urls") or ""
+    media_items = media_value if isinstance(media_value, list) else re.split(r"[,;\n]+", str(media_value))
+    invalid_media = [
+        str(item).strip() for item in media_items
+        if str(item).strip() and not re.match(r"^https://", str(item).strip(), re.IGNORECASE)
+    ]
+    if invalid_media:
+        errors.append(
+            f"Cột “Link ảnh/video”: URL {shown(invalid_media[0])} không hợp lệ. "
+            "Cách sửa: dùng đường dẫn công khai bắt đầu bằng https://; nhiều link ngăn cách bằng dấu phẩy."
+        )
+    return errors
 
 def ai_validate_and_extract_room_batch(rows_list: List[dict]) -> List[Optional[dict]]:
     """Xử lý nhóm dữ liệu Excel - Fix triệt để UnboundLocalError & Lỗi parse giá tiền."""

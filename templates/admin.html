@@ -921,15 +921,27 @@
                   method:"POST",body:f
               }
               ),d=await data(r);
-              $("uploadMsg").textContent=r.ok?d.message:err(d);
-              $("uploadMsg").className=r.ok
-                  ?"mb-3 rounded bg-green-100 p-2 text-sm text-green-800"
-                  :"mb-3 rounded bg-red-100 p-2 text-sm text-red-800";
-              if(r.ok)loadRooms()
+              const rowErrors=Array.isArray(d.errors)?d.errors:[];
+              const errorDetails=rowErrors.flatMap(item=> {
+                  const header=`• Dòng ${item.row||"?"}: ${item.reason||"Dữ liệu không hợp lệ"}`;
+                  const fields=Array.isArray(item.field_errors)
+                      ?item.field_errors.map(detail=>`   - ${detail}`)
+                      :[];
+                  return[header,...fields]
+              });
+              $("uploadMsg").textContent=r.ok
+                  ?[d.message,errorDetails.length?"\nChi tiết lỗi:":"",...errorDetails].filter(Boolean).join("\n")
+                  :err(d);
+              const resultStatus=r.ok?(d.status||"success"):"error";
+              $("uploadMsg").className=resultStatus==="success"
+                  ?"mb-3 max-h-72 overflow-y-auto whitespace-pre-line rounded bg-green-100 p-3 text-sm text-green-800"
+                  :resultStatus==="partial"
+                      ?"mb-3 max-h-72 overflow-y-auto whitespace-pre-line rounded bg-amber-100 p-3 text-sm text-amber-900"
+                      :"mb-3 max-h-72 overflow-y-auto whitespace-pre-line rounded bg-red-100 p-3 text-sm text-red-800";
+              if(r.ok&&Number(d.success_count||0)>0)loadRooms()
           } catch(error) {
-              console.error("Lỗi tải Excel:",error);
               $("uploadMsg").textContent="Không thể kết nối máy chủ. Vui lòng thử lại.";
-              $("uploadMsg").className="mb-3 rounded bg-red-100 p-2 text-sm text-red-800"
+              $("uploadMsg").className="mb-3 whitespace-pre-line rounded bg-red-100 p-3 text-sm text-red-800"
           } finally {
               busy("excelSave",false)
           }

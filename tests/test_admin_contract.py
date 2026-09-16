@@ -487,6 +487,25 @@ def test_standard_excel_bypasses_gemini_and_duplicate_key_is_address_plus_name()
     assert "Phòng bị trùng địa chỉ và tên phòng" in services_source
 
 
+def test_excel_validation_errors_are_returned_and_rendered_in_admin_modal():
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
+    assert "def validate_excel_room_data" in services_source
+    assert "validation_errors = validate_excel_room_data(extracted)" in main_source
+    assert '"success_count": success_count' in main_source
+    assert '"error_count": error_count' in main_source
+    assert 'result_status = "error"' in main_source
+    assert "const rowErrors=Array.isArray(d.errors)?d.errors:[]" in html
+    assert '"field_errors": validation_errors' in main_source
+    assert "Array.isArray(item.field_errors)" in html
+    assert "Chi tiết lỗi:" in html
+    assert "whitespace-pre-line" in html
+    assert 'resultStatus==="partial"' in html
+    assert 'console.error("Lỗi tải Excel:"' not in html
+    assert 'print(f"❌ Dòng {current_excel_row}' not in main_source
+
+
 def test_natural_search_overrides_invalid_gemini_extraction():
     services_source = (ROOT / "services.py").read_text(encoding="utf-8")
     assert "def extract_natural_room_search" in services_source
