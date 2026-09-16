@@ -639,3 +639,25 @@ def test_room_only_persists_move_in_date_without_timestamp():
     assert 'datetime.strptime(str(item.get("move_in_date") or ""), "%d/%m/%Y")' in main_source
     assert 'payload_data.pop("move_in_timestamp", None)' in main_source
     assert "r.move_in_timestamp" not in html
+
+
+def test_admin_room_filters_cover_details_and_boolean_checkboxes():
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
+
+    for field_name in (
+        "floor", "room_size", "max_occupants", "move_in_date",
+        "is_private_bathroom", "has_ac", "has_heater", "has_washer",
+        "has_fridge", "bed", "wardrobe", "allow_pets", "has_balcony",
+        "has_window", "has_fingerprint_lock", "parking_info",
+    ):
+        assert f'"{field_name}":' in main_source or f'{field_name}: Optional[str]' in main_source
+    assert "const booleanRoomFilterDefinitions=" in html
+    assert "function toggleBooleanRoomFilter" in html
+    assert 'return"Có"' in html
+    assert 'return"Không"' in html
+    assert 'p.set("move_in_date",exactMoveInDate)' in html
+    assert 'id="fFloor"' in html
+    assert 'id="fRoomSize"' in html
+    assert 'id="fMaxOccupants"' in html
+    assert 'id="fMoveInDate"' in html

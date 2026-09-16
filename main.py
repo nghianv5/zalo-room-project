@@ -693,7 +693,22 @@ async def get_rooms_filter(
     address: Optional[str] = None,
     room_query: Optional[str] = None,
     landlord_phone: Optional[str] = None,
+    floor: Optional[str] = None,
+    room_size: Optional[str] = None,
+    max_occupants: Optional[str] = None,
+    move_in_date: Optional[str] = None,
+    is_private_bathroom: Optional[str] = None,
     has_ac: Optional[str] = None,
+    has_heater: Optional[str] = None,
+    has_washer: Optional[str] = None,
+    has_fridge: Optional[str] = None,
+    bed: Optional[str] = None,
+    wardrobe: Optional[str] = None,
+    allow_pets: Optional[str] = None,
+    has_balcony: Optional[str] = None,
+    has_window: Optional[str] = None,
+    has_fingerprint_lock: Optional[str] = None,
+    parking_info: Optional[str] = None,
     page: int = 1,
     page_size: int = 25,
     include_deleted: bool = False,
@@ -711,6 +726,33 @@ async def get_rooms_filter(
 
     if status:
         must_conditions.append(qdrant_models.FieldCondition(key="status", match=qdrant_models.MatchValue(value=status)))
+
+    exact_room_filters = {
+        "floor": floor,
+        "room_size": room_size,
+        "max_occupants": max_occupants,
+        "move_in_date": move_in_date,
+        "is_private_bathroom": is_private_bathroom,
+        "has_ac": has_ac,
+        "has_heater": has_heater,
+        "has_washer": has_washer,
+        "has_fridge": has_fridge,
+        "bed": bed,
+        "wardrobe": wardrobe,
+        "allow_pets": allow_pets,
+        "has_balcony": has_balcony,
+        "has_window": has_window,
+        "has_fingerprint_lock": has_fingerprint_lock,
+        "parking_info": parking_info,
+    }
+    for field_name, field_value in exact_room_filters.items():
+        if field_value is not None and str(field_value).strip():
+            must_conditions.append(
+                qdrant_models.FieldCondition(
+                    key=field_name,
+                    match=qdrant_models.MatchValue(value=str(field_value).strip()),
+                )
+            )
 
     if min_price is not None or max_price is not None:
         price_range = {}
@@ -755,7 +797,6 @@ async def get_rooms_filter(
 
     address_text = str(address or "").strip().lower()
     query_text = str(room_query or "").strip().lower()
-    ac_text = str(has_ac or "").strip().lower()
     if address_text:
         all_results = [item for item in all_results if address_text in str(item.get("address") or "").lower()]
     if query_text:
@@ -763,8 +804,6 @@ async def get_rooms_filter(
             item for item in all_results
             if query_text in f"{item.get('room_name') or ''} {item.get('room_code') or ''}".lower()
         ]
-    if ac_text:
-        all_results = [item for item in all_results if str(item.get("has_ac") or "").strip().lower() == ac_text]
     if date_from or date_to:
         def room_is_in_date_range(item: dict) -> bool:
             try:
