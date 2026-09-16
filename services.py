@@ -120,7 +120,7 @@ GEMINI_EXCEL_MAX_OUTPUT_TOKENS = max(2048, int(os.getenv("GEMINI_EXCEL_MAX_OUTPU
 CACHE_TTL_SECONDS = 600
 MAX_MEDIA_PER_ROOM = max(0, int(os.getenv("MAX_MEDIA_PER_ROOM", "0")))
 MAX_SEARCH_MEDIA = max(0, int(os.getenv("MAX_SEARCH_MEDIA", "0")))
-MAX_SEARCH_ROOMS = max(1, int(os.getenv("MAX_SEARCH_ROOMS", "5")))
+MAX_SEARCH_ROOMS = min(20, max(1, int(os.getenv("MAX_SEARCH_ROOMS", "20"))))
 MAX_SEARCH_MEDIA_PER_ROOM = max(0, int(os.getenv("MAX_SEARCH_MEDIA_PER_ROOM", "0")))
 MAX_IMAGE_UPLOAD_BYTES = max(1, int(os.getenv("MAX_IMAGE_UPLOAD_MB", "15"))) * 1024 * 1024
 MAX_VIDEO_UPLOAD_BYTES = max(1, int(os.getenv("MAX_VIDEO_UPLOAD_MB", "80"))) * 1024 * 1024
@@ -1084,7 +1084,7 @@ def format_room_search_message(room: dict, position: int, include_action_instruc
 
 
 def send_zalo_room_action_buttons(user_id: str, room_code: str) -> bool:
-    """Gửi hai nút oa.query.show; tự chuyển sang câu lệnh chữ nếu OA từ chối template."""
+    """Gửi button và luôn gửi câu lệnh chữ để Zalo PC cũng thao tác được."""
     normalized_code = str(room_code or "").strip().upper()
     fallback_text = (
         f"📅 Đặt lịch xem phòng: nhắn “XEM PHÒNG {normalized_code}”\n"
@@ -1125,6 +1125,7 @@ def send_zalo_room_action_buttons(user_id: str, room_code: str) -> bool:
             },
         },
     }
+    button_sent = False
     try:
         response_data, _ = _post_zalo_with_token_retry(
             "https://openapi.zalo.me/v3.0/oa/message/cs",
@@ -1132,15 +1133,19 @@ def send_zalo_room_action_buttons(user_id: str, room_code: str) -> bool:
             token_data["access_token"],
         )
         if response_data.get("error") == 0:
-            return True
-        report_error(
-            f"Zalo từ chối button template: {response_data}",
-            context="send_zalo_room_action_buttons",
-            notify=False,
-        )
+            button_sent = True
+        else:
+            report_error(
+                f"Zalo từ chối button template: {response_data}",
+                context="send_zalo_room_action_buttons",
+                notify=False,
+            )
     except Exception as exc:
         report_error("Gửi nút thao tác phòng Zalo thất bại", exc, "send_zalo_room_action_buttons", notify=False)
-    return send_zalo_message(user_id, fallback_text)
+    # API có thể báo gửi button thành công nhưng Zalo PC không render template.
+    # Vì vậy câu lệnh chữ luôn được gửi, không chỉ gửi khi button bị lỗi.
+    text_sent = send_zalo_message(user_id, fallback_text)
+    return button_sent or text_sent
 
 
 def get_room_for_zalo_action(room_code: str) -> Optional[dict]:
@@ -1276,7 +1281,11 @@ def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
     if not rooms:
         return False
 
-    intro = f"🔎 Tìm thấy {len(search_results)} phòng phù hợp. Dưới đây là các phòng nổi bật:"
+    total_found = len(search_results)
+    intro = (
+        f"🔎 Tìm thấy {total_found} phòng phù hợp. "
+        f"Hiển thị {len(rooms)}/{total_found} phòng:"
+    )
     if not send_zalo_message(user_id, intro):
         return False
 
@@ -2762,7 +2771,7 @@ def process_zalo_ai_logic(
             location_search=location_search,
             min_price=min_p,
             max_price=max_p,
-            top_k=10,
+            top_k=MAX_SEARCH_ROOMS,
         )
         if search_results:
             send_zalo_search_results(user_id, search_results)
@@ -2991,7 +3000,7 @@ def process_zalo_ai_logic(
                     location_search=location_search,
                     min_price=min_p, 
                     max_price=max_p, 
-                    top_k=10
+                    top_k=MAX_SEARCH_ROOMS
                 )
                 print(f"search_result : {search_results}")
                 if not search_results:
@@ -3610,7 +3619,7 @@ def search_rooms_with_filter(
 
     status_filter = qdrant_models.Filter(must=must_conditions)
     print(f"query_text : {query_text}")
-    safe_top_k = min(max(int(top_k or 20), 1), 100)
+    safe_top_k = min(max(int(top_k or MAX_SEARCH_ROOMS), 1), MAX_SEARCH_ROOMS)
     candidates = []
     try:
         scroll_offset = None

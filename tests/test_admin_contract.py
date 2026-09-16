@@ -211,7 +211,7 @@ def test_gemini_cost_optimizations_are_enabled():
     assert 'gemini:embedding:' in services_source
     assert "GEMINI_EMBED_CACHE_TTL" in services_source
     assert "MAX_HISTORY_MESSAGES = 8" in services_source
-    assert "top_k=10" in services_source
+    assert "top_k=MAX_SEARCH_ROOMS" in services_source
     assert "prompt_format_rooms" not in services_source
     assert "raw_text_search" not in services_source
     assert "def can_update_amenities_without_ai" in services_source
@@ -661,3 +661,18 @@ def test_admin_room_filters_cover_details_and_boolean_checkboxes():
     assert 'id="fRoomSize"' in html
     assert 'id="fMaxOccupants"' in html
     assert 'id="fMoveInDate"' in html
+
+
+def test_zalo_search_shows_text_actions_and_caps_results_at_twenty():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    env_source = (ROOT / ".env.example").read_text(encoding="utf-8")
+
+    assert 'MAX_SEARCH_ROOMS = min(20, max(1, int(os.getenv("MAX_SEARCH_ROOMS", "20"))))' in services_source
+    assert "MAX_SEARCH_ROOMS=20" in env_source
+    assert 'f"📅 Đặt lịch xem phòng: nhắn “XEM PHÒNG {normalized_code}”' in services_source
+    assert 'f"🚩 Report phòng: nhắn “REPORT PHÒNG {normalized_code}”' in services_source
+    assert "text_sent = send_zalo_message(user_id, fallback_text)" in services_source
+    assert "return button_sent or text_sent" in services_source
+    assert 'f"Hiển thị {len(rooms)}/{total_found} phòng:"' in services_source
+    assert "top_k=MAX_SEARCH_ROOMS" in services_source
+    assert "safe_top_k = min(max(int(top_k or MAX_SEARCH_ROOMS), 1), MAX_SEARCH_ROOMS)" in services_source
