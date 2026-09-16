@@ -562,7 +562,12 @@ async def upload_excel_rooms(
 
     contents = await file.read()
     try:
-        df = pd.read_csv(io.BytesIO(contents)) if file.filename.endswith(".csv") else pd.read_excel(io.BytesIO(contents))
+        # Đọc dạng chuỗi để không làm mất số 0 đầu của SĐT/mã phòng.
+        df = (
+            pd.read_csv(io.BytesIO(contents), dtype=str)
+            if file.filename.lower().endswith(".csv")
+            else pd.read_excel(io.BytesIO(contents), dtype=str)
+        )
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Không thể đọc tệp: {str(e)}")
 
@@ -570,11 +575,20 @@ async def upload_excel_rooms(
     failed_rows_details = []
 
     BATCH_SIZE = 15
-    rows = df.to_dict(orient="records")
+    standard_rows = extract_standard_excel_rows(df)
+    used_ai = standard_rows is None
+    rows = df.to_dict(orient="records") if used_ai else standard_rows
 
     for i in range(0, len(rows), BATCH_SIZE):
         batch_rows = rows[i:i + BATCH_SIZE]
-        batch_results = ai_validate_and_extract_room_batch(batch_rows)
+        batch_results = (
+            ai_validate_and_extract_room_batch(batch_rows)
+            if used_ai
+            else [
+                {"index": i + offset, "action": "ADD_ROOM", "extracted_data": row}
+                for offset, row in enumerate(batch_rows)
+            ]
+        )
 
         # Sử dụng enumerate để lấy chỉ số offset của từng bản ghi trong batch
         for offset, validated_data in enumerate(batch_results):
@@ -604,6 +618,14 @@ async def upload_excel_rooms(
                 failed_rows_details.append({"row": current_excel_row, "reason": "Thiếu hoặc sai địa chỉ"})
                 continue
 
+            raw_room_name = str(extracted.get("room_name") or "").strip()
+            if not raw_room_name or raw_room_name.lower() in {"none", "null", "chưa rõ"}:
+                failed_rows_details.append({
+                    "row": current_excel_row,
+                    "reason": "Thiếu tên phòng; cần tên phòng để kiểm tra trùng cùng địa chỉ",
+                })
+                continue
+
             # Kiểm tra lưu DB (hàm trả về None/"" nếu thành công, trả về string lỗi nếu thất bại)
             if user.role == "SUPER_ADMIN":
                 excel_owner_phone = extracted.get("landlord_phone")
@@ -613,7 +635,13 @@ async def upload_excel_rooms(
                 excel_owner_phone = user.username
 
             extracted["landlord_phone"] = excel_owner_phone
-            message = upsert_room_to_db(data=extracted, current_excel_row=current_excel_row, type_process="EXCEL", landlord_phone=excel_owner_phone)
+            message = upsert_room_to_db(
+                data=extracted,
+                current_excel_row=current_excel_row,
+                type_process="EXCEL",
+                landlord_phone=excel_owner_phone,
+                skip_ai_embedding=not used_ai,
+            )
             if message == "SUCCESS":
                 success_count += 1
             else:
@@ -622,7 +650,11 @@ async def upload_excel_rooms(
 
     return {
         "status": "success",
-        "message": f"AI đã xử lý xong! Thành công: {success_count} phòng; lỗi: {len(failed_rows_details)} dòng.",
+        "message": (
+            f"Đã xử lý {'bằng AI do file không đúng mẫu' if used_ai else 'trực tiếp, không dùng AI'}! "
+            f"Thành công: {success_count} phòng; lỗi: {len(failed_rows_details)} dòng."
+        ),
+        "processing_mode": "AI_FALLBACK" if used_ai else "DIRECT_NO_AI",
         "errors": failed_rows_details[:100]
     }
 

@@ -1193,9 +1193,7 @@ def start_zalo_room_report(user_id: str, room_code: str) -> str:
         f"🔖 Mã phòng: {room['room_code']}\n"
         f"🛏️ Tên phòng: {room_name}\n"
         f"📍 Địa chỉ: {address}\n\n"
-        "Ba thông tin trên được lấy từ hệ thống và không thể chỉnh sửa.\n"
-        "Bạn hãy nhập nội dung cần report trong tin nhắn tiếp theo (5–2000 ký tự).\n"
-        "Nhắn HỦY REPORT nếu không muốn tiếp tục."
+        "Bạn hãy nhập nội dung cần report trong tin nhắn tiếp theo (5–2000 ký tự)."
     )
 
 
@@ -1871,7 +1869,15 @@ def is_missing_required_room_price(value) -> bool:
     return clean_value in {"", "none", "null", "nan", "undefined", "chưa rõ", "chưa cập nhật"}
 
 
-def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[List[str]] = None, current_excel_row: int = 0, type_process: str = None,  landlord_phone: str = None) -> Optional[str]:
+def upsert_room_to_db(
+    data: dict,
+    point_id: str = None,
+    media_urls: Optional[List[str]] = None,
+    current_excel_row: int = 0,
+    type_process: str = None,
+    landlord_phone: str = None,
+    skip_ai_embedding: bool = False,
+) -> Optional[str]:
     try:
         data = dict(data or {})
         legacy_amenities = str(data.get("other_amenities") or "").lower()
@@ -1892,17 +1898,26 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
             if type_process == "EXCEL":
                 return f"❌ Dòng {current_excel_row}: landlord_phone là trường bắt buộc và phải là số điện thoại Việt Nam hợp lệ."
             return "landlord_phone là trường bắt buộc và phải là số điện thoại Việt Nam hợp lệ."
-        # Nếu tìm thấy thì bản ghi thì k cập nhật mà bỏ qua
-        existing_id = point_id or find_existing_room_id(
-            address=address_clean,
-            room_name=room_name,
-            landlord_phone=phone,
-            room_code=data.get("room_code"),
-        )
+        # Import Excel chỉ coi là trùng khi đồng thời trùng địa chỉ + tên phòng.
+        # Các luồng cập nhật thường vẫn xác định phòng theo mã/SĐT như trước.
+        if point_id:
+            existing_id = point_id
+        elif type_process == "EXCEL":
+            existing_id = find_duplicate_room_id(address_clean, room_name)
+        else:
+            existing_id = find_existing_room_id(
+                address=address_clean,
+                room_name=room_name,
+                landlord_phone=phone,
+                room_code=data.get("room_code"),
+            )
         if existing_id:
             point_id = existing_id
             if type_process == "EXCEL":
-                return f"❌ Đăng ký thành công đến dòng {current_excel_row - 1}. Lỗi từ dòng {current_excel_row}: Phòng đã được bạn hoặc người dùng khác đăng ký."
+                return (
+                    f"❌ Dòng {current_excel_row}: Phòng bị trùng địa chỉ và tên phòng "
+                    f"({address} — {room_name})."
+                )
 
             old_records = qdrant_client.retrieve(
                 collection_name=COLLECTION_NAME,
@@ -1981,8 +1996,13 @@ def upsert_room_to_db(data: dict, point_id: str = None, media_urls: Optional[Lis
         - Phí dịch vụ (điện, nước, wifi,...): {service_fees_str}
         """.strip()
 
-        # 4. Lấy vector embedding từ chuỗi văn bản trên
-        vector = get_text_embedding(text_to_embed)
+        # File Excel đúng mẫu đã có dữ liệu cấu trúc và tìm kiếm hiện dùng payload
+        # (địa chỉ/giá/trạng thái), nên không cần phát sinh phí Gemini Embedding.
+        vector = (
+            [1.0] + [0.0] * (VECTOR_SIZE - 1)
+            if skip_ai_embedding
+            else get_text_embedding(text_to_embed)
+        )
         
         if not vector:
             report_error("Không thể tạo vector embedding cho phòng", context="upsert_room_to_db")
@@ -2105,6 +2125,115 @@ def update_room_status_in_db(point_id: str, new_status: str) -> bool:
     except Exception as e:
         report_error("Cập nhật trạng thái phòng thất bại", e, "update_room_status_in_db")
         return False
+
+
+STANDARD_EXCEL_HEADER_MAP = {
+    "ma phong": "room_code",
+    "room code": "room_code",
+    "dia chi": "address",
+    "address": "address",
+    "gia thue": "price",
+    "gia": "price",
+    "price": "price",
+    "ten phong": "room_name",
+    "room name": "room_name",
+    "tang": "floor",
+    "floor": "floor",
+    "wc rieng": "is_private_bathroom",
+    "is private bathroom": "is_private_bathroom",
+    "dieu hoa": "has_ac",
+    "has ac": "has_ac",
+    "nong lanh": "has_heater",
+    "has heater": "has_heater",
+    "may giat": "has_washer",
+    "has washer": "has_washer",
+    "tu lanh": "has_fridge",
+    "has fridge": "has_fridge",
+    "cho nuoi thu cung": "allow_pets",
+    "allow pets": "allow_pets",
+    "ban cong": "has_balcony",
+    "has balcony": "has_balcony",
+    "cua so": "has_window",
+    "has window": "has_window",
+    "khoa van tay": "has_fingerprint_lock",
+    "has fingerprint lock": "has_fingerprint_lock",
+    "cho de xe": "parking_info",
+    "parking info": "parking_info",
+    "giuong": "bed",
+    "bed": "bed",
+    "tu quan ao": "wardrobe",
+    "wardrobe": "wardrobe",
+    "dien tich": "room_size",
+    "room size": "room_size",
+    "so nguoi toi da": "max_occupants",
+    "max occupants": "max_occupants",
+    "tien ich khac": "other_amenities",
+    "other amenities": "other_amenities",
+    "phi dich vu": "service_fees",
+    "service fees": "service_fees",
+    "link anh video": "media_urls",
+    "media urls": "media_urls",
+    "ngay co the vao o": "move_in_date",
+    "move in date": "move_in_date",
+    "trang thai": "status",
+    "status": "status",
+    "sdt chu nha": "landlord_phone",
+    "so dien thoai chu nha": "landlord_phone",
+    "landlord phone": "landlord_phone",
+}
+
+EXCEL_BOOLEAN_FIELDS = {
+    "is_private_bathroom", "has_ac", "has_heater", "has_washer", "has_fridge",
+    "allow_pets", "has_balcony", "has_window", "has_fingerprint_lock",
+    "parking_info", "bed", "wardrobe",
+}
+
+
+def normalize_excel_header(value: str) -> str:
+    """Chuẩn hóa tiêu đề Excel Việt/Anh để ánh xạ không cần Gemini."""
+    text_value = unicodedata.normalize("NFD", str(value or "").strip().lower())
+    text_value = "".join(char for char in text_value if unicodedata.category(char) != "Mn")
+    text_value = text_value.replace("đ", "d")
+    text_value = re.sub(r"[^a-z0-9]+", " ", text_value)
+    return re.sub(r"\s+", " ", text_value).strip()
+
+
+def extract_standard_excel_rows(dataframe) -> Optional[List[dict]]:
+    """Đọc file đúng mẫu trực tiếp; trả ``None`` để dùng AI cho file cũ/sai mẫu."""
+    column_mapping = {}
+    for original_column in dataframe.columns:
+        field_name = STANDARD_EXCEL_HEADER_MAP.get(normalize_excel_header(original_column))
+        if not field_name or field_name in column_mapping.values():
+            return None
+        column_mapping[original_column] = field_name
+
+    required_fields = {"address", "price", "room_name"}
+    if not required_fields.issubset(set(column_mapping.values())):
+        return None
+
+    parsed_rows = []
+    for raw_row in dataframe.to_dict(orient="records"):
+        extracted = {}
+        for original_column, field_name in column_mapping.items():
+            raw_value = raw_row.get(original_column)
+            value = "" if raw_value is None or pd.isna(raw_value) else str(raw_value).strip()
+            if value.lower() in {"nan", "none", "null", "undefined"}:
+                value = ""
+            if field_name in EXCEL_BOOLEAN_FIELDS and value:
+                normalized_value = normalize_excel_header(value)
+                if normalized_value in {"co", "yes", "true", "1", "x"}:
+                    value = "Có"
+                elif normalized_value in {"khong", "no", "false", "0"}:
+                    value = "Không"
+            elif field_name == "status" and value:
+                value = value.upper()
+            elif field_name == "move_in_date":
+                value = normalize_move_in_date(value)[0]
+            elif field_name == "media_urls" and value:
+                value = ",".join(item.strip() for item in re.split(r"[,;\n]+", value) if item.strip())
+            extracted[field_name] = value
+        parsed_rows.append(extracted)
+    return parsed_rows
 
 def ai_validate_and_extract_room_batch(rows_list: List[dict]) -> List[Optional[dict]]:
     """Xử lý nhóm dữ liệu Excel - Fix triệt để UnboundLocalError & Lỗi parse giá tiền."""
@@ -2235,8 +2364,11 @@ def process_excel_file(file_url: str, sender_id: str) -> str:
             f.write(res.content)
 
         # 2. Đọc dữ liệu file Excel
-        df = pd.read_excel(temp_file)
-        rows = df.to_dict(orient="records")
+        # Giữ nguyên số 0 đầu của SĐT và các mã dạng chuỗi trong Excel.
+        df = pd.read_excel(temp_file, dtype=str)
+        standard_rows = extract_standard_excel_rows(df)
+        used_ai = standard_rows is None
+        rows = df.to_dict(orient="records") if used_ai else standard_rows
 
         success_count = 0
         owner_db = SessionLocal()
@@ -2255,7 +2387,14 @@ def process_excel_file(file_url: str, sender_id: str) -> str:
         # 3. Duyệt theo từng batch
         for i in range(0, len(rows), BATCH_SIZE):
             batch_rows = rows[i:i + BATCH_SIZE]
-            batch_results = ai_validate_and_extract_room_batch(batch_rows)
+            batch_results = (
+                ai_validate_and_extract_room_batch(batch_rows)
+                if used_ai
+                else [
+                    {"index": i + offset, "action": "ADD_ROOM", "extracted_data": row}
+                    for offset, row in enumerate(batch_rows)
+                ]
+            )
 
             # 4. Duyệt qua từng kết quả trong batch bằng enumerate
             for offset, validated_data in enumerate(batch_results):
@@ -2280,9 +2419,23 @@ def process_excel_file(file_url: str, sender_id: str) -> str:
                     failed_rows_details.append((current_excel_row, "Địa chỉ trống hoặc không hợp lệ"))
                     continue
 
+                raw_room_name = str(extracted.get("room_name") or "").strip()
+                if not raw_room_name or raw_room_name.lower() in {"none", "null", "chưa rõ"}:
+                    failed_rows_details.append((
+                        current_excel_row,
+                        "Thiếu tên phòng; cần tên phòng để kiểm tra trùng cùng địa chỉ",
+                    ))
+                    continue
+
                 # upsert_room_to_db trả về None/"" nếu thành công, trả về string lỗi nếu thất bại
                 extracted["landlord_phone"] = landlord_phone
-                message = upsert_room_to_db(data=extracted, current_excel_row=current_excel_row, type_process="EXCEL", landlord_phone=landlord_phone)
+                message = upsert_room_to_db(
+                    data=extracted,
+                    current_excel_row=current_excel_row,
+                    type_process="EXCEL",
+                    landlord_phone=landlord_phone,
+                    skip_ai_embedding=not used_ai,
+                )
                 
                 if message == "SUCCESS":
                     success_count += 1
@@ -2295,10 +2448,8 @@ def process_excel_file(file_url: str, sender_id: str) -> str:
             os.remove(temp_file)
 
         # 5. Đóng gói thông báo trả về
-        msg = (
-            f"AI đã xử lý xong!\n"
-            f"- Thành công: {success_count} phòng.\n"
-        )
+        mode_text = "AI dự phòng vì file không đúng mẫu" if used_ai else "trực tiếp, không dùng AI"
+        msg = f"Đã xử lý {mode_text}!\n- Thành công: {success_count} phòng.\n"
 
         if failed_rows_details:
             # Lấy tối đa 10 dòng lỗi đầu tiên để tránh tin nhắn quá dài
@@ -3472,6 +3623,46 @@ def normalize_room_address(value: str) -> str:
     return re.sub(r"\s+", " ", normalized).strip()
 
 
+def normalize_room_name(value: str) -> str:
+    """Chuẩn hóa tên phòng để so khớp chính xác, không phân biệt hoa/thường."""
+    return re.sub(r"\s+", " ", str(value or "").strip()).casefold()
+
+
+def find_duplicate_room_id(address: str, room_name: str) -> Optional[str]:
+    """Phòng chỉ được xem là trùng khi đồng thời trùng địa chỉ và tên phòng."""
+    safe_address = str(address or "").strip()
+    safe_room_name = str(room_name or "").strip()
+    if not safe_address or not safe_room_name:
+        return None
+    try:
+        records, _ = qdrant_client.scroll(
+            collection_name=COLLECTION_NAME,
+            scroll_filter=qdrant_models.Filter(
+                must=[
+                    qdrant_models.FieldCondition(
+                        key="address",
+                        match=qdrant_models.MatchText(text=safe_address),
+                    )
+                ]
+            ),
+            limit=100,
+            with_payload=True,
+            with_vectors=False,
+        )
+        normalized_address = normalize_room_address(safe_address)
+        normalized_name = normalize_room_name(safe_room_name)
+        for record in records:
+            payload = record.payload or {}
+            if (
+                normalize_room_address(payload.get("address")) == normalized_address
+                and normalize_room_name(payload.get("room_name")) == normalized_name
+            ):
+                return str(record.id)
+        return None
+    except Exception as exc:
+        raise Exception(f"❌ Lỗi truy vấn Qdrant khi kiểm tra phòng trùng: {exc}")
+
+
 def find_existing_room_id(
     address: str,
     room_name: str = "",
@@ -3530,13 +3721,14 @@ def find_existing_room_id(
             if normalize_room_address((record.payload or {}).get("address")) == normalized_address
         ]
         if safe_room_name:
-            normalized_name = safe_room_name.casefold()
+            normalized_name = normalize_room_name(safe_room_name)
             named_records = [
                 record for record in exact_address_records
-                if str((record.payload or {}).get("room_name") or "").strip().casefold() == normalized_name
+                if normalize_room_name((record.payload or {}).get("room_name")) == normalized_name
             ]
             if len(named_records) == 1:
                 return str(named_records[0].id)
+            return None
         if len(exact_address_records) == 1:
             return str(exact_address_records[0].id)
 

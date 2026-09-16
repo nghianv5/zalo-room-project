@@ -274,7 +274,7 @@ def test_missing_room_price_is_user_input_error_not_system_exception():
     assert "Thông tin phòng đã được lưu tạm" in services_source
     assert "Lỗi: 'price' không được để trống hoặc null!" not in services_source
     price_check = services_source.index('if is_missing_required_room_price(data.get("price"))')
-    embedding_call = services_source.index("vector = get_text_embedding(text_to_embed)", price_check)
+    embedding_call = services_source.index("vector = (", price_check)
     assert price_check < embedding_call
 
 
@@ -461,6 +461,30 @@ def test_move_in_date_defaults_to_empty_and_supports_natural_vietnamese_dates():
     assert 'extracted["move_in_date"] = extract_move_in_date_from_text(message_text)' in services_source
     assert 'move_in_date_str = "Vào ở ngay"' not in services_source
     assert 'move_in_timestamp = now_vn.timestamp()' not in services_source
+
+
+def test_excel_import_preserves_phone_and_code_as_text():
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    assert 'pd.read_excel(io.BytesIO(contents), dtype=str)' in main_source
+    assert 'pd.read_csv(io.BytesIO(contents), dtype=str)' in main_source
+    assert 'pd.read_excel(temp_file, dtype=str)' in services_source
+
+
+def test_standard_excel_bypasses_gemini_and_duplicate_key_is_address_plus_name():
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    assert "def extract_standard_excel_rows" in services_source
+    assert "standard_rows = extract_standard_excel_rows(df)" in main_source
+    assert "standard_rows = extract_standard_excel_rows(df)" in services_source
+    assert '"processing_mode": "AI_FALLBACK" if used_ai else "DIRECT_NO_AI"' in main_source
+    assert "skip_ai_embedding=not used_ai" in main_source
+    assert "skip_ai_embedding=not used_ai" in services_source
+    assert "if skip_ai_embedding" in services_source
+    assert "def find_duplicate_room_id(address: str, room_name: str)" in services_source
+    assert 'elif type_process == "EXCEL":' in services_source
+    assert "existing_id = find_duplicate_room_id(address_clean, room_name)" in services_source
+    assert "Phòng bị trùng địa chỉ và tên phòng" in services_source
 
 
 def test_natural_search_overrides_invalid_gemini_extraction():
