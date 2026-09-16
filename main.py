@@ -432,12 +432,17 @@ async def save_or_update_room(
             data=room_dict, 
             point_id=point_id, 
             media_urls=room_dict.get("media_urls", []),
-            type_process = "NOT_EXCEL"
+            type_process="NOT_EXCEL",
+            replace_media_urls=bool(point_id),
         )
         
         if success == "SUCCESS":
             write_audit_log(user.username, "ROOM_UPDATE" if point_id else "ROOM_CREATE", point_id, {"room_code": room_dict.get("room_code")})
-            return {"status": "success", "message": "Lưu thông tin phòng thành công!"}
+            return {
+                "status": "success",
+                "message": "Lưu thông tin phòng thành công!",
+                "media_urls": room_dict.get("media_urls", []),
+            }
         else:
             raise HTTPException(status_code=400, detail=f"Không thể ghi dữ liệu: {success}")
             
@@ -713,18 +718,15 @@ async def get_rooms_filter(
         if max_price is not None: price_range["lte"] = max_price
         must_conditions.append(qdrant_models.FieldCondition(key="price", range=qdrant_models.Range(**price_range)))
 
-    if from_date or to_date:
-        time_range = {}
-        try:
-            if from_date:
-                dt_from = datetime.strptime(from_date, "%Y-%m-%d")
-                time_range["gte"] = VN_TZ.localize(dt_from).timestamp()
-            if to_date:
-                dt_to = datetime.strptime(to_date, "%Y-%m-%d").replace(hour=23, minute=59, second=59)
-                time_range["lte"] = VN_TZ.localize(dt_to).timestamp()
-        except ValueError as exc:
-            raise HTTPException(status_code=400, detail="Ngày lọc phải có định dạng YYYY-MM-DD.") from exc
-        must_conditions.append(qdrant_models.FieldCondition(key="move_in_timestamp", range=qdrant_models.Range(**time_range)))
+    date_from = None
+    date_to = None
+    try:
+        if from_date:
+            date_from = datetime.strptime(from_date, "%Y-%m-%d").date()
+        if to_date:
+            date_to = datetime.strptime(to_date, "%Y-%m-%d").date()
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Ngày lọc phải có định dạng YYYY-MM-DD.") from exc
 
     query_filter = qdrant_models.Filter(must=must_conditions, must_not=must_not_conditions)
     # Đọc hết các bản ghi thỏa bộ lọc Qdrant theo từng batch, sau đó áp dụng
@@ -743,6 +745,8 @@ async def get_rooms_filter(
         for rec in records:
             if rec.payload:
                 payload_data = dict(rec.payload)
+                # Không trả trường timestamp cũ ra giao diện; chỉ sử dụng move_in_date.
+                payload_data.pop("move_in_timestamp", None)
                 payload_data["id"] = str(rec.id)
                 all_results.append(payload_data)
         if next_offset is None or next_offset == scroll_offset:
@@ -761,9 +765,19 @@ async def get_rooms_filter(
         ]
     if ac_text:
         all_results = [item for item in all_results if str(item.get("has_ac") or "").strip().lower() == ac_text]
+    if date_from or date_to:
+        def room_is_in_date_range(item: dict) -> bool:
+            try:
+                room_date = datetime.strptime(str(item.get("move_in_date") or ""), "%d/%m/%Y").date()
+            except ValueError:
+                return False
+            return (date_from is None or room_date >= date_from) and (date_to is None or room_date <= date_to)
+
+        all_results = [item for item in all_results if room_is_in_date_range(item)]
 
     all_results.sort(
-        key=lambda item: str(item.get("updated_at") or item.get("created_at") or ""),
+        # Phòng mới tạo hiển thị trước; cập nhật phòng cũ không làm thay đổi thứ tự.
+        key=lambda item: str(item.get("created_at") or ""),
         reverse=True,
     )
     safe_page_size = min(max(page_size, 1), 100)

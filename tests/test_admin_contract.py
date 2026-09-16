@@ -67,7 +67,7 @@ def test_order_status_and_updated_at_are_persisted_and_displayed():
     assert '"status": order.status' in main_source
     assert '"updated_at": vietnam_datetime_iso(order.updated_at)' in main_source
     assert 'id="oStatus"' in html
-    assert "Cập nhật: ${val(o.updated_at)}" in html
+    assert "Cập nhật: ${formatDateTimeVN(o.updated_at)}" in html
 
 
 def test_order_filters_cover_status_phones_and_room_code():
@@ -506,6 +506,18 @@ def test_excel_validation_errors_are_returned_and_rendered_in_admin_modal():
     assert 'print(f"❌ Dòng {current_excel_row}' not in main_source
 
 
+def test_admin_timestamps_are_formatted_as_vietnamese_date_time():
+    html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
+    assert "formatDateTimeVN=value=>" in html
+    assert 'timeZone:"Asia/Ho_Chi_Minh"' in html
+    assert 'second:"2-digit"' in html
+    assert "r.move_in_timestamp" not in html
+    assert "${formatDateTimeVN(r.created_at)}" in html
+    assert "${formatDateTimeVN(r.updated_at)}" in html
+    assert "${formatDateTimeVN(item.created_at)}" in html
+    assert "${formatDateTimeVN(o.viewing_time)}" in html
+
+
 def test_natural_search_overrides_invalid_gemini_extraction():
     services_source = (ROOT / "services.py").read_text(encoding="utf-8")
     assert "def extract_natural_room_search" in services_source
@@ -595,3 +607,35 @@ def test_admin_user_registration_flow_is_available():
     assert "function configureZaloQR()" in html
     assert "function openConfiguredZaloOA()" in html
     assert "ZALO_OA_URL | tojson" in html
+
+
+def test_admin_room_media_update_is_validated_replaced_and_reloaded():
+    html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+
+    assert "function parseMediaUrls(value)" in html
+    assert "await loadRooms();" in html
+    assert "Link ảnh/video không hợp lệ" in html
+    assert "replace_media_urls=bool(point_id)" in main_source
+    assert "def normalize_room_media_urls" in services_source
+    assert "if replace_media_urls:" in services_source
+
+
+def test_admin_rooms_are_sorted_by_created_time():
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    assert 'key=lambda item: str(item.get("created_at") or "")' in main_source
+    assert 'item.get("updated_at") or item.get("created_at")' not in main_source
+
+
+def test_room_only_persists_move_in_date_without_timestamp():
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
+
+    assert '"move_in_date": move_in_date_str' in services_source
+    assert '"move_in_timestamp": move_in_timestamp' not in services_source
+    assert 'key="move_in_timestamp"' not in main_source
+    assert 'datetime.strptime(str(item.get("move_in_date") or ""), "%d/%m/%Y")' in main_source
+    assert 'payload_data.pop("move_in_timestamp", None)' in main_source
+    assert "r.move_in_timestamp" not in html

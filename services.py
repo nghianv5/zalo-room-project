@@ -176,6 +176,19 @@ def apply_media_limit(items: List[str], limit: int = MAX_MEDIA_PER_ROOM) -> List
     values = list(items or [])
     return values if limit <= 0 else values[:limit]
 
+
+def normalize_room_media_urls(value) -> List[str]:
+    """Chuẩn hóa danh sách URL media từ form, AI hoặc dữ liệu cũ trong DB."""
+    if value is None:
+        return []
+    raw_items = re.split(r"[,;\n\r]+", value) if isinstance(value, str) else list(value)
+    normalized = []
+    for item in raw_items:
+        url = str(item or "").strip()
+        if url and url not in normalized:
+            normalized.append(url)
+    return apply_media_limit(normalized)
+
 # Initializing Qdrant Collection & Index
 try:
     if not qdrant_client.collection_exists(collection_name=COLLECTION_NAME):
@@ -404,6 +417,16 @@ class RoomCreateUpdateSchema(BaseModel):
             raise ValueError("Giá trị không được để trống hoặc invalid!")
             
         return val_str
+
+    @validator("media_urls", pre=True)
+    def validate_media_urls(cls, value):
+        values = normalize_room_media_urls(value)
+        invalid = [url for url in values if not is_valid_zalo_media_url(url)]
+        if invalid:
+            raise ValueError(
+                "Link ảnh/video phải là URL HTTPS công khai hợp lệ: " + ", ".join(invalid[:3])
+            )
+        return values
 
 
 class OrderRoomCreateUpdateSchema(BaseModel):
@@ -1701,9 +1724,16 @@ def has_room_update_value(value) -> bool:
     return str(value).strip().lower() not in ROOM_NULL_VALUES
 
 
-def merge_room_partial_update(old_payload: dict, new_data: dict, media_urls: Optional[List[str]] = None) -> dict:
+def merge_room_partial_update(
+    old_payload: dict,
+    new_data: dict,
+    media_urls: Optional[List[str]] = None,
+    replace_media_urls: bool = False,
+) -> dict:
     """Giữ dữ liệu cũ và chỉ ghi đè những trường có giá trị trong yêu cầu cập nhật."""
     merged = dict(old_payload or {})
+    # Trường cũ không còn được lưu; ngày vào ở chỉ dùng move_in_date.
+    merged.pop("move_in_timestamp", None)
     for key, value in dict(new_data or {}).items():
         if key in {"id", "created_at", "updated_at", "move_in_timestamp"}:
             continue
@@ -1713,14 +1743,14 @@ def merge_room_partial_update(old_payload: dict, new_data: dict, media_urls: Opt
     if has_room_update_value(new_data.get("move_in_date")):
         merged.pop("move_in_timestamp", None)
 
-    incoming_media = media_urls if media_urls is not None else new_data.get("media_urls")
-    if incoming_media:
-        if isinstance(incoming_media, str):
-            incoming_media = [item.strip() for item in incoming_media.split(",") if item.strip()]
-        old_media = old_payload.get("media_urls") or []
-        if isinstance(old_media, str):
-            old_media = [item.strip() for item in old_media.split(",") if item.strip()]
-        merged["media_urls"] = apply_media_limit(list(dict.fromkeys(list(old_media) + list(incoming_media))))
+    incoming_media = normalize_room_media_urls(
+        media_urls if media_urls is not None else new_data.get("media_urls")
+    )
+    if replace_media_urls:
+        merged["media_urls"] = incoming_media
+    elif incoming_media:
+        old_media = normalize_room_media_urls(old_payload.get("media_urls"))
+        merged["media_urls"] = apply_media_limit(list(dict.fromkeys(old_media + incoming_media)))
     return merged
 
 
@@ -1877,6 +1907,7 @@ def upsert_room_to_db(
     type_process: str = None,
     landlord_phone: str = None,
     skip_ai_embedding: bool = False,
+    replace_media_urls: bool = False,
 ) -> Optional[str]:
     try:
         data = dict(data or {})
@@ -1927,7 +1958,12 @@ def upsert_room_to_db(
             )
             if not old_records or not old_records[0].payload:
                 return "Không thể tải dữ liệu phòng cũ để cập nhật. Vui lòng thử lại."
-            data = merge_room_partial_update(dict(old_records[0].payload), data, media_urls)
+            data = merge_room_partial_update(
+                dict(old_records[0].payload),
+                data,
+                media_urls,
+                replace_media_urls=replace_media_urls,
+            )
             media_urls = data.get("media_urls") or []
             address = str(data.get("address") or "").strip()
             address_clean = address.lower()
@@ -1946,9 +1982,9 @@ def upsert_room_to_db(
                 return f"❌ Dòng {current_excel_row}: Giá phòng là trường bắt buộc."
             return ROOM_PRICE_REQUIRED
 
-        media_list = media_urls if media_urls is not None else data.get("media_urls", [])
-        if isinstance(media_list, str):
-            media_list = [x.strip() for x in media_list.split(",") if x.strip()]
+        media_list = normalize_room_media_urls(
+            media_urls if media_urls is not None else data.get("media_urls", [])
+        )
 
         # 1. Thu thập và chuẩn hóa dữ liệu tiện ích (Booleans)
         amenities_list = [
@@ -1973,7 +2009,7 @@ def upsert_room_to_db(
         floor_str = f"Tầng {data.get('floor')}" if data.get("floor") else "Chưa rõ tầng"
         room_size_str = f"{data.get('room_size')} m²" if data.get("room_size") else "Chưa rõ diện tích"
         max_occ_str = f"Tối đa {data.get('max_occupants')} người ở" if data.get("max_occupants") else "Không giới hạn / Chưa rõ"
-        move_in_str, normalized_move_in_timestamp = normalize_move_in_date(data.get("move_in_date"))
+        move_in_str = normalize_move_in_date(data.get("move_in_date"))[0]
         status_str = data.get("status", "TRỐNG")
         parking_str = data.get("parking_info", "Chưa rõ thông tin xe")
         other_amenities_str = data.get("other_amenities", "Không có")
@@ -2038,10 +2074,8 @@ def upsert_room_to_db(
         else:
             room_code = str(room_code).strip().upper()
         
-        # Ngày vào ở luôn lưu theo ngày Việt Nam, không kèm giờ/phút/giây.
-        # Nếu người dùng không cung cấp thì cả ngày và timestamp đều để trống.
+        # Ngày vào ở chỉ lưu dạng dd/mm/YYYY, không lưu timestamp dư thừa.
         move_in_date_str = move_in_str
-        move_in_timestamp = normalized_move_in_timestamp
 
         raw_status = data.get("status")
         if raw_status is None or str(raw_status).strip().lower() in ["","none","null","chưa rõ","undefined"]:
@@ -2073,7 +2107,6 @@ def upsert_room_to_db(
             "service_fees": str(data.get("service_fees", "Chưa rõ")),
             "media_urls": media_list,
             "move_in_date": move_in_date_str,
-            "move_in_timestamp": move_in_timestamp,
             "status": status_str,
             "landlord_phone": phone,
             "created_at": created_at,

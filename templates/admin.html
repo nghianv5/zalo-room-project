@@ -382,7 +382,7 @@
               <input id="service_fees" class="input">
             </label>
             <label class="md:col-span-3">
-              URL ảnh/video, cách nhau bằng dấu phẩy
+              URL ảnh/video HTTPS (mỗi link một dòng hoặc cách nhau bằng dấu phẩy)
               <textarea id="media_urls" rows="3" class="input">
               </textarea>
             </label>
@@ -536,10 +536,40 @@
     <script>
       const ZALO_OA_URL={{ ZALO_OA_URL | tojson }},$=id=>document.getElementById(id),roomFields=["room_code","address","room_name","price","floor","room_size","max_occupants","move_in_date","status","landlord_phone","is_private_bathroom","has_ac","has_heater","has_washer","has_fridge","allow_pets","has_balcony","has_window","has_fingerprint_lock","bed","wardrobe","parking_info","other_amenities","service_fees"];
       let rooms=[],orders=[],reports=[],roomPage=1,roomTotal=0,roomTotalPages=1,roomReloadTimer=null;
+      function parseMediaUrls(value) {
+          const raw=Array.isArray(value)?value.join("\n"):String(value??"");
+          const items=[...new Set(raw.split(/[,;\n\r]+/).map(item=>item.trim()).filter(Boolean))];
+          return {
+              valid:items.filter(item=>/^https:\/\/[^\s]+$/i.test(item)),
+              invalid:items.filter(item=>!/^https:\/\/[^\s]+$/i.test(item))
+          }
+      }
       const esc=v=>String(v??"").replace(/[&<>"']/g,c=>( {
           "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"
       }
-      [c])),val=v=>v===null||v===undefined||String(v).trim()===""?"—":esc(v),err=d=>typeof d?.detail==="string"?d.detail:d?.detail?JSON.stringify(d.detail):"Có lỗi xảy ra";
+      [c])),val=v=>v===null||v===undefined||String(v).trim()===""?"—":esc(v),formatDateTimeVN=value=> {
+          if(value===null||value===undefined||String(value).trim()==="")return"—";
+          let date;
+          const raw=String(value).trim();
+          if(/^\d+(?:\.\d+)?$/.test(raw)) {
+              const numeric=Number(raw);
+              date=new Date(numeric<1e12?numeric*1000:numeric)
+          } else {
+              const normalized=/^\d{4}-\d{2}-\d{2}[ T]\d{2}:\d{2}:\d{2}$/.test(raw)
+                  ?raw.replace(" ","T")+"+07:00"
+                  :raw;
+              date=new Date(normalized)
+          }
+          if(Number.isNaN(date.getTime()))return val(value);
+          const parts=new Intl.DateTimeFormat("vi-VN", {
+              timeZone:"Asia/Ho_Chi_Minh",day:"2-digit",month:"2-digit",year:"numeric",
+              hour:"2-digit",minute:"2-digit",second:"2-digit",hourCycle:"h23"
+          }).formatToParts(date).reduce((result,part)=> {
+              result[part.type]=part.value;
+              return result
+          },{});
+          return`${parts.day}/${parts.month}/${parts.year} ${parts.hour}:${parts.minute}:${parts.second}`
+      },err=d=>typeof d?.detail==="string"?d.detail:d?.detail?JSON.stringify(d.detail):"Có lỗi xảy ra";
       async function api(url,opt= {
       }
       ) {
@@ -690,13 +720,13 @@
               return
           }
           $("roomBody").innerHTML=list.map(r=> {
-              let m=(Array.isArray(r.media_urls)?r.media_urls:[]).filter(u=>/^https?:\/\//i.test(String(u)));
+              let m=parseMediaUrls(r.media_urls).valid;
               let mediaItems=m.map(u=> {
                   const safeUrl=esc(u),isVideo=/\.(mp4|mov|webm)(\?|$)/i.test(u)||/\/video\/upload\//i.test(u);
-                  return isVideo?`<div class="rounded-lg border bg-black p-1"><video src="${safeUrl}" controls preload="metadata" class="h-32 w-44 rounded object-contain"></video><div class="bg-white p-1 text-center text-[10px] font-bold">VIDEO</div></div>`:`<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="rounded-lg border bg-white p-1"><img src="${safeUrl}" class="h-32 w-44 rounded object-cover" loading="lazy"><div class="p-1 text-center text-[10px] font-bold">ẢNH</div></a>`
+                  return isVideo?`<div class="rounded-lg border bg-black p-1"><video src="${safeUrl}" controls preload="metadata" class="h-32 w-44 rounded object-contain"></video><div class="bg-white p-1 text-center text-[10px] font-bold">VIDEO</div></div>`:`<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="rounded-lg border bg-white p-1"><img src="${safeUrl}" class="h-32 w-44 rounded object-cover" loading="lazy" onerror="this.classList.add('hidden');this.nextElementSibling.textContent='Ảnh không tải được – mở link để kiểm tra'"><div class="p-1 text-center text-[10px] font-bold">ẢNH</div></a>`
               }).join("");
               const mediaBox=`<div class="rounded-xl border-2 border-blue-200 bg-blue-50 p-2"><div class="mb-2 font-bold text-blue-800">📸 Ảnh/video phòng ${val(r.room_code)} · ${m.length} tệp</div><div class="flex max-w-[600px] flex-wrap gap-2">${mediaItems||'<span class="text-slate-500">Phòng này chưa có ảnh/video</span>'}</div></div>`;
-              return`<tr class="border-t-4 border-slate-300 align-top"><td class="p-3"><input class="roomCheck" type="checkbox" value="${esc(r.id)}" onchange="updateSelected()"></td><td class="p-3"><b class="text-base text-blue-700">${val(r.room_code)}</b><div>${val(r.room_name)}</div><div>${val(r.address)}</div><b class="text-green-700">${val(r.price)} đ</b></td><td class="p-3"><div class="grid grid-cols-2 gap-1"><span>Tầng: <b>${val(r.floor)}</b></span><span>Diện tích: <b>${val(r.room_size)}</b></span><span>WC riêng: <b>${val(r.is_private_bathroom)}</b></span><span>Điều hòa: <b>${val(r.has_ac)}</b></span><span>Nóng lạnh: <b>${val(r.has_heater)}</b></span><span>Máy giặt: <b>${val(r.has_washer)}</b></span><span>Tủ lạnh: <b>${val(r.has_fridge)}</b></span><span>Giường: <b>${val(r.bed)}</b></span><span>Tủ áo: <b>${val(r.wardrobe)}</b></span><span>Thú cưng: <b>${val(r.allow_pets)}</b></span><span>Ban công: <b>${val(r.has_balcony)}</b></span><span>Cửa sổ: <b>${val(r.has_window)}</b></span><span>Vân tay: <b>${val(r.has_fingerprint_lock)}</b></span><span>Để xe: <b>${val(r.parking_info)}</b></span><span>Tối đa: <b>${val(r.max_occupants)}</b></span><span class="col-span-2">Khác: <b>${val(r.other_amenities)}</b></span><span class="col-span-2">Phí: <b>${val(r.service_fees)}</b></span><span>Ngày vào: <b>${val(r.move_in_date)}</b></span><span>Timestamp: <b>${val(r.move_in_timestamp)}</b></span><span>Trạng thái: <b>${val(r.status)}</b></span><span>Chủ nhà: <b>${val(r.landlord_phone)}</b></span></div></td><td class="p-3">${mediaBox}<div class="mt-2">ID: ${val(r.id)}</div><div>Zalo ID: ${val(r.zalo_user_id)}</div><div>Tạo: ${val(r.created_at)}</div><div>Cập nhật: ${val(r.updated_at)}</div><div>Xóa: ${val(r.deleted_at)}</div></td><td class="p-3"><button onclick="editRoom('${esc(r.id)}')" class="rounded bg-blue-100 px-3 py-1">Sửa</button> <button onclick="deleteRoom('${esc(r.id)}')" class="rounded bg-red-100 px-3 py-1">Xóa</button></td></tr>`
+              return`<tr class="border-t-4 border-slate-300 align-top"><td class="p-3"><input class="roomCheck" type="checkbox" value="${esc(r.id)}" onchange="updateSelected()"></td><td class="p-3"><b class="text-base text-blue-700">${val(r.room_code)}</b><div>${val(r.room_name)}</div><div>${val(r.address)}</div><b class="text-green-700">${val(r.price)} đ</b></td><td class="p-3"><div class="grid grid-cols-2 gap-1"><span>Tầng: <b>${val(r.floor)}</b></span><span>Diện tích: <b>${val(r.room_size)}</b></span><span>WC riêng: <b>${val(r.is_private_bathroom)}</b></span><span>Điều hòa: <b>${val(r.has_ac)}</b></span><span>Nóng lạnh: <b>${val(r.has_heater)}</b></span><span>Máy giặt: <b>${val(r.has_washer)}</b></span><span>Tủ lạnh: <b>${val(r.has_fridge)}</b></span><span>Giường: <b>${val(r.bed)}</b></span><span>Tủ áo: <b>${val(r.wardrobe)}</b></span><span>Thú cưng: <b>${val(r.allow_pets)}</b></span><span>Ban công: <b>${val(r.has_balcony)}</b></span><span>Cửa sổ: <b>${val(r.has_window)}</b></span><span>Vân tay: <b>${val(r.has_fingerprint_lock)}</b></span><span>Để xe: <b>${val(r.parking_info)}</b></span><span>Tối đa: <b>${val(r.max_occupants)}</b></span><span class="col-span-2">Khác: <b>${val(r.other_amenities)}</b></span><span class="col-span-2">Phí: <b>${val(r.service_fees)}</b></span><span>Ngày vào: <b>${val(r.move_in_date)}</b></span><span>Trạng thái: <b>${val(r.status)}</b></span><span>Chủ nhà: <b>${val(r.landlord_phone)}</b></span></div></td><td class="p-3">${mediaBox}<div class="mt-2">ID: ${val(r.id)}</div><div>Zalo ID: ${val(r.zalo_user_id)}</div><div>Tạo: ${formatDateTimeVN(r.created_at)}</div><div>Cập nhật: ${formatDateTimeVN(r.updated_at)}</div><div>Xóa: ${formatDateTimeVN(r.deleted_at)}</div></td><td class="p-3"><button onclick="editRoom('${esc(r.id)}')" class="rounded bg-blue-100 px-3 py-1">Sửa</button> <button onclick="deleteRoom('${esc(r.id)}')" class="rounded bg-red-100 px-3 py-1">Xóa</button></td></tr>`
           }
           ).join("")
       }
@@ -758,7 +788,7 @@
               $(k).value=r[k]??""
           }
           );
-          $("media_urls").value=Array.isArray(r?.media_urls)?r.media_urls.join(", "):"";
+          $("media_urls").value=parseMediaUrls(r?.media_urls).valid.join("\n");
           if(!r&&/^0[35789][0-9]{8}$/.test(localStorage.getItem("username")||""))$("landlord_phone").value=localStorage.getItem("username");
           modal("roomModal",true)
       }
@@ -775,7 +805,7 @@
           $("reportTotal").textContent=`${Number(d.total)||0} report`;
           $("reportBody").innerHTML=reports.length?reports.map(item=> {
               const statuses=["MỚI","ĐANG XỬ LÝ","ĐÃ XỬ LÝ","BỎ QUA"].map(status=>`<option ${item.status===status?"selected":""}>${status}</option>`).join("");
-              return`<tr class="border-t align-top"><td class="p-3"><b class="text-red-700">${val(item.room_code)}</b><div>${val(item.room_name)}</div><div>${val(item.address)}</div><div class="mt-1 text-[10px] text-slate-400">ID: ${val(item.room_id)}</div></td><td class="p-3">${val(item.reporter_username)}</td><td class="max-w-md whitespace-pre-wrap p-3">${val(item.content)}</td><td class="p-3"><select class="rounded border p-2">${statuses}</select></td><td class="p-3">Tạo: ${val(item.created_at)}<br>Cập nhật: ${val(item.updated_at)}</td><td class="p-3"><button onclick="updateReportStatus('${esc(item.id)}',this.parentElement.previousElementSibling.previousElementSibling.querySelector('select').value)" class="mb-2 rounded bg-blue-600 px-3 py-1 font-bold text-white">Cập nhật</button><br><button onclick="deleteReport('${esc(item.id)}')" class="rounded bg-red-100 px-3 py-1 text-red-800">Xóa</button></td></tr>`
+              return`<tr class="border-t align-top"><td class="p-3"><b class="text-red-700">${val(item.room_code)}</b><div>${val(item.room_name)}</div><div>${val(item.address)}</div><div class="mt-1 text-[10px] text-slate-400">ID: ${val(item.room_id)}</div></td><td class="p-3">${val(item.reporter_username)}</td><td class="max-w-md whitespace-pre-wrap p-3">${val(item.content)}</td><td class="p-3"><select class="rounded border p-2">${statuses}</select></td><td class="p-3">Tạo: ${formatDateTimeVN(item.created_at)}<br>Cập nhật: ${formatDateTimeVN(item.updated_at)}</td><td class="p-3"><button onclick="updateReportStatus('${esc(item.id)}',this.parentElement.previousElementSibling.previousElementSibling.querySelector('select').value)" class="mb-2 rounded bg-blue-600 px-3 py-1 font-bold text-white">Cập nhật</button><br><button onclick="deleteReport('${esc(item.id)}')" class="rounded bg-red-100 px-3 py-1 text-red-800">Xóa</button></td></tr>`
           }).join(""):'<tr><td colspan="6" class="p-6 text-center">Không có report</td></tr>'
       }
       async function updateReportStatus(id,status) {
@@ -798,7 +828,12 @@
               ;
               roomFields.forEach(k=>p[k]=$(k).value.trim());
               if(!p.room_code)delete p.room_code;
-              p.media_urls=$("media_urls").value.split(",").map(x=>x.trim()).filter(x=>/^https?:\/\//i.test(x));
+              const parsedMedia=parseMediaUrls($("media_urls").value);
+              if(parsedMedia.invalid.length) {
+                  alert(`Link ảnh/video không hợp lệ:\n${parsedMedia.invalid.join("\n")}\n\nVui lòng dùng link HTTPS công khai trực tiếp.`);
+                  return
+              }
+              p.media_urls=parsedMedia.valid;
               let r=await api(id?`/api/rooms?point_id=${encodeURIComponent(id)}`:"/api/rooms", {
                   method:"POST",headers: {
                       "Content-Type":"application/json"
@@ -807,8 +842,8 @@
               }
               ),d=await data(r);
               if(!r.ok)return alert(err(d));
-              modal("roomModal",false);
-              loadRooms()
+              await loadRooms();
+              modal("roomModal",false)
           } finally {
               busy("roomSave",false)
           }
@@ -829,7 +864,7 @@
           $("orderBody").innerHTML=orders.length?orders.map(o=> {
               const userStatusAction=`<div class="flex min-w-[210px] gap-1"><select class="rounded border p-1"><option value="" disabled ${!["ĐÃ XEM","ĐÃ THUÊ"].includes(o.status)?"selected":""}>Chọn trạng thái</option><option ${o.status==="ĐÃ XEM"?"selected":""}>ĐÃ XEM</option><option ${o.status==="ĐÃ THUÊ"?"selected":""}>ĐÃ THUÊ</option></select><button onclick="updateOrderStatus('${esc(o.id)}',this.previousElementSibling.value)" class="rounded bg-emerald-600 px-2 py-1 font-bold text-white">Cập nhật</button></div>`;
               const adminActions=`<button onclick="editOrder('${esc(o.id)}')" class="rounded bg-blue-100 px-3 py-1">Sửa</button> <button onclick="deleteOrder('${esc(o.id)}')" class="rounded bg-red-100 px-3 py-1">Xóa</button>`;
-              return`<tr class="border-t"><td class="p-3 font-bold">${val(o.room_code)}</td><td class="p-3">📞 ${val(o.tenant_phone)}<br>Zalo: ${val(o.tenant_zalo_id)}</td><td class="p-3">📞 ${val(o.landlord_phone)}<br>Zalo: ${val(o.landlord_zalo_id)}</td><td class="p-3">${val(o.viewing_time)}</td><td class="p-3 font-bold text-violet-700">${val(o.status)}</td><td class="p-3">ID: ${val(o.id)}<br>Tạo: ${val(o.created_at)}<br>Cập nhật: ${val(o.updated_at)}</td><td class="p-3">${isSuperAdmin?adminActions:userStatusAction}</td></tr>`
+              return`<tr class="border-t"><td class="p-3 font-bold">${val(o.room_code)}</td><td class="p-3">📞 ${val(o.tenant_phone)}<br>Zalo: ${val(o.tenant_zalo_id)}</td><td class="p-3">📞 ${val(o.landlord_phone)}<br>Zalo: ${val(o.landlord_zalo_id)}</td><td class="p-3">${formatDateTimeVN(o.viewing_time)}</td><td class="p-3 font-bold text-violet-700">${val(o.status)}</td><td class="p-3">ID: ${val(o.id)}<br>Tạo: ${formatDateTimeVN(o.created_at)}<br>Cập nhật: ${formatDateTimeVN(o.updated_at)}</td><td class="p-3">${isSuperAdmin?adminActions:userStatusAction}</td></tr>`
           }).join(""):'<tr><td colspan="7" class="p-6 text-center">Không có đơn đặt phòng</td></tr>'
       }
       function openOrder(o=null) {
