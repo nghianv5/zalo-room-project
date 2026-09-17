@@ -28,6 +28,7 @@ import cloudinary
 import cloudinary.uploader
 import string
 from error_reporting import report_error
+from config import Config
 from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 import redis
@@ -301,6 +302,21 @@ class RoomReport(Base):
     created_at = Column(DateTime, default=vietnam_now, index=True)
     updated_at = Column(DateTime, default=vietnam_now, onupdate=vietnam_now)
 
+
+class RoomPostingBlock(Base):
+    """Quy tắc chặn người dùng tạo/cập nhật phòng theo SĐT hoặc một phần địa chỉ."""
+    __tablename__ = "room_posting_blocks"
+
+    id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
+    block_type = Column(String, index=True, nullable=False)  # PHONE hoặc ADDRESS
+    block_value = Column(String, nullable=False)
+    normalized_value = Column(String, index=True, nullable=False)
+    reason = Column(String, nullable=True)
+    is_active = Column(Integer, nullable=False, default=1)
+    created_by = Column(String, nullable=False)
+    created_at = Column(DateTime, default=vietnam_now, index=True)
+    updated_at = Column(DateTime, default=vietnam_now, onupdate=vietnam_now)
+
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     id = Column(String, primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -376,6 +392,27 @@ class RoomReportStatusSchema(BaseModel):
         clean_value = str(value or "").strip().upper()
         if clean_value not in {"MỚI", "ĐANG XỬ LÝ", "ĐÃ XỬ LÝ", "BỎ QUA"}:
             raise ValueError("Trạng thái report không hợp lệ.")
+        return clean_value
+
+
+class RoomPostingBlockSchema(BaseModel):
+    block_type: str
+    block_value: str = Field(..., min_length=2, max_length=255)
+    reason: Optional[str] = Field(default=None, max_length=500)
+    is_active: bool = True
+
+    @validator("block_type", pre=True)
+    def validate_block_type(cls, value):
+        clean_value = str(value or "").strip().upper()
+        if clean_value not in {"PHONE", "ADDRESS"}:
+            raise ValueError("Loại chặn phải là PHONE hoặc ADDRESS.")
+        return clean_value
+
+    @validator("block_value", pre=True)
+    def validate_block_value(cls, value):
+        clean_value = str(value or "").strip()
+        if len(clean_value) < 2:
+            raise ValueError("Giá trị chặn không được để trống.")
         return clean_value
 
 class RoomCreateUpdateSchema(BaseModel):
@@ -1086,6 +1123,11 @@ def format_room_search_message(room: dict, position: int, include_action_instruc
 def send_zalo_room_action_buttons(user_id: str, room_code: str) -> bool:
     """Gửi button và luôn gửi câu lệnh chữ để Zalo PC cũng thao tác được."""
     normalized_code = str(room_code or "").strip().upper()
+    if str(user_id) != Config.ZALO_ADMIN_ID:
+        action_room = get_room_for_zalo_action(normalized_code)
+        action_block = get_room_access_block(action_room)
+        if action_block:
+            return send_zalo_message(user_id, format_room_access_block_message(action_block))
     fallback_text = (
         f"📅 Đặt lịch xem phòng: nhắn “XEM PHÒNG {normalized_code}”\n"
         f"🚩 Report phòng: nhắn “REPORT PHÒNG {normalized_code}”"
@@ -1172,6 +1214,9 @@ def get_room_for_zalo_action(room_code: str) -> Optional[dict]:
     room = dict(records[0].payload)
     room["id"] = str(records[0].id)
     room["room_code"] = normalized_code
+    access_block = get_room_access_block(room)
+    room["posting_blocked"] = bool(access_block)
+    room["posting_block_reason"] = str((access_block or {}).get("reason") or "")
     return room
 
 
@@ -1199,6 +1244,8 @@ def start_zalo_room_report(user_id: str, room_code: str) -> str:
         return "⚠️ Chưa thể mở report lúc này. Bạn vui lòng thử lại sau."
     if not room:
         return f"❌ Không tìm thấy phòng có mã {str(room_code).strip().upper()}."
+    if str(user_id) != Config.ZALO_ADMIN_ID and room.get("posting_blocked"):
+        return format_room_access_block_message({"reason": room.get("posting_block_reason")})
 
     pending_data = {
         "room_code": room["room_code"],
@@ -1248,6 +1295,9 @@ def submit_zalo_room_report(db: Session, user_id: str, room_code: str, content: 
         if not room:
             clear_pending_zalo_room_report(user_id)
             return f"❌ Phòng {str(room_code).strip().upper()} không còn tồn tại."
+        if str(user_id) != Config.ZALO_ADMIN_ID and room.get("posting_blocked"):
+            clear_pending_zalo_room_report(user_id)
+            return format_room_access_block_message({"reason": room.get("posting_block_reason")})
         reporter = get_phone_by_user_id(db, str(user_id)) or f"ZALO:{user_id}"
         room_report = RoomReport(
             room_id=room["id"],
@@ -1277,11 +1327,15 @@ def submit_zalo_room_report(db: Session, user_id: str, room_code: str, content: 
 
 def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
     """Gửi mỗi phòng thành một cụm riêng và hiển thị toàn bộ media của phòng."""
-    rooms = list(search_results or [])[:MAX_SEARCH_ROOMS]
+    candidate_rooms = list(search_results or [])
+    if str(user_id) != Config.ZALO_ADMIN_ID:
+        rules = get_active_room_posting_blocks()
+        candidate_rooms = [room for room in candidate_rooms if not get_room_access_block(room, rules)]
+    rooms = candidate_rooms[:MAX_SEARCH_ROOMS]
     if not rooms:
-        return False
+        return send_zalo_message(user_id, "Dạ chưa tìm thấy phòng đang khả dụng phù hợp với yêu cầu của bạn.")
 
-    total_found = len(search_results)
+    total_found = len(candidate_rooms)
     intro = (
         f"🔎 Tìm thấy {total_found} phòng phù hợp. "
         f"Hiển thị {len(rooms)}/{total_found} phòng:"
@@ -1900,6 +1954,127 @@ def can_update_amenities_without_ai(message_text: str) -> bool:
 ROOM_PRICE_REQUIRED = "ROOM_PRICE_REQUIRED"
 
 
+def normalize_room_posting_block_value(block_type: str, value: str) -> str:
+    clean_type = str(block_type or "").strip().upper()
+    if clean_type == "PHONE":
+        phone = format_national_phone(value)
+        if not re.fullmatch(r"0[35789][0-9]{8}", phone or ""):
+            raise ValueError("Số điện thoại chặn phải là SĐT Việt Nam hợp lệ gồm 10 số.")
+        return phone
+    if clean_type == "ADDRESS":
+        normalized = normalize_block_address(value)
+        if len(normalized) < 3:
+            raise ValueError("Địa chỉ chặn phải có ít nhất 3 ký tự có nghĩa.")
+        return normalized
+    raise ValueError("Loại chặn phải là PHONE hoặc ADDRESS.")
+
+
+def normalize_block_address(value: str) -> str:
+    """Chuẩn hóa địa chỉ không phân biệt hoa/thường, dấu câu và dấu tiếng Việt."""
+    normalized = normalize_room_address(value)
+    normalized = unicodedata.normalize("NFD", normalized)
+    normalized = "".join(char for char in normalized if unicodedata.category(char) != "Mn")
+    return normalized.replace("đ", "d")
+
+
+def is_super_admin_phone(phone: str, db: Optional[Session] = None) -> bool:
+    own_session = db is None
+    session = db or SessionLocal()
+    try:
+        account = session.query(UserWeb).filter(UserWeb.user_id == "ADMIN_SUPER").first()
+        return bool(
+            account
+            and format_national_phone(account.phone) == format_national_phone(phone)
+        )
+    finally:
+        if own_session:
+            session.close()
+
+
+def find_room_posting_block(phone: str, address: str, db: Optional[Session] = None) -> Optional[dict]:
+    """SĐT khớp chính xác; địa chỉ khớp khi chứa cụm địa chỉ bị chặn."""
+    own_session = db is None
+    session = db or SessionLocal()
+    try:
+        normalized_phone = format_national_phone(phone)
+        normalized_address = normalize_block_address(address)
+        rules = (
+            session.query(RoomPostingBlock)
+            .filter(RoomPostingBlock.is_active == 1)
+            .order_by(RoomPostingBlock.created_at.desc())
+            .all()
+        )
+        return match_room_posting_block(phone, address, rules)
+    finally:
+        if own_session:
+            session.close()
+
+
+def match_room_posting_block(phone: str, address: str, rules) -> Optional[dict]:
+    """So khớp payload phòng với danh sách rule đã tải sẵn, tránh truy vấn DB lặp."""
+    normalized_phone = format_national_phone(phone)
+    normalized_address = normalize_block_address(address)
+    for rule in rules or []:
+        if not bool(rule.is_active):
+            continue
+        matched = (
+            rule.block_type == "PHONE"
+            and rule.normalized_value == normalized_phone
+        ) or (
+            rule.block_type == "ADDRESS"
+            and bool(rule.normalized_value)
+            and rule.normalized_value in normalized_address
+        )
+        if matched:
+            return {
+                "id": rule.id,
+                "block_type": rule.block_type,
+                "block_value": rule.block_value,
+                "reason": rule.reason or "",
+            }
+    return None
+
+
+def get_active_room_posting_blocks(db: Optional[Session] = None):
+    own_session = db is None
+    session = db or SessionLocal()
+    try:
+        return (
+            session.query(RoomPostingBlock)
+            .filter(RoomPostingBlock.is_active == 1)
+            .order_by(RoomPostingBlock.created_at.desc())
+            .all()
+        )
+    finally:
+        if own_session:
+            session.close()
+
+
+def get_room_access_block(room: dict, rules=None) -> Optional[dict]:
+    """Trả quy tắc đang khóa một phòng dựa trên chủ nhà hoặc địa chỉ."""
+    if not room:
+        return None
+    if rules is None:
+        return find_room_posting_block(room.get("landlord_phone"), room.get("address"))
+    return match_room_posting_block(
+        room.get("landlord_phone"),
+        room.get("address"),
+        rules,
+    )
+
+
+def format_room_posting_block_message(rule: dict) -> str:
+    reason = str((rule or {}).get("reason") or "").strip()
+    message = "Bạn đang bị chặn tạo mới hoặc cập nhật thông tin phòng. Vui lòng liên hệ quản trị viên."
+    return f"{message} Lý do: {reason}" if reason else message
+
+
+def format_room_access_block_message(rule: dict) -> str:
+    reason = str((rule or {}).get("reason") or "").strip()
+    message = "⛔ Phòng này đang bị khóa nên không thể xem, đặt lịch hoặc report."
+    return f"{message} Lý do: {reason}" if reason else message
+
+
 def is_missing_required_room_price(value) -> bool:
     """Nhận diện giá bị thiếu do người dùng hoặc AI trả về giá trị rỗng."""
     if value is None:
@@ -1917,6 +2092,7 @@ def upsert_room_to_db(
     landlord_phone: str = None,
     skip_ai_embedding: bool = False,
     replace_media_urls: bool = False,
+    bypass_posting_block: bool = False,
 ) -> Optional[str]:
     try:
         data = dict(data or {})
@@ -1977,6 +2153,11 @@ def upsert_room_to_db(
             address = str(data.get("address") or "").strip()
             address_clean = address.lower()
             room_name = str(data.get("room_name") or "Phòng trọ").strip()
+
+        if not bypass_posting_block and not is_super_admin_phone(phone):
+            posting_block = find_room_posting_block(phone, address_clean)
+            if posting_block:
+                return format_room_posting_block_message(posting_block)
         
         if not address_clean:
             if type_process == "NOT_EXCEL":
@@ -2585,6 +2766,7 @@ def process_excel_file(file_url: str, sender_id: str) -> str:
                     type_process="EXCEL",
                     landlord_phone=landlord_phone,
                     skip_ai_embedding=not used_ai,
+                    bypass_posting_block=str(sender_id) == Config.ZALO_ADMIN_ID,
                 )
                 
                 if message == "SUCCESS":
@@ -2743,6 +2925,7 @@ def process_zalo_ai_logic(
             media_urls=None,
             type_process="NOT_EXCEL",
             landlord_phone=phone,
+            bypass_posting_block=str(user_id) == Config.ZALO_ADMIN_ID,
         )
         if result == "SUCCESS":
             changed_fields = ", ".join(sorted(set(direct_updates) - {"room_code"}))
@@ -3104,6 +3287,7 @@ def process_zalo_ai_logic(
                         point_id=existing_point_id,
                         type_process="NOT_EXCEL",
                         landlord_phone=phone,
+                        bypass_posting_block=str(user_id) == Config.ZALO_ADMIN_ID,
                     )
                     if message == "SUCCESS":
                         get_get_and_clear_pending_media(user_id)
@@ -3210,6 +3394,9 @@ def process_room_booking(tenant_zalo_id: str, room_code: str, raw_message: str, 
 
 
     room_data = records[0].payload
+    access_block = get_room_access_block(room_data)
+    if str(tenant_zalo_id) != Config.ZALO_ADMIN_ID and access_block:
+        return format_room_access_block_message(access_block)
     landlord_phone = room_data.get("landlord_phone", "")
     landlord_zalo_id = get_user_id_by_phone(db, room_data.get("landlord_phone", "")) # lấy id chủ nhà
     room_address = room_data.get("address", "Chưa rõ")

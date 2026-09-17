@@ -224,6 +224,7 @@ def delete_selected_rooms_from_web(
             )
 
         unauthorized_ids = []
+        blocked_ids = []
         for room_id in room_ids:
             qdrant_room = qdrant_by_id.get(room_id)
             mirror_room = mirror_by_id.get(room_id)
@@ -234,10 +235,22 @@ def delete_selected_rooms_from_web(
             )
             if user.role != "SUPER_ADMIN" and owner != user.username:
                 unauthorized_ids.append(room_id)
+            room_payload = (
+                dict(qdrant_room.payload)
+                if qdrant_room
+                else dict(mirror_room.payload or {})
+            )
+            if user.role != "SUPER_ADMIN" and get_room_access_block(room_payload):
+                blocked_ids.append(room_id)
         if unauthorized_ids:
             raise HTTPException(
                 status_code=403,
                 detail="Bạn không có quyền xóa một hoặc nhiều phòng đã chọn.",
+            )
+        if blocked_ids:
+            raise HTTPException(
+                status_code=403,
+                detail="Một hoặc nhiều phòng đang bị khóa nên không thể thao tác.",
             )
 
         qdrant_ids = list(qdrant_by_id)
@@ -295,6 +308,9 @@ def delete_room_from_web(
         owner = qdrant_room.payload.get("landlord_phone") if qdrant_room else mirror_room.landlord_phone
         if user.role != "SUPER_ADMIN" and owner != user.username:
             raise HTTPException(status_code=403, detail="Bạn không có quyền xóa phòng này.")
+        room_payload = dict(qdrant_room.payload) if qdrant_room else dict(mirror_room.payload or {})
+        if user.role != "SUPER_ADMIN" and get_room_access_block(room_payload):
+            raise HTTPException(status_code=403, detail="Phòng đang bị khóa nên không thể thao tác.")
 
         if qdrant_room:
             qdrant_client.delete(
@@ -403,6 +419,115 @@ def delete_room_report(
     return {"status": "success", "message": "Đã xóa report."}
 
 
+def _serialize_room_posting_block(item: RoomPostingBlock) -> dict:
+    return {
+        "id": item.id,
+        "block_type": item.block_type,
+        "block_value": item.block_value,
+        "reason": item.reason or "",
+        "is_active": bool(item.is_active),
+        "created_by": item.created_by,
+        "created_at": vietnam_datetime_iso(item.created_at),
+        "updated_at": vietnam_datetime_iso(item.updated_at),
+    }
+
+
+@app.get("/api/admin/room-post-blocks")
+def list_room_posting_blocks(
+    block_type: Optional[str] = None,
+    query: Optional[str] = None,
+    user: Principal = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    statement = db.query(RoomPostingBlock)
+    if block_type:
+        statement = statement.filter(RoomPostingBlock.block_type == block_type.strip().upper())
+    if query:
+        statement = statement.filter(RoomPostingBlock.block_value.ilike(f"%{query.strip()}%"))
+    items = statement.order_by(RoomPostingBlock.created_at.desc()).limit(500).all()
+    return {"data": [_serialize_room_posting_block(item) for item in items], "total": len(items)}
+
+
+@app.post("/api/admin/room-post-blocks")
+def create_room_posting_block(
+    data: RoomPostingBlockSchema,
+    user: Principal = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    try:
+        normalized_value = normalize_room_posting_block_value(data.block_type, data.block_value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    duplicate = db.query(RoomPostingBlock).filter(
+        RoomPostingBlock.block_type == data.block_type,
+        RoomPostingBlock.normalized_value == normalized_value,
+    ).first()
+    if duplicate:
+        raise HTTPException(status_code=409, detail="Quy tắc chặn này đã tồn tại.")
+    item = RoomPostingBlock(
+        block_type=data.block_type,
+        block_value=data.block_value.strip(),
+        normalized_value=normalized_value,
+        reason=str(data.reason or "").strip() or None,
+        is_active=1 if data.is_active else 0,
+        created_by=user.username,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    write_audit_log(user.username, "ROOM_POST_BLOCK_CREATE", item.id, _serialize_room_posting_block(item))
+    return {"status": "success", "message": "Đã thêm quy tắc chặn.", "data": _serialize_room_posting_block(item)}
+
+
+@app.patch("/api/admin/room-post-blocks/{block_id}")
+def update_room_posting_block(
+    block_id: str,
+    data: RoomPostingBlockSchema,
+    user: Principal = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    item = db.query(RoomPostingBlock).filter(RoomPostingBlock.id == block_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Không tìm thấy quy tắc chặn.")
+    try:
+        normalized_value = normalize_room_posting_block_value(data.block_type, data.block_value)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    duplicate = db.query(RoomPostingBlock).filter(
+        RoomPostingBlock.id != block_id,
+        RoomPostingBlock.block_type == data.block_type,
+        RoomPostingBlock.normalized_value == normalized_value,
+    ).first()
+    if duplicate:
+        raise HTTPException(status_code=409, detail="Quy tắc chặn này đã tồn tại.")
+    item.block_type = data.block_type
+    item.block_value = data.block_value.strip()
+    item.normalized_value = normalized_value
+    item.reason = str(data.reason or "").strip() or None
+    item.is_active = 1 if data.is_active else 0
+    item.updated_at = vietnam_now()
+    db.commit()
+    db.refresh(item)
+    write_audit_log(user.username, "ROOM_POST_BLOCK_UPDATE", item.id, _serialize_room_posting_block(item))
+    return {"status": "success", "message": "Đã cập nhật quy tắc chặn.", "data": _serialize_room_posting_block(item)}
+
+
+@app.delete("/api/admin/room-post-blocks/{block_id}")
+def delete_room_posting_block(
+    block_id: str,
+    user: Principal = Depends(require_admin),
+    db: Session = Depends(get_db),
+):
+    item = db.query(RoomPostingBlock).filter(RoomPostingBlock.id == block_id).first()
+    if not item:
+        raise HTTPException(status_code=404, detail="Không tìm thấy quy tắc chặn.")
+    details = _serialize_room_posting_block(item)
+    db.delete(item)
+    db.commit()
+    write_audit_log(user.username, "ROOM_POST_BLOCK_DELETE", block_id, details)
+    return {"status": "success", "message": "Đã xóa quy tắc chặn."}
+
+
 @app.post("/api/rooms")
 async def save_or_update_room(
     data: RoomCreateUpdateSchema, 
@@ -434,6 +559,7 @@ async def save_or_update_room(
             media_urls=room_dict.get("media_urls", []),
             type_process="NOT_EXCEL",
             replace_media_urls=bool(point_id),
+            bypass_posting_block=user.role == "SUPER_ADMIN",
         )
         
         if success == "SUCCESS":
@@ -644,6 +770,7 @@ async def upload_excel_rooms(
                     type_process="EXCEL",
                     landlord_phone=excel_owner_phone,
                     skip_ai_embedding=not used_ai,
+                    bypass_posting_block=user.role == "SUPER_ADMIN",
                 )
             except Exception:
                 failed_rows_details.append({
@@ -712,7 +839,8 @@ async def get_rooms_filter(
     page: int = 1,
     page_size: int = 25,
     include_deleted: bool = False,
-    user: Principal = Depends(get_current_user)
+    user: Principal = Depends(get_current_user),
+    db: Session = Depends(get_db),
 ):
     must_conditions = []
     must_not_conditions = []
@@ -814,6 +942,13 @@ async def get_rooms_filter(
 
         all_results = [item for item in all_results if room_is_in_date_range(item)]
 
+    active_block_rules = get_active_room_posting_blocks(db)
+    for room in all_results:
+        access_block = get_room_access_block(room, active_block_rules)
+        room["posting_blocked"] = bool(access_block)
+        room["posting_block_reason"] = str((access_block or {}).get("reason") or "")
+        room["can_manage"] = user.role == "SUPER_ADMIN" or not bool(access_block)
+
     all_results.sort(
         # Phòng mới tạo hiển thị trước; cập nhật phòng cũ không làm thay đổi thứ tự.
         key=lambda item: str(item.get("created_at") or ""),
@@ -849,6 +984,27 @@ def _serialize_order(order: OrderRoom) -> dict:
         "created_at": vietnam_datetime_iso(order.created_at),
         "updated_at": vietnam_datetime_iso(order.updated_at),
     }
+
+
+def _serialize_order_with_room_access(
+    order: OrderRoom,
+    user: Principal,
+    room_payloads: dict,
+    active_block_rules,
+) -> dict:
+    data = _serialize_order(order)
+    code = str(order.room_code or "").strip().upper()
+    room_data = dict(room_payloads.get(code) or {})
+    # Đơn vẫn phải hiển thị khi phòng đã mất khỏi Qdrant/room_records.
+    # SĐT chủ nhà trên order vẫn đủ để áp dụng quy tắc chặn theo số điện thoại.
+    room_data.setdefault("room_code", code)
+    room_data.setdefault("landlord_phone", order.landlord_phone or "")
+    room_data.setdefault("address", "")
+    access_block = get_room_access_block(room_data, active_block_rules)
+    data["room_blocked"] = bool(access_block)
+    data["room_block_reason"] = str((access_block or {}).get("reason") or "")
+    data["can_manage"] = user.role == "SUPER_ADMIN" or not bool(access_block)
+    return data
 
 
 def _get_room_by_code(room_code: str) -> dict:
@@ -912,7 +1068,14 @@ def get_admin_orders(
 ):
     query = db.query(OrderRoom)
     if user.role != "SUPER_ADMIN":
-        query = query.filter(OrderRoom.landlord_phone == _normalise_principal_phone(user))
+        principal_phone = _normalise_principal_phone(user)
+        # Tương thích đơn cũ từng lưu SĐT ở dạng 0xxx, 84xxx hoặc +84xxx.
+        phone_variants = {
+            principal_phone,
+            f"84{principal_phone[1:]}",
+            f"+84{principal_phone[1:]}",
+        }
+        query = query.filter(OrderRoom.landlord_phone.in_(phone_variants))
     if room_code:
         query = query.filter(OrderRoom.room_code.ilike(f"%{room_code.strip()}%"))
     if tenant_phone:
@@ -926,9 +1089,42 @@ def get_admin_orders(
         query = query.filter(OrderRoom.status == normalized_status)
     safe_limit = min(max(limit, 1), 200)
     safe_offset = max(offset, 0)
-    total = query.count()
-    orders = query.order_by(OrderRoom.created_at.desc()).offset(safe_offset).limit(safe_limit).all()
-    return {"data": [_serialize_order(item) for item in orders], "total": total, "limit": safe_limit, "offset": safe_offset}
+    ordered_query = query.order_by(OrderRoom.created_at.desc())
+    candidate_orders = ordered_query.all() if user.role != "SUPER_ADMIN" else []
+    orders_for_room_lookup = candidate_orders if user.role != "SUPER_ADMIN" else ordered_query.offset(safe_offset).limit(safe_limit).all()
+    room_codes = list({str(item.room_code or "").strip().upper() for item in orders_for_room_lookup if item.room_code})
+    room_records = (
+        db.query(RoomRecord).filter(RoomRecord.room_code.in_(room_codes)).all()
+        if room_codes else []
+    )
+    room_payloads = {
+        str(record.room_code or "").strip().upper(): dict(record.payload or {})
+        for record in room_records
+    }
+    active_block_rules = get_active_room_posting_blocks(db)
+    if user.role != "SUPER_ADMIN":
+        visible_orders = []
+        for item in candidate_orders:
+            code = str(item.room_code or "").strip().upper()
+            room_data = dict(room_payloads.get(code) or {})
+            room_data.setdefault("landlord_phone", item.landlord_phone or "")
+            room_data.setdefault("address", "")
+            if not get_room_access_block(room_data, active_block_rules):
+                visible_orders.append(item)
+        total = len(visible_orders)
+        orders = visible_orders[safe_offset:safe_offset + safe_limit]
+    else:
+        total = query.count()
+        orders = orders_for_room_lookup
+    return {
+        "data": [
+            _serialize_order_with_room_access(item, user, room_payloads, active_block_rules)
+            for item in orders
+        ],
+        "total": total,
+        "limit": safe_limit,
+        "offset": safe_offset,
+    }
 
 
 @app.post("/api/admin/orders")
@@ -1002,6 +1198,13 @@ def update_order_status(
     order = query.first()
     if not order:
         raise HTTPException(status_code=404, detail="Không tìm thấy đơn đặt phòng.")
+    if user.role != "SUPER_ADMIN":
+        room_data = _get_room_by_code(order.room_code)
+        if get_room_access_block(room_data):
+            raise HTTPException(
+                status_code=403,
+                detail="Phòng đang bị khóa nên không thể thao tác quản lý đặt phòng.",
+            )
     order.status = data.status
     order.updated_at = vietnam_now()
     try:
@@ -1103,7 +1306,13 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                         phone_reply = f"✅ Cảm ơn bạn! Hệ thống đã ghi nhận thành công Số điện thoại: {extracted_phone}. Mời bạn đăng thông tin phòng."
                         if pending_room:
                             pending_media = get_pending_media(str(sender_id))
-                            result = upsert_room_to_db(pending_room, media_urls=pending_media, type_process="NOT_EXCEL", landlord_phone=extracted_phone)
+                            result = upsert_room_to_db(
+                                pending_room,
+                                media_urls=pending_media,
+                                type_process="NOT_EXCEL",
+                                landlord_phone=extracted_phone,
+                                bypass_posting_block=str(sender_id) == Config.ZALO_ADMIN_ID,
+                            )
                             if result == "SUCCESS":
                                 clear_pending_room(str(sender_id))
                                 get_get_and_clear_pending_media(str(sender_id))

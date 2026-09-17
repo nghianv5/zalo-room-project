@@ -51,6 +51,9 @@
             <button id="reportsTab" onclick="showPage('reports')" class="hidden rounded bg-red-600 px-3 py-2 text-xs font-bold text-white">
               🚩 Report phòng
             </button>
+            <button id="postingBlocksTab" onclick="showPage('postingBlocks')" class="hidden rounded bg-orange-600 px-3 py-2 text-xs font-bold text-white">
+              ⛔ Chặn đăng phòng
+            </button>
             <button onclick="openExcelModal()" class="rounded bg-emerald-600 px-3 py-2 text-xs font-bold text-white">
               📊 Nhập Excel
             </button>
@@ -250,6 +253,45 @@
               </tr>
             </thead>
             <tbody id="reportBody"></tbody>
+          </table>
+        </div>
+      </section>
+      <section id="postingBlocksPage" class="hidden">
+        <div class="mb-4 rounded-2xl bg-white p-4 shadow">
+          <div class="mb-3 flex items-center justify-between">
+            <div>
+              <b>Quản lý chặn đăng phòng</b>
+              <p class="text-xs text-slate-500">Chặn cả tạo mới và cập nhật phòng trên web, Excel và Zalo. Super Admin luôn được miễn chặn.</p>
+            </div>
+            <span id="postingBlockTotal" class="text-sm text-slate-500">0 quy tắc</span>
+          </div>
+          <form onsubmit="savePostingBlock(event)" class="grid gap-2 md:grid-cols-5">
+            <input id="postingBlockId" type="hidden">
+            <select id="postingBlockType" onchange="updatePostingBlockPlaceholder()" class="rounded border p-2" required>
+              <option value="PHONE">Chặn theo SĐT</option>
+              <option value="ADDRESS">Chặn theo địa chỉ</option>
+            </select>
+            <input id="postingBlockValue" class="rounded border p-2" required placeholder="SĐT 10 số">
+            <input id="postingBlockReason" class="rounded border p-2" placeholder="Lý do chặn">
+            <label class="flex items-center gap-2 rounded border p-2"><input id="postingBlockActive" type="checkbox" checked> Đang áp dụng</label>
+            <div class="flex gap-2">
+              <button id="postingBlockSave" class="flex-1 rounded bg-orange-600 p-2 font-bold text-white">Thêm quy tắc</button>
+              <button type="button" onclick="resetPostingBlockForm()" class="rounded border px-3">Hủy</button>
+            </div>
+          </form>
+          <div class="mt-3 grid gap-2 md:grid-cols-3">
+            <select id="postingBlockFilterType" onchange="loadPostingBlocks()" class="rounded border p-2">
+              <option value="">Tất cả loại chặn</option>
+              <option value="PHONE">Số điện thoại</option>
+              <option value="ADDRESS">Địa chỉ</option>
+            </select>
+            <input id="postingBlockQuery" oninput="schedulePostingBlockReload()" class="rounded border p-2" placeholder="Tìm SĐT hoặc địa chỉ">
+          </div>
+        </div>
+        <div class="overflow-x-auto rounded-2xl bg-white shadow">
+          <table class="w-full min-w-[950px] text-left text-xs">
+            <thead class="bg-orange-800 text-white"><tr><th class="p-3">Loại</th><th class="p-3">Giá trị chặn</th><th class="p-3">Lý do</th><th class="p-3">Trạng thái</th><th class="p-3">Thời gian</th><th class="p-3">Thao tác</th></tr></thead>
+            <tbody id="postingBlockBody"></tbody>
           </table>
         </div>
       </section>
@@ -532,7 +574,7 @@
     </style>
     <script>
       const ZALO_OA_URL={{ ZALO_OA_URL | tojson }},$=id=>document.getElementById(id),roomFields=["room_code","address","room_name","price","floor","room_size","max_occupants","move_in_date","status","landlord_phone","is_private_bathroom","has_ac","has_heater","has_washer","has_fridge","allow_pets","has_balcony","has_window","has_fingerprint_lock","bed","wardrobe","parking_info","other_amenities","service_fees"];
-      let rooms=[],orders=[],reports=[],roomPage=1,roomTotal=0,roomTotalPages=1,roomReloadTimer=null;
+      let rooms=[],orders=[],reports=[],postingBlocks=[],roomPage=1,roomTotal=0,roomTotalPages=1,roomReloadTimer=null,postingBlockReloadTimer=null;
       const booleanRoomFilterDefinitions=[
           ["is_private_bathroom","fPrivateBathroom","WC riêng"],
           ["has_ac","fHasAC","Điều hòa"],
@@ -653,6 +695,7 @@
               $("loginInfo").textContent=`${localStorage.getItem("adminUsername")} · ${role}`;
               $("ordersTab").classList.remove("hidden");
               $("reportsTab").classList.toggle("hidden",role!=="SUPER_ADMIN");
+              $("postingBlocksTab").classList.toggle("hidden",role!=="SUPER_ADMIN");
               $("addOrderBtn").classList.toggle("hidden",role!=="SUPER_ADMIN");
               $("ofLandlord").readOnly=role!=="SUPER_ADMIN";
               $("ofLandlord").value=role!=="SUPER_ADMIN"?(localStorage.getItem("username")||""):"";
@@ -687,9 +730,11 @@
           $("roomsPage").classList.toggle("hidden",p!=="rooms");
           $("ordersPage").classList.toggle("hidden",p!=="orders");
           $("reportsPage").classList.toggle("hidden",p!=="reports");
+          $("postingBlocksPage").classList.toggle("hidden",p!=="postingBlocks");
           if(p==="rooms")loadRooms();
           else if(p==="orders")loadOrders();
-          else if(p==="reports")loadReports()
+          else if(p==="reports")loadReports();
+          else if(p==="postingBlocks")loadPostingBlocks()
       }
       async function loadRooms(resetPage=false) {
           if(resetPage)roomPage=1;
@@ -764,10 +809,23 @@
                   const safeUrl=esc(u),isVideo=/\.(mp4|mov|webm)(\?|$)/i.test(u)||/\/video\/upload\//i.test(u);
                   return isVideo?`<div class="rounded-lg border bg-black p-1"><video src="${safeUrl}" controls preload="metadata" class="h-32 w-44 rounded object-contain"></video><div class="bg-white p-1 text-center text-[10px] font-bold">VIDEO</div></div>`:`<a href="${safeUrl}" target="_blank" rel="noopener noreferrer" class="rounded-lg border bg-white p-1"><img src="${safeUrl}" class="h-32 w-44 rounded object-cover" loading="lazy" onerror="this.classList.add('hidden');this.nextElementSibling.textContent='Ảnh không tải được – mở link để kiểm tra'"><div class="p-1 text-center text-[10px] font-bold">ẢNH</div></a>`
               }).join("");
-              const mediaBox=`<div class="rounded-xl border-2 border-blue-200 bg-blue-50 p-2"><div class="mb-2 font-bold text-blue-800">📸 Ảnh/video phòng ${val(r.room_code)} · ${m.length} tệp</div><div class="flex max-w-[600px] flex-wrap gap-2">${mediaItems||'<span class="text-slate-500">Phòng này chưa có ảnh/video</span>'}</div></div>`;
+              const blockNotice=r.posting_blocked?`<div class="mb-2 rounded-lg border border-red-300 bg-red-100 p-2 font-bold text-red-800">⛔ Phòng đang bị khóa. User chỉ được xem thông tin, không thể thao tác.${r.posting_block_reason?`<br>Lý do: ${val(r.posting_block_reason)}`:""}</div>`:"";
+              const mediaBox=`${blockNotice}<div class="rounded-xl border-2 border-blue-200 bg-blue-50 p-2"><div class="mb-2 font-bold text-blue-800">📸 Ảnh/video phòng ${val(r.room_code)} · ${m.length} tệp</div><div class="flex max-w-[600px] flex-wrap gap-2">${mediaItems||'<span class="text-slate-500">Phòng này chưa có ảnh/video</span>'}</div></div>`;
               return`<tr class="border-t-4 border-slate-300 align-top"><td class="p-3"><input class="roomCheck" type="checkbox" value="${esc(r.id)}" onchange="updateSelected()"></td><td class="p-3"><b class="text-base text-blue-700">${val(r.room_code)}</b><div>${val(r.room_name)}</div><div>${val(r.address)}</div><b class="text-green-700">${val(r.price)} đ</b></td><td class="p-3"><div class="grid grid-cols-2 gap-1"><span>Tầng: <b>${val(r.floor)}</b></span><span>Diện tích: <b>${val(r.room_size)}</b></span><span>WC riêng: <b>${val(r.is_private_bathroom)}</b></span><span>Điều hòa: <b>${val(r.has_ac)}</b></span><span>Nóng lạnh: <b>${val(r.has_heater)}</b></span><span>Máy giặt: <b>${val(r.has_washer)}</b></span><span>Tủ lạnh: <b>${val(r.has_fridge)}</b></span><span>Giường: <b>${val(r.bed)}</b></span><span>Tủ áo: <b>${val(r.wardrobe)}</b></span><span>Thú cưng: <b>${val(r.allow_pets)}</b></span><span>Ban công: <b>${val(r.has_balcony)}</b></span><span>Cửa sổ: <b>${val(r.has_window)}</b></span><span>Vân tay: <b>${val(r.has_fingerprint_lock)}</b></span><span>Để xe: <b>${val(r.parking_info)}</b></span><span>Tối đa: <b>${val(r.max_occupants)}</b></span><span class="col-span-2">Khác: <b>${val(r.other_amenities)}</b></span><span class="col-span-2">Phí: <b>${val(r.service_fees)}</b></span><span>Ngày vào: <b>${val(r.move_in_date)}</b></span><span>Trạng thái: <b>${val(r.status)}</b></span><span>Chủ nhà: <b>${val(r.landlord_phone)}</b></span></div></td><td class="p-3">${mediaBox}<div class="mt-2">ID: ${val(r.id)}</div><div>Zalo ID: ${val(r.zalo_user_id)}</div><div>Tạo: ${formatDateTimeVN(r.created_at)}</div><div>Cập nhật: ${formatDateTimeVN(r.updated_at)}</div><div>Xóa: ${formatDateTimeVN(r.deleted_at)}</div></td><td class="p-3"><button onclick="editRoom('${esc(r.id)}')" class="rounded bg-blue-100 px-3 py-1">Sửa</button> <button onclick="deleteRoom('${esc(r.id)}')" class="rounded bg-red-100 px-3 py-1">Xóa</button></td></tr>`
           }
-          ).join("")
+          ).join("");
+          document.querySelectorAll(".roomCheck").forEach(checkbox=> {
+              const room=rooms.find(item=>String(item.id)===String(checkbox.value));
+              if(room&&room.can_manage===false) {
+                  checkbox.disabled=true;
+                  checkbox.title="Phòng đang bị khóa";
+                  checkbox.closest("tr")?.querySelectorAll("button").forEach(button=> {
+                      button.disabled=true;
+                      button.title="Phòng đang bị khóa";
+                      button.classList.add("cursor-not-allowed","opacity-50")
+                  })
+              }
+          })
       }
       function resetFilters() {
           ["fAddress","fName","fMin","fMax","fFrom","fTo","fPhone","fFloor","fRoomSize","fMaxOccupants","fMoveInDate"].forEach(id=>$(id).value="");
@@ -779,7 +837,7 @@
           loadRooms(true)
       }
       function selectAll(e) {
-          document.querySelectorAll(".roomCheck").forEach(c=>c.checked=e.checked);
+          document.querySelectorAll(".roomCheck:not(:disabled)").forEach(c=>c.checked=e.checked);
           updateSelected()
       }
       function updateSelected() {
@@ -788,6 +846,11 @@
           $("deleteSelectedBtn").classList.toggle("hidden",!n)
       }
       async function deleteRoom(id,confirming=true) {
+          const room=rooms.find(item=>String(item.id)===String(id));
+          if(room&&room.can_manage===false) {
+              alert(`Phòng đang bị khóa nên không thể thao tác.${room.posting_block_reason?`\nLý do: ${room.posting_block_reason}`:""}`);
+              return false
+          }
           if(confirming&&!confirm("Xóa vĩnh viễn phòng này khỏi Qdrant và PostgreSQL? Dữ liệu phòng sẽ không thể khôi phục."))return false;
           let r=await api(`/api/rooms/${encodeURIComponent(id)}`, {
               method:"DELETE"
@@ -836,7 +899,71 @@
       }
       function editRoom(id) {
           let r=rooms.find(x=>String(x.id)===String(id));
+          if(r&&r.can_manage===false)return alert(`Phòng đang bị khóa nên không thể thao tác.${r.posting_block_reason?`\nLý do: ${r.posting_block_reason}`:""}`);
           r&&openRoom(r)
+      }
+      function updatePostingBlockPlaceholder() {
+          const byPhone=$("postingBlockType").value==="PHONE";
+          $("postingBlockValue").placeholder=byPhone?"SĐT 10 số":"Cụm địa chỉ cần chặn";
+          $("postingBlockValue").inputMode=byPhone?"numeric":"text"
+      }
+      function resetPostingBlockForm() {
+          $("postingBlockId").value="";
+          $("postingBlockType").value="PHONE";
+          $("postingBlockValue").value="";
+          $("postingBlockReason").value="";
+          $("postingBlockActive").checked=true;
+          $("postingBlockSave").textContent="Thêm quy tắc";
+          updatePostingBlockPlaceholder()
+      }
+      function schedulePostingBlockReload() {
+          clearTimeout(postingBlockReloadTimer);
+          postingBlockReloadTimer=setTimeout(loadPostingBlocks,350)
+      }
+      async function loadPostingBlocks() {
+          const params=new URLSearchParams();
+          if($("postingBlockFilterType").value)params.set("block_type",$("postingBlockFilterType").value);
+          if($("postingBlockQuery").value.trim())params.set("query",$("postingBlockQuery").value.trim());
+          const response=await api(`/api/admin/room-post-blocks?${params}`),result=await data(response);
+          if(!response.ok)return alert(err(result));
+          postingBlocks=Array.isArray(result.data)?result.data:[];
+          $("postingBlockTotal").textContent=`${Number(result.total)||0} quy tắc`;
+          $("postingBlockBody").innerHTML=postingBlocks.length?postingBlocks.map(item=>`<tr class="border-t"><td class="p-3 font-bold">${item.block_type==="PHONE"?"SĐT":"ĐỊA CHỈ"}</td><td class="p-3">${val(item.block_value)}</td><td class="max-w-sm whitespace-pre-wrap p-3">${val(item.reason)}</td><td class="p-3"><span class="rounded px-2 py-1 font-bold ${item.is_active?"bg-red-100 text-red-800":"bg-slate-100 text-slate-600"}">${item.is_active?"ĐANG CHẶN":"TẠM TẮT"}</span></td><td class="p-3">Tạo: ${formatDateTimeVN(item.created_at)}<br>Cập nhật: ${formatDateTimeVN(item.updated_at)}</td><td class="p-3"><button onclick="editPostingBlock('${esc(item.id)}')" class="rounded bg-blue-100 px-3 py-1">Sửa</button> <button onclick="deletePostingBlock('${esc(item.id)}')" class="rounded bg-red-100 px-3 py-1">Xóa</button></td></tr>`).join(""):'<tr><td colspan="6" class="p-6 text-center">Chưa có quy tắc chặn</td></tr>'
+      }
+      function editPostingBlock(id) {
+          const item=postingBlocks.find(value=>String(value.id)===String(id));
+          if(!item)return;
+          $("postingBlockId").value=item.id;
+          $("postingBlockType").value=item.block_type;
+          $("postingBlockValue").value=item.block_value;
+          $("postingBlockReason").value=item.reason||"";
+          $("postingBlockActive").checked=Boolean(item.is_active);
+          $("postingBlockSave").textContent="Cập nhật";
+          updatePostingBlockPlaceholder();
+          window.scrollTo({top:0,behavior:"smooth"})
+      }
+      async function savePostingBlock(event) {
+          event.preventDefault();
+          const id=$("postingBlockId").value;
+          const payload={block_type:$("postingBlockType").value,block_value:$("postingBlockValue").value.trim(),reason:$("postingBlockReason").value.trim(),is_active:$("postingBlockActive").checked};
+          busy("postingBlockSave",true);
+          let saved=false;
+          try {
+              const response=await api(id?`/api/admin/room-post-blocks/${encodeURIComponent(id)}`:"/api/admin/room-post-blocks",{method:id?"PATCH":"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(payload)}),result=await data(response);
+              if(!response.ok)return alert(err(result));
+              saved=true;
+              await loadPostingBlocks()
+          } finally {
+              busy("postingBlockSave",false);
+              if(saved)resetPostingBlockForm()
+          }
+      }
+      async function deletePostingBlock(id) {
+          if(!confirm("Xóa vĩnh viễn quy tắc chặn này?"))return;
+          const response=await api(`/api/admin/room-post-blocks/${encodeURIComponent(id)}`,{method:"DELETE"}),result=await data(response);
+          if(!response.ok)return alert(err(result));
+          if($("postingBlockId").value===id)resetPostingBlockForm();
+          await loadPostingBlocks()
       }
       async function loadReports() {
           let p=new URLSearchParams({page:"1",page_size:"100"});
@@ -904,7 +1031,7 @@
           orders=Array.isArray(d.data)?d.data:[];
           const isSuperAdmin=localStorage.getItem("userRole")==="SUPER_ADMIN";
           $("orderBody").innerHTML=orders.length?orders.map(o=> {
-              const userStatusAction=`<div class="flex min-w-[210px] gap-1"><select class="rounded border p-1"><option value="" disabled ${!["ĐÃ XEM","ĐÃ THUÊ"].includes(o.status)?"selected":""}>Chọn trạng thái</option><option ${o.status==="ĐÃ XEM"?"selected":""}>ĐÃ XEM</option><option ${o.status==="ĐÃ THUÊ"?"selected":""}>ĐÃ THUÊ</option></select><button onclick="updateOrderStatus('${esc(o.id)}',this.previousElementSibling.value)" class="rounded bg-emerald-600 px-2 py-1 font-bold text-white">Cập nhật</button></div>`;
+              const userStatusAction=o.can_manage===false?`<div class="rounded border border-red-300 bg-red-100 p-2 font-bold text-red-800">⛔ Phòng bị khóa, không thể quản lý đặt phòng.${o.room_block_reason?`<br>Lý do: ${val(o.room_block_reason)}`:""}</div>`:`<div class="flex min-w-[210px] gap-1"><select class="rounded border p-1"><option value="" disabled ${!["ĐÃ XEM","ĐÃ THUÊ"].includes(o.status)?"selected":""}>Chọn trạng thái</option><option ${o.status==="ĐÃ XEM"?"selected":""}>ĐÃ XEM</option><option ${o.status==="ĐÃ THUÊ"?"selected":""}>ĐÃ THUÊ</option></select><button onclick="updateOrderStatus('${esc(o.id)}',this.previousElementSibling.value)" class="rounded bg-emerald-600 px-2 py-1 font-bold text-white">Cập nhật</button></div>`;
               const adminActions=`<button onclick="editOrder('${esc(o.id)}')" class="rounded bg-blue-100 px-3 py-1">Sửa</button> <button onclick="deleteOrder('${esc(o.id)}')" class="rounded bg-red-100 px-3 py-1">Xóa</button>`;
               return`<tr class="border-t"><td class="p-3 font-bold">${val(o.room_code)}</td><td class="p-3">📞 ${val(o.tenant_phone)}<br>Zalo: ${val(o.tenant_zalo_id)}</td><td class="p-3">📞 ${val(o.landlord_phone)}<br>Zalo: ${val(o.landlord_zalo_id)}</td><td class="p-3">${formatDateTimeVN(o.viewing_time)}</td><td class="p-3 font-bold text-violet-700">${val(o.status)}</td><td class="p-3">ID: ${val(o.id)}<br>Tạo: ${formatDateTimeVN(o.created_at)}<br>Cập nhật: ${formatDateTimeVN(o.updated_at)}</td><td class="p-3">${isSuperAdmin?adminActions:userStatusAction}</td></tr>`
           }).join(""):'<tr><td colspan="7" class="p-6 text-center">Không có đơn đặt phòng</td></tr>'
@@ -1113,6 +1240,7 @@
       }
       choices();
       initBooleanRoomFilters();
+      updatePostingBlockPlaceholder();
       $("excelFile").addEventListener("change",()=> {
           $("uploadMsg").textContent="";
           $("uploadMsg").className="mb-3 hidden rounded p-2 text-sm"

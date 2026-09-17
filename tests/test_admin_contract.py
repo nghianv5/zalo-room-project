@@ -676,3 +676,78 @@ def test_zalo_search_shows_text_actions_and_caps_results_at_twenty():
     assert 'f"Hiển thị {len(rooms)}/{total_found} phòng:"' in services_source
     assert "top_k=MAX_SEARCH_ROOMS" in services_source
     assert "safe_top_k = min(max(int(top_k or MAX_SEARCH_ROOMS), 1), MAX_SEARCH_ROOMS)" in services_source
+
+
+def test_room_posting_blocks_cover_web_excel_and_zalo_with_admin_bypass():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
+
+    assert "class RoomPostingBlock(Base):" in services_source
+    assert 'block_type == "PHONE"' in services_source
+    assert 'block_type == "ADDRESS"' in services_source
+    assert "def normalize_block_address" in services_source
+    assert "def find_room_posting_block" in services_source
+    assert "not existing_id\n            and not bypass_posting_block" not in services_source
+    assert "not bypass_posting_block" in services_source
+    assert "format_room_posting_block_message(posting_block)" in services_source
+    assert "bypass_posting_block=str(user_id) == Config.ZALO_ADMIN_ID" in services_source
+    assert "bypass_posting_block=str(sender_id) == Config.ZALO_ADMIN_ID" in main_source
+    assert 'bypass_posting_block=user.role == "SUPER_ADMIN"' in main_source
+    assert '@app.get("/api/admin/room-post-blocks")' in main_source
+    assert '@app.post("/api/admin/room-post-blocks")' in main_source
+    assert '@app.patch("/api/admin/room-post-blocks/{block_id}")' in main_source
+    assert '@app.delete("/api/admin/room-post-blocks/{block_id}")' in main_source
+    assert 'id="postingBlocksTab"' in html
+    assert 'id="postingBlocksPage"' in html
+    assert "async function loadPostingBlocks()" in html
+    assert "async function savePostingBlock(event)" in html
+    assert "async function deletePostingBlock(id)" in html
+    assert "Chặn cả tạo mới và cập nhật phòng" in html
+
+
+def test_blocked_rooms_are_visible_on_web_but_locked_everywhere_else():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
+
+    assert "def get_room_access_block" in services_source
+    assert "def format_room_access_block_message" in services_source
+    assert "candidate_rooms = [room for room in candidate_rooms if not get_room_access_block(room, rules)]" in services_source
+    assert "room.get(\"posting_blocked\")" in services_source
+    assert "access_block = get_room_access_block(room_data)" in services_source
+    assert "không thể xem, đặt lịch hoặc report" in services_source
+    assert 'room["posting_blocked"] = bool(access_block)' in main_source
+    assert 'room["can_manage"] = user.role == "SUPER_ADMIN" or not bool(access_block)' in main_source
+    assert "def _serialize_order_with_room_access" in main_source
+    assert "Phòng đang bị khóa nên không thể thao tác quản lý đặt phòng" in main_source
+    assert "Một hoặc nhiều phòng đang bị khóa nên không thể thao tác" in main_source
+    assert "Phòng đang bị khóa. User chỉ được xem thông tin" in html
+    assert 'o.can_manage===false' in html
+    assert '.roomCheck:not(:disabled)' in html
+
+
+def test_order_list_does_not_depend_on_qdrant_room_lookup():
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    serializer_start = main_source.index("def _serialize_order_with_room_access")
+    serializer_end = main_source.index("\ndef _get_room_by_code", serializer_start)
+    serializer_source = main_source[serializer_start:serializer_end]
+
+    assert "_get_room_by_code" not in serializer_source
+    assert "room_payloads.get(code)" in serializer_source
+    assert 'room_data.setdefault("landlord_phone", order.landlord_phone or "")' in serializer_source
+    assert "db.query(RoomRecord).filter(RoomRecord.room_code.in_(room_codes)).all()" in main_source
+    assert "active_block_rules = get_active_room_posting_blocks(db)" in main_source
+    assert "OrderRoom.landlord_phone.in_(phone_variants)" in main_source
+    assert 'f"+84{principal_phone[1:]}"' in main_source
+
+
+def test_blocked_user_or_address_orders_are_hidden_from_regular_users():
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+
+    assert 'candidate_orders = ordered_query.all() if user.role != "SUPER_ADMIN" else []' in main_source
+    assert "if not get_room_access_block(room_data, active_block_rules):" in main_source
+    assert "visible_orders.append(item)" in main_source
+    assert "total = len(visible_orders)" in main_source
+    assert "orders = visible_orders[safe_offset:safe_offset + safe_limit]" in main_source
+    assert "else:\n        total = query.count()" in main_source
