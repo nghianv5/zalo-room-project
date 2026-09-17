@@ -873,14 +873,13 @@ async def get_rooms_filter(
         "has_fingerprint_lock": has_fingerprint_lock,
         "parking_info": parking_info,
     }
-    for field_name, field_value in exact_room_filters.items():
-        if field_value is not None and str(field_value).strip():
-            must_conditions.append(
-                qdrant_models.FieldCondition(
-                    key=field_name,
-                    match=qdrant_models.MatchValue(value=str(field_value).strip()),
-                )
-            )
+    # Các trường chi tiết chưa chắc đã có payload index trên collection Qdrant cũ.
+    # Lọc chúng trong Python sau khi scroll để tránh Qdrant trả 400 "Index required".
+    active_exact_room_filters = {
+        field_name: str(field_value).strip().casefold()
+        for field_name, field_value in exact_room_filters.items()
+        if field_value is not None and str(field_value).strip()
+    }
 
     if min_price is not None or max_price is not None:
         price_range = {}
@@ -931,6 +930,14 @@ async def get_rooms_filter(
         all_results = [
             item for item in all_results
             if query_text in f"{item.get('room_name') or ''} {item.get('room_code') or ''}".lower()
+        ]
+    if active_exact_room_filters:
+        all_results = [
+            item for item in all_results
+            if all(
+                str(item.get(field_name) or "").strip().casefold() == expected_value
+                for field_name, expected_value in active_exact_room_filters.items()
+            )
         ]
     if date_from or date_to:
         def room_is_in_date_range(item: dict) -> bool:

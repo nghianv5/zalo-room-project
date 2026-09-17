@@ -663,6 +663,18 @@ def test_admin_room_filters_cover_details_and_boolean_checkboxes():
     assert 'id="fMoveInDate"' in html
 
 
+def test_unindexed_room_filters_are_applied_after_qdrant_scroll():
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    route_start = main_source.index('async def get_rooms_filter(')
+    route_end = main_source.index('\ndef _serialize_order(', route_start)
+    route_source = main_source[route_start:route_end]
+
+    assert "active_exact_room_filters" in route_source
+    assert "item.get(field_name)" in route_source
+    assert "expected_value" in route_source
+    assert 'key=field_name' not in route_source
+
+
 def test_zalo_search_shows_text_actions_and_caps_results_at_twenty():
     services_source = (ROOT / "services.py").read_text(encoding="utf-8")
     env_source = (ROOT / ".env.example").read_text(encoding="utf-8")
