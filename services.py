@@ -1864,6 +1864,46 @@ def infer_explicit_boolean_room_updates(message_text: str) -> dict:
     return inferred
 
 
+def extract_listing_price_from_text(message_text: str) -> Optional[float]:
+    """Đọc giá thuê phổ biến: 4tr5, 4tr500, 4,5 triệu, 4.500.000 đồng."""
+    text_value = str(message_text or "").strip().lower()
+    if not text_value:
+        return None
+
+    # Dạng triệu viết gọn. Phần sau "tr" là phần lẻ: 4tr5/4tr50/4tr500 = 4,5 triệu.
+    compact_match = re.search(
+        r"(?<!\d)(\d{1,3})\s*(?:triệu|trieu|tr)\s*(\d{1,3})(?!\d)",
+        text_value,
+        re.IGNORECASE,
+    )
+    if compact_match:
+        whole = int(compact_match.group(1))
+        fractional_text = compact_match.group(2)
+        fractional = int(fractional_text) / (10 ** len(fractional_text))
+        return (whole + fractional) * 1_000_000
+
+    unit_match = re.search(
+        r"(?<!\d)(\d+(?:[.,]\d+)?)\s*(triệu|trieu|tr|k|nghìn|nghin)(?![a-zA-Z])",
+        text_value,
+        re.IGNORECASE,
+    )
+    if unit_match:
+        number = float(unit_match.group(1).replace(",", "."))
+        unit = normalize_location_search(unit_match.group(2))
+        return number * (1_000 if unit in {"k", "nghin"} else 1_000_000)
+
+    # Chỉ nhận số tiền đầy đủ khi gần từ khóa giá để không nhầm số nhà/SĐT.
+    full_amount_match = re.search(
+        r"\b(?:giá|gia)(?:\s+(?:thuê|thue|phòng|phong|là|la))*\s*([\d.,]{6,})",
+        text_value,
+        re.IGNORECASE,
+    )
+    if full_amount_match:
+        digits = re.sub(r"\D", "", full_amount_match.group(1))
+        return float(digits) if digits else None
+    return None
+
+
 def apply_direct_room_listing_fallbacks(data: dict, message_text: str) -> dict:
     """Bổ sung các trường rõ ràng trong tin đăng nếu AI phân loại/trích xuất thiếu."""
     extracted = dict(data or {})
@@ -1881,15 +1921,9 @@ def apply_direct_room_listing_fallbacks(data: dict, message_text: str) -> dict:
     if size_match and not has_room_update_value(extracted.get("room_size")):
         extracted["room_size"] = f"{size_match.group(1).replace(',', '.')}m2"
 
-    price_match = re.search(
-        r"\b(?:giá|gia)\s*(\d+(?:[.,]\d+)?)\s*(triệu|trieu|tr|k|nghìn|nghin)\b",
-        raw_text,
-        flags=re.IGNORECASE,
-    )
-    if price_match and is_missing_required_room_price(extracted.get("price")):
-        number = float(price_match.group(1).replace(",", "."))
-        unit = normalize_location_search(price_match.group(2))
-        extracted["price"] = number * (1_000 if unit in {"k", "nghin"} else 1_000_000)
+    direct_price = extract_listing_price_from_text(raw_text)
+    if direct_price and is_missing_required_room_price(extracted.get("price")):
+        extracted["price"] = direct_price
 
     extracted.update(infer_explicit_boolean_room_updates(raw_text))
     return extracted
@@ -3120,6 +3154,9 @@ def process_zalo_ai_logic(
         ):
             action = "SEARCH_ROOM"
         extracted = result_data.get("extracted_data", {})
+        direct_price = extract_listing_price_from_text(message_text)
+        if direct_price and is_missing_required_room_price(extracted.get("price")):
+            extracted["price"] = direct_price
         # Không có thông tin ngày trong chính câu người dùng thì bắt buộc để trống.
         # Cách này cũng ngăn Gemini tự suy đoán ngày vào ở.
         extracted["move_in_date"] = extract_move_in_date_from_text(message_text)
@@ -3734,7 +3771,7 @@ def extract_natural_room_search(message_text: str) -> dict:
     """Tách địa chỉ và khoảng giá trực tiếp, không phụ thuộc kết quả Gemini."""
     raw_text = str(message_text or "").strip()
     price_pattern = re.compile(
-        r"(?<!\d)(\d+(?:[.,]\d+)?)\s*(triệu|trieu|tr|k|nghìn|nghin)(?![a-zA-Z])",
+        r"(?<!\d)(\d+(?:[.,]\d+)?)\s*(triệu|trieu|tr|k|nghìn|nghin)\s*(\d{1,3})?(?!\d|[a-zA-Z])",
         re.IGNORECASE,
     )
     prices = []
@@ -3743,6 +3780,9 @@ def extract_natural_room_search(message_text: str) -> dict:
         number = float(match.group(1).replace(",", "."))
         unit = normalize_location_search(match.group(2))
         multiplier = 1_000 if unit in {"k", "nghin"} else 1_000_000
+        compact_fraction = match.group(3)
+        if compact_fraction and multiplier == 1_000_000:
+            number += int(compact_fraction) / (10 ** len(compact_fraction))
         prices.append(number * multiplier)
         return " "
 

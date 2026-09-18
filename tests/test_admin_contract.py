@@ -538,7 +538,8 @@ def test_landlord_listing_intent_has_priority_over_room_search():
     assert 'action = "ADD_ROOM"' in services_source
     assert "apply_direct_room_listing_fallbacks(extracted, message_text)" in services_source
     assert 'extracted["address"] = address_match.group(1)' in services_source
-    assert 'extracted["price"] = number *' in services_source
+    assert "direct_price = extract_listing_price_from_text(raw_text)" in services_source
+    assert 'extracted["price"] = direct_price' in services_source
     assert 'extracted["room_size"]' in services_source
     assert '"wardrobe": ("tủ quần áo", "tủ áo", "giường tủ")' in services_source
     assert 'r"^(?:(?:toi|minh|em|anh|chi)\\s+)?cho thue' in services_source
@@ -763,3 +764,14 @@ def test_blocked_user_or_address_orders_are_hidden_from_regular_users():
     assert "total = len(visible_orders)" in main_source
     assert "orders = visible_orders[safe_offset:safe_offset + safe_limit]" in main_source
     assert "else:\n        total = query.count()" in main_source
+
+
+def test_compact_vietnamese_price_is_parsed_before_required_price_validation():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+
+    assert "def extract_listing_price_from_text(message_text: str)" in services_source
+    assert 'r"(?<!\\d)(\\d{1,3})\\s*(?:triệu|trieu|tr)\\s*(\\d{1,3})(?!\\d)"' in services_source
+    assert "fractional = int(fractional_text) / (10 ** len(fractional_text))" in services_source
+    assert "direct_price = extract_listing_price_from_text(message_text)" in services_source
+    assert 'extracted["price"] = direct_price' in services_source
+    assert "if listing_intent:\n            action = \"ADD_ROOM\"" in services_source
