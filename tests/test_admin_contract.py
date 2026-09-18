@@ -775,3 +775,27 @@ def test_compact_vietnamese_price_is_parsed_before_required_price_validation():
     assert "direct_price = extract_listing_price_from_text(message_text)" in services_source
     assert 'extracted["price"] = direct_price' in services_source
     assert "if listing_intent:\n            action = \"ADD_ROOM\"" in services_source
+
+
+def test_rented_room_report_requires_landlord_confirmation_and_hides_room_from_search():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+
+    assert 'f"🏠 Tôi thấy phòng đã cho thuê: nhắn “TÔI THẤY PHÒNG ĐÃ CHO THUÊ {normalized_code}”' in services_source
+    assert '"payload": f"TÔI THẤY PHÒNG ĐÃ CHO THUÊ {normalized_code}"' in services_source
+    assert "def request_room_rented_confirmation(" in services_source
+    assert "def send_zalo_rented_confirmation(" in services_source
+    assert "def confirm_room_rented_status(" in services_source
+    assert '"payload": f"PHÒNG ĐÃ CHO THUÊ {room_code}"' in services_source
+    assert '"payload": f"PHÒNG CHƯA CHO THUÊ {room_code}"' in services_source
+    assert "sender_phone != landlord_phone" in services_source
+    assert 'new_status = "ĐÃ CHO THUÊ" if is_rented else "TRỐNG"' in services_source
+    assert 'mirror_payload["status"] = normalized_status' in services_source
+    assert 'match=qdrant_models.MatchValue(value="TRỐNG")' in services_source
+    assert "rented_confirmation_match = re.search(" in main_source
+    assert "rented_report_match = re.search(" in main_source
+    assert "request_room_rented_confirmation(" in main_source
+    assert "confirm_room_rented_status(" in main_source
+    assert 'block_key = f"block:rented-report:{reporter_user_id}"' in services_source
+    assert "if report_count > 5:" in services_source
+    assert 'redis_client.set(block_key, "1", ex=172800)' in services_source

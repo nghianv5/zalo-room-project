@@ -1113,6 +1113,7 @@ def format_room_search_message(room: dict, position: int, include_action_instruc
         normalized_code = str(room_code).strip().upper()
         lines.append(f"📅 Đặt lịch xem phòng: nhắn “XEM PHÒNG {normalized_code}”")
         lines.append(f"🚩 Report phòng: nhắn “REPORT PHÒNG {normalized_code}”")
+        lines.append(f"🏠 Tôi thấy phòng đã cho thuê: nhắn “TÔI THẤY PHÒNG ĐÃ CHO THUÊ {normalized_code}”")
     else:
         lines.append("👉 Nhắn OA để được tư vấn phòng này.")
     message = "\n".join(lines)
@@ -1130,7 +1131,8 @@ def send_zalo_room_action_buttons(user_id: str, room_code: str) -> bool:
             return send_zalo_message(user_id, format_room_access_block_message(action_block))
     fallback_text = (
         f"📅 Đặt lịch xem phòng: nhắn “XEM PHÒNG {normalized_code}”\n"
-        f"🚩 Report phòng: nhắn “REPORT PHÒNG {normalized_code}”"
+        f"🚩 Report phòng: nhắn “REPORT PHÒNG {normalized_code}”\n"
+        f"🏠 Tôi thấy phòng đã cho thuê: nhắn “TÔI THẤY PHÒNG ĐÃ CHO THUÊ {normalized_code}”"
     )
     if not re.fullmatch(r"[A-Z0-9]{6}", normalized_code):
         return send_zalo_message(user_id, fallback_text)
@@ -1161,6 +1163,11 @@ def send_zalo_room_action_buttons(user_id: str, room_code: str) -> bool:
                             "title": "🚩 Report phòng",
                             "type": "oa.query.show",
                             "payload": f"REPORT PHÒNG {normalized_code}",
+                        },
+                        {
+                            "title": "🏠 Tôi thấy phòng đã cho thuê",
+                            "type": "oa.query.show",
+                            "payload": f"TÔI THẤY PHÒNG ĐÃ CHO THUÊ {normalized_code}",
                         },
                     ],
                 },
@@ -1323,6 +1330,261 @@ def submit_zalo_room_report(db: Session, user_id: str, room_code: str, content: 
         db.rollback()
         report_error("Lưu report phòng từ Zalo thất bại", exc, "submit_zalo_room_report")
         return "⚠️ Chưa thể lưu report lúc này. Bạn vui lòng thử lại sau."
+
+
+def _find_zalo_user_id_by_phone(db: Session, phone: str) -> Optional[str]:
+    """Tìm Zalo ID của chủ nhà, hỗ trợ cả định dạng 0xxx và +84xxx."""
+    national_phone = format_national_phone(phone)
+    if not national_phone:
+        return None
+    phone_variants = {national_phone}
+    if national_phone.startswith("0"):
+        phone_variants.update({f"+84{national_phone[1:]}", f"84{national_phone[1:]}"})
+    account = db.query(UserWeb).filter(UserWeb.phone.in_(phone_variants)).first()
+    return str(account.user_id).strip() if account and account.user_id else None
+
+
+def format_rented_confirmation_room_details(room: dict) -> str:
+    """Hiển thị toàn bộ trường nghiệp vụ cần thiết để chủ nhà xác nhận đúng phòng."""
+    def display(field_name: str) -> str:
+        value = room.get(field_name)
+        return str(value).strip() if _has_meaningful_room_value(value) else "[chưa cập nhật]"
+
+    numeric_price = parse_price_safe({"price": room.get("price")})
+    price_text = f"{numeric_price:,.0f}đ/tháng" if numeric_price > 0 else display("price")
+    media_count = len(normalize_room_media_urls(room.get("media_urls")))
+    return "\n".join([
+        "🏠 THÔNG TIN PHÒNG CẦN XÁC NHẬN",
+        f"🔖 Mã phòng: {display('room_code')}",
+        f"🛏️ Tên phòng: {display('room_name')}",
+        f"📍 Địa chỉ: {display('address')}",
+        f"💰 Giá: {price_text}",
+        f"🏢 Tầng: {display('floor')}",
+        f"📐 Diện tích: {display('room_size')}",
+        f"🚿 WC riêng: {display('is_private_bathroom')}",
+        f"❄️ Điều hòa: {display('has_ac')}",
+        f"♨️ Nóng lạnh: {display('has_heater')}",
+        f"🧺 Máy giặt: {display('has_washer')}",
+        f"🧊 Tủ lạnh: {display('has_fridge')}",
+        f"🛏️ Giường: {display('bed')}",
+        f"🚪 Tủ quần áo: {display('wardrobe')}",
+        f"🐾 Thú cưng: {display('allow_pets')}",
+        f"🌤️ Ban công: {display('has_balcony')}",
+        f"🪟 Cửa sổ: {display('has_window')}",
+        f"🔐 Khóa vân tay: {display('has_fingerprint_lock')}",
+        f"🛵 Để xe: {display('parking_info')}",
+        f"👥 Số người tối đa: {display('max_occupants')}",
+        f"➕ Tiện ích khác: {display('other_amenities')}",
+        f"🧾 Phí dịch vụ: {display('service_fees')}",
+        f"📅 Ngày vào: {display('move_in_date')}",
+        f"📌 Trạng thái hiện tại: {display('status')}",
+        f"📸 Ảnh/video: {media_count} tệp",
+    ])
+
+
+def send_zalo_rented_confirmation(owner_user_id: str, room: dict) -> bool:
+    """Gửi đầy đủ thông tin phòng và hai lựa chọn xác nhận cho đúng chủ nhà."""
+    room_code = str(room.get("room_code") or "").strip().upper()
+    room_details = format_rented_confirmation_room_details(room)
+    fallback_text = (
+        f"{room_details}\n\n"
+        "Có người dùng báo phòng này có thể đã được cho thuê. Chủ nhà vui lòng xác nhận:\n"
+        f"✅ PHÒNG ĐÃ CHO THUÊ {room_code}\n"
+        f"↩️ PHÒNG CHƯA CHO THUÊ {room_code}"
+    )
+
+    db = SessionLocal()
+    try:
+        token_data = get_current_tokens_from_db(db)
+    finally:
+        db.close()
+    if not token_data or not token_data.get("access_token"):
+        return send_zalo_message(owner_user_id, fallback_text)
+
+    payload = {
+        "recipient": {"user_id": str(owner_user_id)},
+        "message": {
+            "text": fallback_text,
+            "attachment": {
+                "type": "template",
+                "payload": {
+                    "template_type": "button",
+                    "buttons": [
+                        {
+                            "title": "✅ Phòng đã cho thuê",
+                            "type": "oa.query.show",
+                            "payload": f"PHÒNG ĐÃ CHO THUÊ {room_code}",
+                        },
+                        {
+                            "title": "↩️ Phòng chưa cho thuê",
+                            "type": "oa.query.show",
+                            "payload": f"PHÒNG CHƯA CHO THUÊ {room_code}",
+                        },
+                    ],
+                },
+            },
+        },
+    }
+    try:
+        response_data, _ = _post_zalo_with_token_retry(
+            "https://openapi.zalo.me/v3.0/oa/message/cs",
+            payload,
+            token_data["access_token"],
+        )
+        if response_data.get("error") == 0:
+            return True
+        report_error(
+            f"Zalo từ chối nút xác nhận phòng đã thuê: {response_data}",
+            context="send_zalo_rented_confirmation",
+            notify=False,
+        )
+    except Exception as exc:
+        report_error(
+            "Gửi xác nhận phòng đã thuê cho chủ nhà thất bại",
+            exc,
+            "send_zalo_rented_confirmation",
+            notify=False,
+        )
+    # Zalo PC có thể không hiển thị button template, nên gửi câu lệnh chữ dự phòng.
+    return send_zalo_message(owner_user_id, fallback_text)
+
+
+def request_room_rented_confirmation(db: Session, reporter_user_id: str, room_code: str) -> str:
+    """Nhận báo cáo của khách và chuyển yêu cầu xác nhận tới đúng chủ nhà."""
+    normalized_code = str(room_code or "").strip().upper()
+    try:
+        # Tối đa 5 lần trong 1 giờ. Lần thứ 6 khóa riêng chức năng này trong 48 giờ.
+        if str(reporter_user_id) != str(Config.ZALO_ADMIN_ID):
+            block_key = f"block:rented-report:{reporter_user_id}"
+            hourly_key = f"rate:rented-report-hour:{reporter_user_id}"
+            try:
+                blocked_ttl = redis_client.ttl(block_key)
+                if blocked_ttl and blocked_ttl > 0:
+                    remaining_hours = max(1, (blocked_ttl + 3599) // 3600)
+                    return (
+                        "⛔ Bạn đang bị tạm khóa chức năng ‘Tôi thấy phòng đã cho thuê’ "
+                        f"do gửi quá nhiều lần. Thời gian còn lại khoảng {remaining_hours} giờ."
+                    )
+
+                report_count = redis_client.incr(hourly_key)
+                if report_count == 1:
+                    redis_client.expire(hourly_key, 3600)
+                if report_count > 5:
+                    redis_client.set(block_key, "1", ex=172800)
+                    redis_client.delete(hourly_key)
+                    return (
+                        "⛔ Bạn đã sử dụng chức năng ‘Tôi thấy phòng đã cho thuê’ quá 5 lần "
+                        "trong 1 giờ. Chức năng này đã bị khóa trong 2 ngày."
+                    )
+            except Exception as rate_error:
+                report_error(
+                    "Không kiểm tra được giới hạn báo phòng đã thuê",
+                    rate_error,
+                    "request_room_rented_confirmation.rate_limit",
+                    notify=False,
+                )
+
+        room = get_room_for_zalo_action(normalized_code)
+        if not room:
+            return f"❌ Không tìm thấy phòng có mã {normalized_code}."
+        if str(reporter_user_id) != Config.ZALO_ADMIN_ID and room.get("posting_blocked"):
+            return format_room_access_block_message({"reason": room.get("posting_block_reason")})
+        if str(room.get("status") or "").strip().upper() == "ĐÃ CHO THUÊ":
+            return f"ℹ️ Phòng {normalized_code} đã được chủ nhà xác nhận là đã cho thuê."
+
+        rate_key = f"rate:rented-report:{reporter_user_id}:{normalized_code}"
+        try:
+            if not redis_client.set(rate_key, "1", nx=True, ex=300):
+                return "ℹ️ Yêu cầu xác nhận phòng này đã được gửi. Vui lòng chờ chủ nhà phản hồi."
+        except Exception:
+            pass
+
+        owner_phone = format_national_phone(room.get("landlord_phone"))
+        owner_user_id = _find_zalo_user_id_by_phone(db, owner_phone)
+        if not owner_user_id:
+            return (
+                f"⚠️ Đã ghi nhận báo cáo phòng {normalized_code}, nhưng chủ nhà chưa liên kết "
+                "SĐT với Zalo OA nên hệ thống chưa thể gửi yêu cầu xác nhận."
+            )
+
+        pending_data = {
+            "reporter_user_id": str(reporter_user_id),
+            "owner_user_id": str(owner_user_id),
+            "room_code": normalized_code,
+        }
+        try:
+            redis_client.set(
+                f"pending:rented-confirmation:{normalized_code}",
+                json.dumps(pending_data, ensure_ascii=False),
+                ex=86400,
+            )
+        except Exception:
+            pass
+
+        if not send_zalo_rented_confirmation(str(owner_user_id), room):
+            return "⚠️ Chưa thể gửi yêu cầu xác nhận tới chủ nhà. Bạn vui lòng thử lại sau."
+        return (
+            f"✅ Đã gửi yêu cầu xác nhận phòng {normalized_code} tới chủ nhà. "
+            "Phòng chỉ chuyển sang trạng thái ĐÃ CHO THUÊ sau khi chủ nhà xác nhận."
+        )
+    except Exception as exc:
+        report_error("Xử lý báo phòng đã cho thuê thất bại", exc, "request_room_rented_confirmation")
+        return "⚠️ Chưa thể gửi yêu cầu xác nhận lúc này. Bạn vui lòng thử lại sau."
+
+
+def confirm_room_rented_status(
+    db: Session,
+    owner_user_id: str,
+    room_code: str,
+    is_rented: bool,
+) -> str:
+    """Chỉ chủ nhà đúng SĐT (hoặc super admin) được xác nhận trạng thái phòng."""
+    normalized_code = str(room_code or "").strip().upper()
+    try:
+        room = get_room_for_zalo_action(normalized_code)
+        if not room:
+            return f"❌ Không tìm thấy phòng có mã {normalized_code}."
+
+        sender_phone = format_national_phone(get_phone_by_user_id(db, str(owner_user_id)))
+        landlord_phone = format_national_phone(room.get("landlord_phone"))
+        is_admin = str(owner_user_id) == str(Config.ZALO_ADMIN_ID)
+        if not is_admin and (not sender_phone or sender_phone != landlord_phone):
+            return "⛔ Chỉ chủ nhà có SĐT trùng với phòng này mới được xác nhận trạng thái."
+
+        new_status = "ĐÃ CHO THUÊ" if is_rented else "TRỐNG"
+        if not update_room_status_in_db(room["id"], new_status):
+            return "⚠️ Chưa thể cập nhật trạng thái phòng. Bạn vui lòng thử lại sau."
+
+        pending_key = f"pending:rented-confirmation:{normalized_code}"
+        try:
+            pending_raw = redis_client.get(pending_key)
+            pending_data = json.loads(pending_raw) if pending_raw else {}
+            redis_client.delete(pending_key)
+        except Exception:
+            pending_data = {}
+
+        write_audit_log(
+            sender_phone or str(owner_user_id),
+            "ROOM_RENTED_STATUS_CONFIRM_ZALO",
+            room["id"],
+            {"room_code": normalized_code, "status": new_status},
+        )
+        reporter_user_id = str(pending_data.get("reporter_user_id") or "").strip()
+        if reporter_user_id and reporter_user_id != str(owner_user_id):
+            send_zalo_message(
+                reporter_user_id,
+                f"ℹ️ Chủ nhà đã xác nhận phòng {normalized_code}: {new_status}.",
+            )
+
+        if is_rented:
+            return (
+                f"✅ Đã cập nhật phòng {normalized_code} thành ĐÃ CHO THUÊ. "
+                "Phòng sẽ không còn xuất hiện trong kết quả tìm kiếm."
+            )
+        return f"✅ Đã xác nhận phòng {normalized_code} vẫn còn TRỐNG."
+    except Exception as exc:
+        report_error("Xác nhận trạng thái phòng từ Zalo thất bại", exc, "confirm_room_rented_status")
+        return "⚠️ Chưa thể xác nhận trạng thái phòng lúc này. Bạn vui lòng thử lại sau."
 
 
 def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
@@ -1635,6 +1897,7 @@ def get_text_embedding(text: str, retries: int = GEMINI_EMBED_RETRIES) -> List[f
     if gemini_client:
         for _ in range(retries):
             try:
+                print("🤖 [GEMINI] Đang gọi Gemini AI để tạo embedding...", flush=True)
                 response = gemini_client.models.embed_content(
                     model="models/gemini-embedding-001",
                     contents=normalized_text,
@@ -1655,6 +1918,7 @@ def get_text_embedding(text: str, retries: int = GEMINI_EMBED_RETRIES) -> List[f
         headers = {"Content-Type": "application/json"}
         payload = {"model": "models/gemini-embedding-001", "content": {"parts": [{"text": normalized_text}]}, "outputDimensionality": 768}
         try:
+            print("🤖 [GEMINI] Đang gọi Gemini AI để tạo embedding (REST fallback)...", flush=True)
             res = requests.post(url, headers=headers, json=payload, timeout=10).json()
             if "embedding" in res and "values" in res["embedding"]:
                 vector = res["embedding"]["values"]
@@ -1729,6 +1993,7 @@ def generate_content_with_retry(prompt: str, mime_type: str = "application/json"
     for attempt in range(retries):
         try:
             config = build_gemini_generation_config(mime_type, GEMINI_MAX_OUTPUT_TOKENS)
+            print("🤖 [GEMINI] Đang gọi Gemini AI...", flush=True)
             response = gemini_client.models.generate_content(
                 model=GEMINI_TEXT_MODEL, contents=current_prompt, config=config
             )
@@ -2366,18 +2631,40 @@ def upsert_room_to_db(
 def update_room_status_in_db(point_id: str, new_status: str) -> bool:
     if not point_id:
         return False
+    normalized_status = str(new_status or "").strip().upper()
+    if normalized_status not in {"TRỐNG", "ĐÃ CHO THUÊ"}:
+        return False
     try:
         now_str = vietnam_now().strftime("%Y-%m-%d %H:%M:%S")
         qdrant_client.set_payload(
             collection_name=COLLECTION_NAME,
             payload={
-                "status": new_status,
-                "raw_data.status": new_status,
+                "status": normalized_status,
                 "updated_at": now_str
             },
             points=[point_id],
             wait=True
         )
+        mirror_db = SessionLocal()
+        try:
+            mirror = mirror_db.query(RoomRecord).filter(RoomRecord.id == str(point_id)).first()
+            if mirror:
+                mirror_payload = dict(mirror.payload or {})
+                mirror_payload["status"] = normalized_status
+                mirror_payload["updated_at"] = now_str
+                mirror.payload = mirror_payload
+                mirror.updated_at = vietnam_now()
+                mirror_db.commit()
+        except Exception as mirror_error:
+            mirror_db.rollback()
+            report_error(
+                "Đồng bộ trạng thái phòng sang room_records thất bại",
+                mirror_error,
+                "update_room_status_in_db",
+            )
+            return False
+        finally:
+            mirror_db.close()
         return True
     except Exception as e:
         report_error("Cập nhật trạng thái phòng thất bại", e, "update_room_status_in_db")
@@ -2673,6 +2960,7 @@ def ai_validate_and_extract_room_batch(rows_list: List[dict]) -> List[Optional[d
             # 💡 FIX LỖI: Khởi tạo parsed_data = None ngay trước khối try
             parsed_data = None 
             try:
+                print("🤖 [GEMINI] Đang gọi Gemini AI để xử lý Excel...", flush=True)
                 response = gemini_client.models.generate_content(
                     model=model_name,
                     contents=prompt,

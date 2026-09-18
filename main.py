@@ -1385,6 +1385,43 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
                     send_zalo_message(user_id=sender_id, ai_reply=reply_text)
                     return {"status": "invalid_syntax"}
 
+            # Chủ nhà xác nhận trạng thái sau khi nhận thông báo từ khách.
+            rented_confirmation_match = re.search(
+                r'^\s*(?:phòng|phong)\s+(đã|da|chưa|chua)\s+(?:cho\s+)?(?:thuê|thue)\s+([a-zA-Z0-9]{6})\s*$',
+                raw_message,
+                re.IGNORECASE,
+            )
+            if rented_confirmation_match:
+                decision = rented_confirmation_match.group(1).lower()
+                room_code = rented_confirmation_match.group(2).upper()
+                is_rented = decision in {"đã", "da"}
+                reply_text = confirm_room_rented_status(
+                    db,
+                    str(sender_id),
+                    room_code,
+                    is_rented,
+                )
+                send_zalo_message(str(sender_id), reply_text)
+                return {"status": "success", "message": "Processed rented-room confirmation"}
+
+            # Khách chỉ gửi yêu cầu xác minh; bước này tuyệt đối không tự đổi trạng thái phòng.
+            rented_report_match = re.search(
+                r'^\s*(?:(?:tôi|toi)\s+(?:thấy|thay)|(?:báo|bao)(?:\s+cáo|\s+cao)?)\s+'
+                r'(?:phòng|phong)\s+(?:đã|da)\s+(?:cho\s+)?(?:thuê|thue)\s+'
+                r'([a-zA-Z0-9]{6})\s*$',
+                raw_message,
+                re.IGNORECASE,
+            )
+            if rented_report_match:
+                room_code = rented_report_match.group(1).upper()
+                reply_text = request_room_rented_confirmation(
+                    db,
+                    str(sender_id),
+                    room_code,
+                )
+                send_zalo_message(str(sender_id), reply_text)
+                return {"status": "success", "message": "Requested rented-room confirmation"}
+
             report_match = re.search(
                 r'(?:report|báo cáo|phản ánh)\s*(?:phòng|mã phòng)?\s*([a-zA-Z0-9]{6})\b(?:\s*[-:–—]\s*(.+))?$',
                 raw_message.strip(),
