@@ -1113,7 +1113,7 @@ def format_room_search_message(room: dict, position: int, include_action_instruc
         normalized_code = str(room_code).strip().upper()
         lines.append(f"📅 Đặt lịch xem phòng: nhắn “XEM PHÒNG {normalized_code}”")
         lines.append(f"🚩 Report phòng: nhắn “REPORT PHÒNG {normalized_code}”")
-        lines.append(f"🏠 Báo đã cho thuê: nhắn “BÁO PHÒNG ĐÃ CHO THUÊ {normalized_code}”")
+        lines.append(f"🏠 Tôi thấy phòng đã cho thuê: nhắn “TÔI THẤY PHÒNG ĐÃ CHO THUÊ {normalized_code}”")
     else:
         lines.append("👉 Nhắn OA để được tư vấn phòng này.")
     message = "\n".join(lines)
@@ -1132,7 +1132,7 @@ def send_zalo_room_action_buttons(user_id: str, room_code: str) -> bool:
     fallback_text = (
         f"📅 Đặt lịch xem phòng: nhắn “XEM PHÒNG {normalized_code}”\n"
         f"🚩 Report phòng: nhắn “REPORT PHÒNG {normalized_code}”\n"
-        f"🏠 Báo đã cho thuê: nhắn “BÁO PHÒNG ĐÃ CHO THUÊ {normalized_code}”"
+        f"🏠 Tôi thấy phòng đã cho thuê: nhắn “TÔI THẤY PHÒNG ĐÃ CHO THUÊ {normalized_code}”"
     )
     if not re.fullmatch(r"[A-Z0-9]{6}", normalized_code):
         return send_zalo_message(user_id, fallback_text)
@@ -1165,9 +1165,9 @@ def send_zalo_room_action_buttons(user_id: str, room_code: str) -> bool:
                             "payload": f"REPORT PHÒNG {normalized_code}",
                         },
                         {
-                            "title": "🏠 Báo đã cho thuê",
+                            "title": "🏠 Tôi thấy phòng đã cho thuê",
                             "type": "oa.query.show",
-                            "payload": f"BÁO PHÒNG ĐÃ CHO THUÊ {normalized_code}",
+                            "payload": f"TÔI THẤY PHÒNG ĐÃ CHO THUÊ {normalized_code}",
                         },
                     ],
                 },
@@ -1453,6 +1453,37 @@ def request_room_rented_confirmation(db: Session, reporter_user_id: str, room_co
     """Nhận báo cáo của khách và chuyển yêu cầu xác nhận tới đúng chủ nhà."""
     normalized_code = str(room_code or "").strip().upper()
     try:
+        # Tối đa 5 lần trong 1 giờ. Lần thứ 6 khóa riêng chức năng này trong 48 giờ.
+        if str(reporter_user_id) != str(Config.ZALO_ADMIN_ID):
+            block_key = f"block:rented-report:{reporter_user_id}"
+            hourly_key = f"rate:rented-report-hour:{reporter_user_id}"
+            try:
+                blocked_ttl = redis_client.ttl(block_key)
+                if blocked_ttl and blocked_ttl > 0:
+                    remaining_hours = max(1, (blocked_ttl + 3599) // 3600)
+                    return (
+                        "⛔ Bạn đang bị tạm khóa chức năng ‘Tôi thấy phòng đã cho thuê’ "
+                        f"do gửi quá nhiều lần. Thời gian còn lại khoảng {remaining_hours} giờ."
+                    )
+
+                report_count = redis_client.incr(hourly_key)
+                if report_count == 1:
+                    redis_client.expire(hourly_key, 3600)
+                if report_count > 5:
+                    redis_client.set(block_key, "1", ex=172800)
+                    redis_client.delete(hourly_key)
+                    return (
+                        "⛔ Bạn đã sử dụng chức năng ‘Tôi thấy phòng đã cho thuê’ quá 5 lần "
+                        "trong 1 giờ. Chức năng này đã bị khóa trong 2 ngày."
+                    )
+            except Exception as rate_error:
+                report_error(
+                    "Không kiểm tra được giới hạn báo phòng đã thuê",
+                    rate_error,
+                    "request_room_rented_confirmation.rate_limit",
+                    notify=False,
+                )
+
         room = get_room_for_zalo_action(normalized_code)
         if not room:
             return f"❌ Không tìm thấy phòng có mã {normalized_code}."
@@ -3246,6 +3277,7 @@ def process_zalo_ai_logic(
             min_price=min_p,
             max_price=max_p,
             top_k=MAX_SEARCH_ROOMS,
+            room_filters=direct_search.get("room_filters"),
         )
         if search_results:
             send_zalo_search_results(user_id, search_results)
@@ -3477,7 +3509,8 @@ def process_zalo_ai_logic(
                     location_search=location_search,
                     min_price=min_p, 
                     max_price=max_p, 
-                    top_k=MAX_SEARCH_ROOMS
+                    top_k=MAX_SEARCH_ROOMS,
+                    room_filters=search_params.get("room_filters") or extract_room_search_filters(message_text),
                 )
                 print(f"search_result : {search_results}")
                 if not search_results:
@@ -4024,6 +4057,97 @@ def get_location_match_level(address: str, location_search: str) -> int:
     return 0
 
 
+ROOM_SEARCH_BOOLEAN_ALIASES = {
+    "is_private_bathroom": ("wc riêng", "wc rieng", "vệ sinh riêng", "ve sinh rieng", "khép kín", "khep kin"),
+    "has_ac": ("điều hòa", "dieu hoa", "điều hoà", "máy lạnh", "may lanh"),
+    "has_heater": ("nóng lạnh", "nong lanh", "máy nước nóng", "may nuoc nong"),
+    "has_washer": ("máy giặt", "may giat"),
+    "has_fridge": ("tủ lạnh", "tu lanh", "tủ mát", "tu mat"),
+    "bed": ("giường", "giuong"),
+    "wardrobe": ("tủ quần áo", "tu quan ao", "tủ áo", "tu ao", "giường tủ", "giuong tu"),
+    "allow_pets": ("thú cưng", "thu cung", "nuôi pet", "nuoi pet", "cho nuôi chó mèo", "cho nuoi cho meo"),
+    "has_balcony": ("ban công", "ban cong"),
+    "has_window": ("cửa sổ", "cua so"),
+    "has_fingerprint_lock": ("khóa vân tay", "khoa van tay", "cổng vân tay", "cong van tay", "vân tay", "van tay"),
+    "parking_info": ("chỗ để xe", "cho de xe", "để xe", "de xe", "bãi xe", "bai xe"),
+}
+
+
+def extract_room_search_filters(message_text: str) -> dict:
+    """Đọc các điều kiện tiện ích/thông số trực tiếp, không cần gọi Gemini."""
+    normalized_text = normalize_location_search(message_text)
+    filters = {}
+    for field_name, aliases in ROOM_SEARCH_BOOLEAN_ALIASES.items():
+        normalized_aliases = sorted(
+            {normalize_location_search(alias) for alias in aliases},
+            key=len,
+            reverse=True,
+        )
+        for alias in normalized_aliases:
+            alias_pattern = re.escape(alias).replace(r"\ ", r"\s+")
+            negative_pattern = rf"\b(?:khong\s+co|khong\s+can|khong)\s+{alias_pattern}\b"
+            if re.search(negative_pattern, normalized_text):
+                filters[field_name] = "Không"
+                break
+            if re.search(rf"\b{alias_pattern}\b", normalized_text):
+                filters[field_name] = "Có"
+                break
+
+    # Các cách nói riêng mang nghĩa Không dù không đứng ngay trước alias chuẩn.
+    if re.search(r"\b(?:wc|ve sinh)\s+chung\b", normalized_text):
+        filters["is_private_bathroom"] = "Không"
+    if re.search(r"\bkhong\s+(?:cho\s+)?nuoi\s+(?:pet|thu cung|cho|meo)\b", normalized_text):
+        filters["allow_pets"] = "Không"
+
+    floor_match = re.search(r"\btang\s*(\d{1,2})\b", normalized_text)
+    if floor_match:
+        filters["floor"] = floor_match.group(1)
+    size_match = re.search(r"(?<!\d)(\d+(?:[.,]\d+)?)\s*m(?:2)?\b", normalized_text)
+    if size_match:
+        filters["room_size"] = size_match.group(1).replace(",", ".")
+    occupants_match = re.search(
+        r"\b(?:toi da|o toi da|cho)\s*(\d{1,2})\s*(?:nguoi)?\b",
+        normalized_text,
+    )
+    if occupants_match:
+        filters["max_occupants"] = occupants_match.group(1)
+    move_in_date = extract_move_in_date_from_text(message_text)
+    if move_in_date:
+        filters["move_in_date"] = move_in_date
+    return filters
+
+
+def strip_room_search_filters_from_location(location_text: str) -> str:
+    """Loại điều kiện phòng khỏi chuỗi địa chỉ trước khi so khớp vị trí."""
+    cleaned = str(location_text or "")
+    all_aliases = sorted(
+        {alias for aliases in ROOM_SEARCH_BOOLEAN_ALIASES.values() for alias in aliases},
+        key=len,
+        reverse=True,
+    )
+    for alias in all_aliases:
+        cleaned = re.sub(
+            rf"\b(?:(?:không|khong)\s+(?:có|co|cần|can)?\s*|(?:có|co)\s+)?{re.escape(alias)}\b",
+            " ",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+    cleaned = re.sub(r"\b(?:wc|vệ sinh|ve sinh)\s+chung\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\btầng\s*\d{1,2}\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"(?<!\d)\d+(?:[.,]\d+)?\s*m(?:2|²)?\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(r"\b(?:tối đa|toi da|ở tối đa|o toi da)\s*\d{1,2}\s*(?:người|nguoi)?\b", " ", cleaned, flags=re.IGNORECASE)
+    cleaned = re.sub(
+        r"\b(?:vào|vao|ở|o|chuyển|chuyen|dọn|don)(?:\s+ở|\s+o)?\s*"
+        r"(?:ngày|ngay)?\s*(?:hôm nay|hom nay|ngày mai|ngay mai|mai|ngày mốt|ngay mot|ngày kia|ngay kia|"
+        r"\d{1,2}[/-]\d{1,2}(?:[/-]\d{2,4})?|\d{4}-\d{1,2}-\d{1,2})\b",
+        " ",
+        cleaned,
+        flags=re.IGNORECASE,
+    )
+    cleaned = re.sub(r"\b(?:có|co|không|khong)\b(?=\s*[,.;]|\s*$)", " ", cleaned, flags=re.IGNORECASE)
+    return re.sub(r"\s*[,;]+\s*", ", ", cleaned).strip(" ,.;-")
+
+
 def extract_natural_room_search(message_text: str) -> dict:
     """Tách địa chỉ và khoảng giá trực tiếp, không phụ thuộc kết quả Gemini."""
     raw_text = str(message_text or "").strip()
@@ -4061,12 +4185,63 @@ def extract_natural_room_search(message_text: str) -> dict:
         location_text,
         flags=re.IGNORECASE,
     )
+    location_text = strip_room_search_filters_from_location(location_text)
+    # Sau khi bỏ các tiện ích, từ khóa "giá" có thể trở thành phần cuối chuỗi.
+    location_text = re.sub(
+        r"\b(?:giá|gia)\s*(?:từ|tu|đến|den|dưới|duoi|tối đa|toi da|khoảng|khoang)?\s*$",
+        "",
+        location_text,
+        flags=re.IGNORECASE,
+    )
     location_text = re.sub(r"^[\s,:;.-]+|[\s,:;.-]+$", "", location_text).strip()
     return {
         "location_search": location_text,
         "min_price": min(prices) if len(prices) > 1 else 0,
         "max_price": max(prices) if prices else 0,
+        "room_filters": extract_room_search_filters(message_text),
     }
+
+
+def _room_boolean_filter_value(value) -> Optional[bool]:
+    if value is True:
+        return True
+    if value is False or value is None:
+        return False if value is False else None
+    normalized = normalize_location_search(value)
+    if normalized in {"co", "yes", "true", "1", "x"}:
+        return True
+    if normalized in {"khong", "no", "false", "0", "khong co"}:
+        return False
+    if not normalized or normalized in {"none", "null", "chua ro", "chua cap nhat"}:
+        return None
+    if normalized.startswith("khong"):
+        return False
+    return True
+
+
+def room_matches_search_filters(room: dict, room_filters: Optional[dict]) -> bool:
+    """Lọc payload sau Qdrant để không yêu cầu index cho từng trường tiện ích."""
+    filters = dict(room_filters or {})
+    for field_name in ROOM_SEARCH_BOOLEAN_ALIASES:
+        expected = filters.get(field_name)
+        if expected not in {"Có", "Không"}:
+            continue
+        actual = _room_boolean_filter_value(room.get(field_name))
+        if actual is None or actual != (expected == "Có"):
+            return False
+
+    for field_name in ("floor", "room_size", "max_occupants"):
+        expected = filters.get(field_name)
+        if expected is None:
+            continue
+        actual_number = re.search(r"\d+(?:[.,]\d+)?", str(room.get(field_name) or ""))
+        if not actual_number:
+            return False
+        if float(actual_number.group(0).replace(",", ".")) != float(expected):
+            return False
+    if filters.get("move_in_date") and str(room.get("move_in_date") or "").strip() != filters["move_in_date"]:
+        return False
+    return True
     
     
     
@@ -4075,7 +4250,8 @@ def search_rooms_with_filter(
     location_search: str = None,
     min_price: int = 0, 
     max_price: int = 0,
-    top_k: int = 20
+    top_k: int = 20,
+    room_filters: Optional[dict] = None,
 ) -> List[dict]:
     
     must_conditions = [
@@ -4140,6 +4316,8 @@ def search_rooms_with_filter(
         rooms = [room for level, room in match_levels if level >= accepted_level]
     else:
         rooms = candidates
+
+    rooms = [room for room in rooms if room_matches_search_filters(room, room_filters)]
 
     # Với truy vấn "6tr", giá tối đa đã lọc ở Qdrant; ưu tiên phòng gần 6tr nhất.
     rooms.sort(key=parse_price_safe, reverse=True)

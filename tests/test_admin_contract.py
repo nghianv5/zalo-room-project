@@ -781,8 +781,8 @@ def test_rented_room_report_requires_landlord_confirmation_and_hides_room_from_s
     services_source = (ROOT / "services.py").read_text(encoding="utf-8")
     main_source = (ROOT / "main.py").read_text(encoding="utf-8")
 
-    assert 'f"🏠 Báo đã cho thuê: nhắn “BÁO PHÒNG ĐÃ CHO THUÊ {normalized_code}”' in services_source
-    assert '"payload": f"BÁO PHÒNG ĐÃ CHO THUÊ {normalized_code}"' in services_source
+    assert 'f"🏠 Tôi thấy phòng đã cho thuê: nhắn “TÔI THẤY PHÒNG ĐÃ CHO THUÊ {normalized_code}”' in services_source
+    assert '"payload": f"TÔI THẤY PHÒNG ĐÃ CHO THUÊ {normalized_code}"' in services_source
     assert "def request_room_rented_confirmation(" in services_source
     assert "def send_zalo_rented_confirmation(" in services_source
     assert "def confirm_room_rented_status(" in services_source
@@ -796,3 +796,28 @@ def test_rented_room_report_requires_landlord_confirmation_and_hides_room_from_s
     assert "rented_report_match = re.search(" in main_source
     assert "request_room_rented_confirmation(" in main_source
     assert "confirm_room_rented_status(" in main_source
+    assert 'block_key = f"block:rented-report:{reporter_user_id}"' in services_source
+    assert "if report_count > 5:" in services_source
+    assert 'redis_client.set(block_key, "1", ex=172800)' in services_source
+
+
+def test_zalo_room_search_filters_all_room_amenities_without_qdrant_indexes():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+
+    assert "ROOM_SEARCH_BOOLEAN_ALIASES = {" in services_source
+    for field_name in (
+        "is_private_bathroom", "has_ac", "has_heater", "has_washer",
+        "has_fridge", "bed", "wardrobe", "allow_pets", "has_balcony",
+        "has_window", "has_fingerprint_lock", "parking_info",
+    ):
+        assert f'"{field_name}":' in services_source
+    assert "def extract_room_search_filters(message_text: str)" in services_source
+    assert "def strip_room_search_filters_from_location(location_text: str)" in services_source
+    assert "def room_matches_search_filters(room: dict, room_filters: Optional[dict])" in services_source
+    assert 'filters["floor"] = floor_match.group(1)' in services_source
+    assert 'filters["room_size"]' in services_source
+    assert 'filters["max_occupants"]' in services_source
+    assert 'filters["move_in_date"] = move_in_date' in services_source
+    assert "rooms = [room for room in rooms if room_matches_search_filters(room, room_filters)]" in services_source
+    assert 'room_filters=direct_search.get("room_filters")' in services_source
+    assert 'room_filters=search_params.get("room_filters") or extract_room_search_filters(message_text)' in services_source

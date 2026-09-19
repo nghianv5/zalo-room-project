@@ -1406,7 +1406,9 @@ async def zalo_webhook(request: Request, background_tasks: BackgroundTasks, db: 
 
             # Khách chỉ gửi yêu cầu xác minh; bước này tuyệt đối không tự đổi trạng thái phòng.
             rented_report_match = re.search(
-                r'^\s*(?:báo|bao)(?:\s+cáo|\s+cao)?\s+(?:phòng|phong)\s+(?:đã|da)\s+(?:cho\s+)?(?:thuê|thue)\s+([a-zA-Z0-9]{6})\s*$',
+                r'^\s*(?:(?:tôi|toi)\s+(?:thấy|thay)|(?:báo|bao)(?:\s+cáo|\s+cao)?)\s+'
+                r'(?:phòng|phong)\s+(?:đã|da)\s+(?:cho\s+)?(?:thuê|thue)\s+'
+                r'([a-zA-Z0-9]{6})\s*$',
                 raw_message,
                 re.IGNORECASE,
             )
