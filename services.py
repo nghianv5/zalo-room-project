@@ -1113,7 +1113,7 @@ def format_room_search_message(room: dict, position: int, include_action_instruc
         normalized_code = str(room_code).strip().upper()
         lines.append(f"📅 Đặt lịch xem phòng: nhắn “XEM PHÒNG {normalized_code}”")
         lines.append(f"🚩 Report phòng: nhắn “REPORT PHÒNG {normalized_code}”")
-        lines.append(f"🏠 Tôi thấy phòng đã cho thuê: nhắn “TÔI THẤY PHÒNG ĐÃ CHO THUÊ {normalized_code}”")
+        lines.append(f"🏠 Báo đã cho thuê: nhắn “BÁO PHÒNG ĐÃ CHO THUÊ {normalized_code}”")
     else:
         lines.append("👉 Nhắn OA để được tư vấn phòng này.")
     message = "\n".join(lines)
@@ -1132,7 +1132,7 @@ def send_zalo_room_action_buttons(user_id: str, room_code: str) -> bool:
     fallback_text = (
         f"📅 Đặt lịch xem phòng: nhắn “XEM PHÒNG {normalized_code}”\n"
         f"🚩 Report phòng: nhắn “REPORT PHÒNG {normalized_code}”\n"
-        f"🏠 Tôi thấy phòng đã cho thuê: nhắn “TÔI THẤY PHÒNG ĐÃ CHO THUÊ {normalized_code}”"
+        f"🏠 Báo đã cho thuê: nhắn “BÁO PHÒNG ĐÃ CHO THUÊ {normalized_code}”"
     )
     if not re.fullmatch(r"[A-Z0-9]{6}", normalized_code):
         return send_zalo_message(user_id, fallback_text)
@@ -1165,9 +1165,9 @@ def send_zalo_room_action_buttons(user_id: str, room_code: str) -> bool:
                             "payload": f"REPORT PHÒNG {normalized_code}",
                         },
                         {
-                            "title": "🏠 Tôi thấy phòng đã cho thuê",
+                            "title": "🏠 Báo đã cho thuê",
                             "type": "oa.query.show",
-                            "payload": f"TÔI THẤY PHÒNG ĐÃ CHO THUÊ {normalized_code}",
+                            "payload": f"BÁO PHÒNG ĐÃ CHO THUÊ {normalized_code}",
                         },
                     ],
                 },
@@ -1453,37 +1453,6 @@ def request_room_rented_confirmation(db: Session, reporter_user_id: str, room_co
     """Nhận báo cáo của khách và chuyển yêu cầu xác nhận tới đúng chủ nhà."""
     normalized_code = str(room_code or "").strip().upper()
     try:
-        # Tối đa 5 lần trong 1 giờ. Lần thứ 6 khóa riêng chức năng này trong 48 giờ.
-        if str(reporter_user_id) != str(Config.ZALO_ADMIN_ID):
-            block_key = f"block:rented-report:{reporter_user_id}"
-            hourly_key = f"rate:rented-report-hour:{reporter_user_id}"
-            try:
-                blocked_ttl = redis_client.ttl(block_key)
-                if blocked_ttl and blocked_ttl > 0:
-                    remaining_hours = max(1, (blocked_ttl + 3599) // 3600)
-                    return (
-                        "⛔ Bạn đang bị tạm khóa chức năng ‘Tôi thấy phòng đã cho thuê’ "
-                        f"do gửi quá nhiều lần. Thời gian còn lại khoảng {remaining_hours} giờ."
-                    )
-
-                report_count = redis_client.incr(hourly_key)
-                if report_count == 1:
-                    redis_client.expire(hourly_key, 3600)
-                if report_count > 5:
-                    redis_client.set(block_key, "1", ex=172800)
-                    redis_client.delete(hourly_key)
-                    return (
-                        "⛔ Bạn đã sử dụng chức năng ‘Tôi thấy phòng đã cho thuê’ quá 5 lần "
-                        "trong 1 giờ. Chức năng này đã bị khóa trong 2 ngày."
-                    )
-            except Exception as rate_error:
-                report_error(
-                    "Không kiểm tra được giới hạn báo phòng đã thuê",
-                    rate_error,
-                    "request_room_rented_confirmation.rate_limit",
-                    notify=False,
-                )
-
         room = get_room_for_zalo_action(normalized_code)
         if not room:
             return f"❌ Không tìm thấy phòng có mã {normalized_code}."

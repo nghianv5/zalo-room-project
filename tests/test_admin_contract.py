@@ -781,8 +781,8 @@ def test_rented_room_report_requires_landlord_confirmation_and_hides_room_from_s
     services_source = (ROOT / "services.py").read_text(encoding="utf-8")
     main_source = (ROOT / "main.py").read_text(encoding="utf-8")
 
-    assert 'f"🏠 Tôi thấy phòng đã cho thuê: nhắn “TÔI THẤY PHÒNG ĐÃ CHO THUÊ {normalized_code}”' in services_source
-    assert '"payload": f"TÔI THẤY PHÒNG ĐÃ CHO THUÊ {normalized_code}"' in services_source
+    assert 'f"🏠 Báo đã cho thuê: nhắn “BÁO PHÒNG ĐÃ CHO THUÊ {normalized_code}”' in services_source
+    assert '"payload": f"BÁO PHÒNG ĐÃ CHO THUÊ {normalized_code}"' in services_source
     assert "def request_room_rented_confirmation(" in services_source
     assert "def send_zalo_rented_confirmation(" in services_source
     assert "def confirm_room_rented_status(" in services_source
@@ -796,6 +796,3 @@ def test_rented_room_report_requires_landlord_confirmation_and_hides_room_from_s
     assert "rented_report_match = re.search(" in main_source
     assert "request_room_rented_confirmation(" in main_source
     assert "confirm_room_rented_status(" in main_source
-    assert 'block_key = f"block:rented-report:{reporter_user_id}"' in services_source
-    assert "if report_count > 5:" in services_source
-    assert 'redis_client.set(block_key, "1", ex=172800)' in services_source
