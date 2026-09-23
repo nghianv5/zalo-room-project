@@ -426,6 +426,7 @@ class RoomCreateUpdateSchema(BaseModel):
     has_heater: Optional[str] = "Chưa rõ"             
     has_washer: Optional[str] = "Chưa rõ"             
     has_fridge: Optional[str] = "Chưa rõ"
+    live_with_landlord: Optional[str] = "Chưa rõ"
     allow_pets: Optional[str] = "Chưa rõ"             
     has_balcony: Optional[str] = "Chưa rõ"            
     has_window: Optional[str] = "Chưa rõ"             
@@ -1108,6 +1109,8 @@ def format_room_search_message(room: dict, position: int, include_action_instruc
                 amenities.append(clean_item)
     if amenities:
         lines.append(f"✅ Tiện nghi: {', '.join(amenities)}")
+    if _has_meaningful_room_value(room.get("live_with_landlord")):
+        lines.append(f"🏡 Ở chung với chủ nhà: {str(room.get('live_with_landlord')).strip()}")
 
     if room_code and include_action_instructions:
         normalized_code = str(room_code).strip().upper()
@@ -1366,6 +1369,7 @@ def format_rented_confirmation_room_details(room: dict) -> str:
         f"♨️ Nóng lạnh: {display('has_heater')}",
         f"🧺 Máy giặt: {display('has_washer')}",
         f"🧊 Tủ lạnh: {display('has_fridge')}",
+        f"🏡 Ở chung với chủ nhà: {display('live_with_landlord')}",
         f"🛏️ Giường: {display('bed')}",
         f"🚪 Tủ quần áo: {display('wardrobe')}",
         f"🐾 Thú cưng: {display('allow_pets')}",
@@ -1587,12 +1591,26 @@ def confirm_room_rented_status(
         return "⚠️ Chưa thể xác nhận trạng thái phòng lúc này. Bạn vui lòng thử lại sau."
 
 
+def exclude_blocked_rooms_from_search(rooms: List[dict]) -> List[dict]:
+    """Loại phòng/chủ nhà bị chặn; nếu không đọc được quy tắc thì không làm lộ phòng."""
+    try:
+        rules = get_active_room_posting_blocks()
+        return [room for room in list(rooms or []) if not get_room_access_block(room, rules)]
+    except Exception as exc:
+        report_error(
+            "Không đọc được danh sách chặn khi tìm phòng",
+            exc,
+            "exclude_blocked_rooms_from_search",
+        )
+        return []
+
+
 def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
     """Gửi mỗi phòng thành một cụm riêng và hiển thị toàn bộ media của phòng."""
     candidate_rooms = list(search_results or [])
-    if str(user_id) != Config.ZALO_ADMIN_ID:
-        rules = get_active_room_posting_blocks()
-        candidate_rooms = [room for room in candidate_rooms if not get_room_access_block(room, rules)]
+    # Phòng/chủ nhà bị chặn không được hiển thị trên Zalo. Đây là lớp bảo vệ
+    # cuối cùng phòng trường hợp kết quả đến từ nguồn khác ngoài hàm tìm kiếm.
+    candidate_rooms = exclude_blocked_rooms_from_search(candidate_rooms)
     rooms = candidate_rooms[:MAX_SEARCH_ROOMS]
     if not rooms:
         return send_zalo_message(user_id, "Dạ chưa tìm thấy phòng đang khả dụng phù hợp với yêu cầu của bạn.")
@@ -2096,6 +2114,10 @@ def infer_explicit_boolean_room_updates(message_text: str) -> dict:
         "has_heater": ("nóng lạnh", "máy nước nóng"),
         "has_washer": ("máy giặt",),
         "has_fridge": ("tủ lạnh", "tủ mát"),
+        "live_with_landlord": (
+            "ở chung với chủ", "ở chung chủ", "chung chủ", "chủ nhà ở cùng",
+            "sống chung với chủ", "sống cùng chủ nhà",
+        ),
         "allow_pets": ("cho nuôi pet", "cho nuôi chó", "cho nuôi mèo", "cho nuôi thú cưng"),
         "has_balcony": ("ban công",),
         "has_window": ("cửa sổ",),
@@ -2206,6 +2228,7 @@ def keep_only_explicit_room_updates(data: dict, message_text: str) -> dict:
         "has_heater": ("nóng lạnh", "máy nước nóng"),
         "has_washer": ("máy giặt",),
         "has_fridge": ("tủ lạnh", "tủ mát"),
+        "live_with_landlord": ("chung chủ", "ở chung chủ", "ở chung với chủ", "chủ nhà ở cùng"),
         "allow_pets": ("thú cưng", "nuôi pet", "nuôi chó", "nuôi mèo"),
         "has_balcony": ("ban công",),
         "has_window": ("cửa sổ",),
@@ -2482,6 +2505,7 @@ def upsert_room_to_db(
             bool_to_text(data.get("has_heater"), "Có nóng lạnh", "Không có nóng lạnh"),
             bool_to_text(data.get("has_washer"), "Có máy giặt", "Không có máy giặt"),
             bool_to_text(data.get("has_fridge"), "Có tủ lạnh", "Không có tủ lạnh"),
+            bool_to_text(data.get("live_with_landlord"), "Có ở chung với chủ nhà", "Không ở chung với chủ nhà"),
             bool_to_text(data.get("bed"), "Có giường", "Không có giường"),
             bool_to_text(data.get("wardrobe"), "Có tủ quần áo", "Không có tủ quần áo"),
             bool_to_text(data.get("allow_pets"), "Cho phép nuôi thú cưng / pet", "Không cho nuôi pet"),
@@ -2583,6 +2607,7 @@ def upsert_room_to_db(
             "has_heater": str(data.get("has_heater", "Chưa rõ")),
             "has_washer": str(data.get("has_washer", "Chưa rõ")),
             "has_fridge": str(data.get("has_fridge", "Chưa rõ")),
+            "live_with_landlord": str(data.get("live_with_landlord", "Chưa rõ")),
             "allow_pets": str(data.get("allow_pets", "Chưa rõ")),
             "has_balcony": str(data.get("has_balcony", "Chưa rõ")),
             "has_window": str(data.get("has_window", "Chưa rõ")),
@@ -2693,6 +2718,10 @@ STANDARD_EXCEL_HEADER_MAP = {
     "has washer": "has_washer",
     "tu lanh": "has_fridge",
     "has fridge": "has_fridge",
+    "o chung voi chu nha": "live_with_landlord",
+    "o chung chu": "live_with_landlord",
+    "chung chu": "live_with_landlord",
+    "live with landlord": "live_with_landlord",
     "cho nuoi thu cung": "allow_pets",
     "allow pets": "allow_pets",
     "ban cong": "has_balcony",
@@ -2728,6 +2757,7 @@ STANDARD_EXCEL_HEADER_MAP = {
 
 EXCEL_BOOLEAN_FIELDS = {
     "is_private_bathroom", "has_ac", "has_heater", "has_washer", "has_fridge",
+    "live_with_landlord",
     "allow_pets", "has_balcony", "has_window", "has_fingerprint_lock",
     "parking_info", "bed", "wardrobe",
 }
@@ -2844,6 +2874,7 @@ def validate_excel_room_data(data: dict) -> List[str]:
         "has_heater": "Nóng lạnh",
         "has_washer": "Máy giặt",
         "has_fridge": "Tủ lạnh",
+        "live_with_landlord": "Ở chung với chủ nhà",
         "allow_pets": "Cho nuôi thú cưng",
         "has_balcony": "Ban công",
         "has_window": "Cửa sổ",
@@ -2934,6 +2965,7 @@ def ai_validate_and_extract_room_batch(rows_list: List[dict]) -> List[Optional[d
               "has_heater": "",
               "has_washer": "",
               "has_fridge": "",
+              "live_with_landlord": "",
               "allow_pets": "",
               "has_balcony": "",
               "has_window": "",
@@ -3256,37 +3288,9 @@ def process_zalo_ai_logic(
             send_zalo_message(user_id, f"❌ Không thể cập nhật phòng {direct_room_code}: {result}")
         return
 
-    # Câu tìm phòng đã có cả địa chỉ và giá được xử lý trực tiếp trước Gemini.
-    # Điều này tránh lỗi phân loại/JSON/timeout làm mất một truy vấn hợp lệ.
+    # Tin đăng rõ ràng vẫn được ưu tiên để không bị phân loại nhầm thành tìm phòng.
+    # Mọi yêu cầu tìm phòng còn lại bắt buộc đi qua Gemini ở khối phía dưới.
     listing_intent = is_room_listing_request(message_text)
-    direct_search = extract_natural_room_search(message_text)
-    direct_search_intent = normalize_location_search(message_text)
-    if (
-        not listing_intent
-        and direct_search.get("location_search")
-        and direct_search.get("max_price", 0) > 0
-        and re.search(r"\b(?:xem|tim|kiem|thue|can)\s+(?:phong|phong tro)\b", direct_search_intent)
-    ):
-        add_chat_history(user_id=user_id, user_message=message_text, ai_reply=None)
-        location_search = direct_search["location_search"]
-        min_p = float(direct_search.get("min_price") or 0)
-        max_p = float(direct_search.get("max_price") or 0)
-        search_results = search_rooms_with_filter(
-            query_text=message_text,
-            location_search=location_search,
-            min_price=min_p,
-            max_price=max_p,
-            top_k=MAX_SEARCH_ROOMS,
-            room_filters=direct_search.get("room_filters"),
-        )
-        if search_results:
-            send_zalo_search_results(user_id, search_results)
-        else:
-            send_zalo_message(
-                user_id,
-                f"Dạ chưa tìm thấy phòng ở {location_search} với giá từ {min_p:,.0f}đ đến {max_p:,.0f}đ.",
-            )
-        return
 
     try:
         
@@ -3310,7 +3314,8 @@ def process_zalo_ai_logic(
         7. `has_heater`: có bình nóng lạnh không?
         8. `has_washer`: Có máy giặt không?
         9. `has_fridge`: Có tủ lạnh không?
-        10. `allow_pets`: Có cho nuôi pet không?
+        10. `live_with_landlord`: Có ở chung với chủ nhà không?
+        11. `allow_pets`: Có cho nuôi pet không?
         10. `has_balcony`: Có ban công không?
         11. `has_window`: Có cửa sổ không?
         12. `has_fingerprint_lock`: Ra vào bằng khoá vân tay có hay không?
@@ -3364,6 +3369,14 @@ def process_zalo_ai_logic(
             1. `location_search`: Yêu cầu người dùng nhập địa chỉ muốn thuê
             2. `min_price`: Giá thuê tối thiểu khách có thể trả (Dạng số float tính theo VNĐ, ví dụ: 2000000). Nếu khách không nói giá tối thiểu thì mặc định là 0.
             3. `max_price`: Giá thuê tối đa khách có thể trả (Dạng số float tính theo VNĐ, ví dụ: 4000000).
+            4. `room_filters`: Các điều kiện người dùng yêu cầu, gồm:
+               `is_private_bathroom`, `has_ac`, `has_heater`, `has_washer`,
+               `has_fridge`, `live_with_landlord`, `bed`, `wardrobe`,
+               `allow_pets`, `has_balcony`, `has_window`,
+               `has_fingerprint_lock`, `parking_info`, `floor`, `room_size`,
+               `max_occupants`, `move_in_date`.
+               Với trường Có/Không: chỉ điền "Có" hoặc "Không" khi người dùng
+               nói rõ; nếu không nhắc đến thì bỏ trống "".
 
             QUY TẮC KIỂM TRA ĐIỀU KIỆN (BẮT BUỘC CHO SEARCH_ROOM):
             - Nếu người dùng tìm phòng nhưng KHÔNG CÓ thông tin địa chỉ -> Set `is_valid_search` = false.
@@ -3379,7 +3392,26 @@ def process_zalo_ai_logic(
           "extracted_search": {{
             "location_search": "",
             "min_price": 0,
-            "max_price": 0
+            "max_price": 0,
+            "room_filters": {{
+              "is_private_bathroom": "",
+              "has_ac": "",
+              "has_heater": "",
+              "has_washer": "",
+              "has_fridge": "",
+              "live_with_landlord": "",
+              "bed": "",
+              "wardrobe": "",
+              "allow_pets": "",
+              "has_balcony": "",
+              "has_window": "",
+              "has_fingerprint_lock": "",
+              "parking_info": "",
+              "floor": "",
+              "room_size": "",
+              "max_occupants": "",
+              "move_in_date": ""
+            }}
           }},
           "extracted_data": {{
             "address": "Địa chỉ phòng trọ...",
@@ -3392,6 +3424,7 @@ def process_zalo_ai_logic(
             "has_heater": "Có/Không",
             "has_washer": "Có/Không",
             "has_fridge": "Có/Không",
+            "live_with_landlord": "Có/Không",
             "allow_pets": "Có/Không",
             "has_balcony": "Có/Không",
             "has_window": "Có/Không",
@@ -3428,20 +3461,13 @@ def process_zalo_ai_logic(
             if not cleaned_text:
                 raise GeminiOutputError("Phản hồi Gemini bị rỗng sau khi làm sạch.")
             result_data = json.loads(cleaned_text)
+            if not isinstance(result_data, dict):
+                raise GeminiOutputError("Gemini không trả về JSON object đúng cấu trúc.")
         ai_reply = result_data.get("ai_reply", "Dạ em đã ghi nhận thông tin rồi ạ!")
         print(f"ai_reply 1: {ai_reply}")
-        action = result_data.get("action")
+        action = str(result_data.get("action") or "").strip().upper()
         natural_search = extract_natural_room_search(message_text)
-        normalized_intent = normalize_location_search(message_text)
         listing_intent = is_room_listing_request(message_text)
-        if (
-            not listing_intent
-            and
-            natural_search.get("location_search")
-            and natural_search.get("max_price", 0) > 0
-            and re.search(r"\b(?:xem|tim|kiem|thue|can)\s+(?:phong|phong tro)\b", normalized_intent)
-        ):
-            action = "SEARCH_ROOM"
         extracted = result_data.get("extracted_data", {})
         direct_price = extract_listing_price_from_text(message_text)
         if direct_price and is_missing_required_room_price(extracted.get("price")):
@@ -3474,12 +3500,27 @@ def process_zalo_ai_logic(
             return
         elif action == "SEARCH_ROOM":
             add_chat_history(user_id=user_id, user_message=message_text, ai_reply=None)
-            search_params = dict(result_data.get("extracted_search") or {})
-            if natural_search.get("location_search") and natural_search.get("max_price", 0) > 0:
-                search_params.update(natural_search)
+            raw_search_params = result_data.get("extracted_search")
+            search_params = dict(raw_search_params) if isinstance(raw_search_params, dict) else {}
+            # Gemini là nguồn phân loại/trích xuất chính. Bộ tách trực tiếp chỉ
+            # bổ sung trường Gemini bỏ sót và chuẩn hóa điều kiện Có/Không.
+            if not str(search_params.get("location_search") or "").strip():
+                search_params["location_search"] = natural_search.get("location_search", "")
+            if parse_price_to_number(search_params.get("min_price")) <= 0:
+                search_params["min_price"] = natural_search.get("min_price", 0)
+            if parse_price_to_number(search_params.get("max_price")) <= 0:
+                search_params["max_price"] = natural_search.get("max_price", 0)
+            raw_gemini_filters = search_params.get("room_filters")
+            gemini_filters = normalize_gemini_room_search_filters(
+                raw_gemini_filters if isinstance(raw_gemini_filters, dict) else {}
+            )
+            gemini_filters.update(extract_room_search_filters(message_text))
+            search_params["room_filters"] = gemini_filters
+            min_p = parse_price_to_number(search_params.get("min_price"))
+            max_p = parse_price_to_number(search_params.get("max_price"))
             is_valid_search = bool(
                 search_params.get("location_search")
-                and float(search_params.get("max_price") or 0) > 0
+                and max_p > 0
             )
         
             # 🚨 TRƯỜNG HỢP 1: THIẾU THÔNG TIN BẮT BUỘC
@@ -3495,8 +3536,6 @@ def process_zalo_ai_logic(
             # ✅ TRƯỜNG HỢP 2: ĐÃ ĐỦ THÔNG TIN -> TIẾN HÀNH TÌM KIẾM
             else:
                 location_search = search_params.get("location_search", "")
-                min_p = float(search_params.get("min_price") or 0)
-                max_p = float(search_params.get("max_price") or 0)
                 print(f"min_p : {min_p}")
                 print(f"max_p : {max_p}")
                 
@@ -3510,7 +3549,7 @@ def process_zalo_ai_logic(
                     min_price=min_p, 
                     max_price=max_p, 
                     top_k=MAX_SEARCH_ROOMS,
-                    room_filters=search_params.get("room_filters") or extract_room_search_filters(message_text),
+                    room_filters=search_params.get("room_filters"),
                 )
                 print(f"search_result : {search_results}")
                 if not search_results:
@@ -4063,6 +4102,10 @@ ROOM_SEARCH_BOOLEAN_ALIASES = {
     "has_heater": ("nóng lạnh", "nong lanh", "máy nước nóng", "may nuoc nong"),
     "has_washer": ("máy giặt", "may giat"),
     "has_fridge": ("tủ lạnh", "tu lanh", "tủ mát", "tu mat"),
+    "live_with_landlord": (
+        "ở chung với chủ nhà", "o chung voi chu nha", "ở chung chủ", "o chung chu",
+        "chung chủ", "chung chu", "chủ nhà ở cùng", "chu nha o cung",
+    ),
     "bed": ("giường", "giuong"),
     "wardrobe": ("tủ quần áo", "tu quan ao", "tủ áo", "tu ao", "giường tủ", "giuong tu"),
     "allow_pets": ("thú cưng", "thu cung", "nuôi pet", "nuoi pet", "cho nuôi chó mèo", "cho nuoi cho meo"),
@@ -4219,6 +4262,23 @@ def _room_boolean_filter_value(value) -> Optional[bool]:
     return True
 
 
+def normalize_gemini_room_search_filters(raw_filters: Optional[dict]) -> dict:
+    """Chuẩn hóa filter Gemini về đúng định dạng mà bộ lọc nội bộ sử dụng."""
+    raw = dict(raw_filters or {})
+    normalized = {}
+    for field_name in ROOM_SEARCH_BOOLEAN_ALIASES:
+        if field_name not in raw:
+            continue
+        boolean_value = _room_boolean_filter_value(raw.get(field_name))
+        if boolean_value is not None:
+            normalized[field_name] = "Có" if boolean_value else "Không"
+    for field_name in ("floor", "room_size", "max_occupants", "move_in_date"):
+        value = raw.get(field_name)
+        if value not in (None, ""):
+            normalized[field_name] = str(value).strip()
+    return normalized
+
+
 def room_matches_search_filters(room: dict, room_filters: Optional[dict]) -> bool:
     """Lọc payload sau Qdrant để không yêu cầu index cho từng trường tiện ích."""
     filters = dict(room_filters or {})
@@ -4319,8 +4379,11 @@ def search_rooms_with_filter(
 
     rooms = [room for room in rooms if room_matches_search_filters(room, room_filters)]
 
-    # Với truy vấn "6tr", giá tối đa đã lọc ở Qdrant; ưu tiên phòng gần 6tr nhất.
-    rooms.sort(key=parse_price_safe, reverse=True)
+    # Loại phòng hoặc chủ nhà bị chặn trước khi sắp xếp và trả kết quả.
+    rooms = exclude_blocked_rooms_from_search(rooms)
+
+    # Luồng mới: hiển thị giá thấp trước, giá cao sau.
+    rooms.sort(key=parse_price_safe)
     return rooms[:safe_top_k]
         
 

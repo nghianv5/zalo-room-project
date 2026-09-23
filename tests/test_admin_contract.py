@@ -21,7 +21,7 @@ def _schema_fields(class_name: str):
 def test_admin_room_form_and_table_cover_schema_fields():
     html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
     fields = _schema_fields("RoomCreateUpdateSchema")
-    assert len(fields) == 25
+    assert len(fields) == 26
     assert not [field for field in fields if not re.search(rf'id=["\']{field}["\']', html)]
     assert not [field for field in fields if not re.search(rf'r\.{field}\b', html)]
 
@@ -390,7 +390,7 @@ def test_detailed_vietnamese_location_search_is_accent_tolerant():
     assert "def get_location_match_level" in services_source
     assert 'str(location_search or "").split(",", 1)[0]' in services_source
     assert "accepted_level = best_level if best_level >= 2 else 1" in services_source
-    assert "rooms.sort(key=parse_price_safe, reverse=True)" in services_source
+    assert "rooms.sort(key=parse_price_safe)" in services_source
     search_start = services_source.index("def search_rooms_with_filter(")
     search_end = services_source.index("def refresh_zalo_tokens", search_start)
     search_source = services_source[search_start:search_end]
@@ -518,23 +518,27 @@ def test_admin_timestamps_are_formatted_as_vietnamese_date_time():
     assert "${formatDateTimeVN(o.viewing_time)}" in html
 
 
-def test_natural_search_overrides_invalid_gemini_extraction():
+def test_zalo_search_uses_gemini_before_filtering_rooms():
     services_source = (ROOT / "services.py").read_text(encoding="utf-8")
     assert "def extract_natural_room_search" in services_source
-    assert 'action = "SEARCH_ROOM"' in services_source
-    assert "search_params.update(natural_search)" in services_source
-    assert 'natural_search.get("max_price", 0) > 0' in services_source
+    process_start = services_source.index("def process_zalo_ai_logic(")
+    process_end = services_source.index("def generate_unique_room_code", process_start)
+    process_source = services_source[process_start:process_end]
+    gemini_call = process_source.index("generate_content_with_retry(system_prompt")
+    search_branch = process_source.index('elif action == "SEARCH_ROOM"')
+    room_query = process_source.index("search_rooms_with_filter(", search_branch)
+    assert gemini_call < search_branch < room_query
+    assert "direct_search = extract_natural_room_search(message_text)" not in process_source
+    assert 'search_params["location_search"] = natural_search.get("location_search", "")' in process_source
+    assert 'gemini_filters.update(extract_room_search_filters(message_text))' in process_source
+    assert '"room_filters": {' in services_source
     assert 'print(f"📩 [ZALO RES Part' not in services_source
-    direct_start = services_source.index("direct_search = extract_natural_room_search(message_text)")
-    gemini_start = services_source.index('system_prompt = f"""', direct_start)
-    assert direct_start < gemini_start
-    assert "send_zalo_search_results(user_id, search_results)" in services_source[direct_start:gemini_start]
 
 
 def test_landlord_listing_intent_has_priority_over_room_search():
     services_source = (ROOT / "services.py").read_text(encoding="utf-8")
     assert "def is_room_listing_request" in services_source
-    assert "not listing_intent" in services_source
+    assert "if listing_intent:" in services_source
     assert 'action = "ADD_ROOM"' in services_source
     assert "apply_direct_room_listing_fallbacks(extracted, message_text)" in services_source
     assert 'extracted["address"] = address_match.group(1)' in services_source
@@ -649,7 +653,7 @@ def test_admin_room_filters_cover_details_and_boolean_checkboxes():
     for field_name in (
         "floor", "room_size", "max_occupants", "move_in_date",
         "is_private_bathroom", "has_ac", "has_heater", "has_washer",
-        "has_fridge", "bed", "wardrobe", "allow_pets", "has_balcony",
+        "has_fridge", "live_with_landlord", "bed", "wardrobe", "allow_pets", "has_balcony",
         "has_window", "has_fingerprint_lock", "parking_info",
     ):
         assert f'"{field_name}":' in main_source or f'{field_name}: Optional[str]' in main_source
@@ -726,7 +730,8 @@ def test_blocked_rooms_are_visible_on_web_but_locked_everywhere_else():
 
     assert "def get_room_access_block" in services_source
     assert "def format_room_access_block_message" in services_source
-    assert "candidate_rooms = [room for room in candidate_rooms if not get_room_access_block(room, rules)]" in services_source
+    assert "def exclude_blocked_rooms_from_search" in services_source
+    assert "candidate_rooms = exclude_blocked_rooms_from_search(candidate_rooms)" in services_source
     assert "room.get(\"posting_blocked\")" in services_source
     assert "access_block = get_room_access_block(room_data)" in services_source
     assert "không thể xem, đặt lịch hoặc report" in services_source
@@ -807,7 +812,7 @@ def test_zalo_room_search_filters_all_room_amenities_without_qdrant_indexes():
     assert "ROOM_SEARCH_BOOLEAN_ALIASES = {" in services_source
     for field_name in (
         "is_private_bathroom", "has_ac", "has_heater", "has_washer",
-        "has_fridge", "bed", "wardrobe", "allow_pets", "has_balcony",
+        "has_fridge", "live_with_landlord", "bed", "wardrobe", "allow_pets", "has_balcony",
         "has_window", "has_fingerprint_lock", "parking_info",
     ):
         assert f'"{field_name}":' in services_source
@@ -819,5 +824,43 @@ def test_zalo_room_search_filters_all_room_amenities_without_qdrant_indexes():
     assert 'filters["max_occupants"]' in services_source
     assert 'filters["move_in_date"] = move_in_date' in services_source
     assert "rooms = [room for room in rooms if room_matches_search_filters(room, room_filters)]" in services_source
-    assert 'room_filters=direct_search.get("room_filters")' in services_source
-    assert 'room_filters=search_params.get("room_filters") or extract_room_search_filters(message_text)' in services_source
+    assert 'gemini_filters.update(extract_room_search_filters(message_text))' in services_source
+    assert 'room_filters=search_params.get("room_filters")' in services_source
+
+
+def test_zalo_search_filters_blocks_then_sorts_prices_ascending():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    search_start = services_source.index("def search_rooms_with_filter(")
+    search_end = services_source.index("def refresh_zalo_tokens", search_start)
+    search_source = services_source[search_start:search_end]
+
+    status_filter = search_source.index('match=qdrant_models.MatchValue(value="TRỐNG")')
+    amenity_filter = search_source.index("room_matches_search_filters")
+    blocked_filter = search_source.index("exclude_blocked_rooms_from_search(rooms)")
+    price_sort = search_source.index("rooms.sort(key=parse_price_safe)")
+    assert status_filter < amenity_filter < blocked_filter < price_sort
+
+    send_start = services_source.index("def send_zalo_search_results")
+    send_end = services_source.index("def _refresh_zalo_token_after_invalid", send_start)
+    send_source = services_source[send_start:send_end]
+    media_send = send_source.index("media_first=True")
+    action_send = send_source.index("send_zalo_room_action_buttons")
+    assert media_send < action_send
+
+
+def test_live_with_landlord_field_is_supported_end_to_end():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
+
+    assert 'live_with_landlord: Optional[str] = "Chưa rõ"' in services_source
+    assert '"live_with_landlord": str(data.get("live_with_landlord", "Chưa rõ"))' in services_source
+    assert '"o chung voi chu nha": "live_with_landlord"' in services_source
+    assert '"live_with_landlord": "Ở chung với chủ nhà"' in services_source
+    assert '"live_with_landlord": (' in services_source
+    assert 'f"🏡 Ở chung với chủ nhà: {display(\'live_with_landlord\')}"' in services_source
+    assert 'live_with_landlord: Optional[str] = None' in main_source
+    assert '"live_with_landlord": live_with_landlord' in main_source
+    assert 'id="live_with_landlord"' in html
+    assert '["live_with_landlord","fLiveWithLandlord","Ở chung chủ"]' in html
+    assert '${val(r.live_with_landlord)}' in html
