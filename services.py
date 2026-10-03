@@ -56,7 +56,27 @@ ZALO_ACCESS_TOKEN = os.environ.get("ZALO_ACCESS_TOKEN")
 ZALO_SECRET_KEY = os.environ.get("ZALO_SECRET_KEY")
 ZALO_REFRESH_TOKEN = os.environ.get("ZALO_REFRESH_TOKEN")
 ZALO_TEMPLATE_ID = os.environ.get("YOUR_ZNS_TEMPLATE_ID")
-SQLALCHEMY_DATABASE_URL = os.environ.get("SQLALCHEMY_DATABASE_URL")
+
+
+def normalize_sqlalchemy_database_url(value: str) -> str:
+    """Buộc PostgreSQL dùng psycopg2, đúng với driver được cài trong requirements."""
+    database_url = str(value or "").strip()
+    if not database_url:
+        raise RuntimeError(
+            "Thiếu SQLALCHEMY_DATABASE_URL (hoặc DATABASE_URL) trong biến môi trường."
+        )
+    if database_url.startswith("postgresql+psycopg://"):
+        return "postgresql+psycopg2://" + database_url[len("postgresql+psycopg://"):]
+    if database_url.startswith("postgresql://"):
+        return "postgresql+psycopg2://" + database_url[len("postgresql://"):]
+    if database_url.startswith("postgres://"):
+        return "postgresql+psycopg2://" + database_url[len("postgres://"):]
+    return database_url
+
+
+SQLALCHEMY_DATABASE_URL = normalize_sqlalchemy_database_url(
+    os.environ.get("SQLALCHEMY_DATABASE_URL") or os.environ.get("DATABASE_URL")
+)
 MEDIA_DIR = "static/media"
 os.makedirs(MEDIA_DIR, exist_ok=True)
 

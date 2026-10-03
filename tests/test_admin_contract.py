@@ -869,3 +869,14 @@ def test_live_with_landlord_field_is_supported_end_to_end():
     assert 'id="live_with_landlord"' in html
     assert '["live_with_landlord","fLiveWithLandlord","Ở chung chủ"]' in html
     assert '${val(r.live_with_landlord)}' in html
+
+
+def test_postgresql_url_is_normalized_to_installed_psycopg2_driver():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    requirements_source = (ROOT / "requirements.txt").read_text(encoding="utf-8")
+
+    assert "def normalize_sqlalchemy_database_url(value: str)" in services_source
+    assert 'database_url.startswith("postgresql+psycopg://")' in services_source
+    assert 'return "postgresql+psycopg2://"' in services_source
+    assert 'os.environ.get("SQLALCHEMY_DATABASE_URL") or os.environ.get("DATABASE_URL")' in services_source
+    assert "psycopg2-binary" in requirements_source
