@@ -2107,7 +2107,9 @@ def is_room_update_command(message_text: str) -> bool:
 
 def infer_explicit_boolean_room_updates(message_text: str) -> dict:
     """Đọc trực tiếp tiện ích Có/Không từ câu cập nhật, kể cả khi Gemini bỏ sót khóa."""
-    clean_text = re.sub(r"\s+", " ", str(message_text or "").strip().lower())
+    # Chuẩn hóa không dấu để hiểu cả cách gõ thiếu dấu như “nóng lanh”,
+    # “dieu hoa”, “may giat” mà vẫn giữ đúng ý nghĩa Có/Không.
+    clean_text = re.sub(r"\s+", " ", normalize_location_search(message_text))
     field_keywords = {
         "is_private_bathroom": ("vệ sinh riêng", "wc riêng", "khép kín"),
         "has_ac": ("điều hòa", "điều hoà", "máy lạnh"),
@@ -2136,7 +2138,8 @@ def infer_explicit_boolean_room_updates(message_text: str) -> dict:
     }
     inferred = {}
     for field, keywords in field_keywords.items():
-        matched_keyword = next((keyword for keyword in keywords if keyword in clean_text), None)
+        normalized_keywords = tuple(normalize_location_search(keyword) for keyword in keywords)
+        matched_keyword = next((keyword for keyword in normalized_keywords if keyword in clean_text), None)
         if not matched_keyword:
             continue
         negative_phrases = (
@@ -2191,10 +2194,34 @@ def extract_listing_price_from_text(message_text: str) -> Optional[float]:
     return None
 
 
+def extract_listing_room_name(message_text: str) -> str:
+    """Đọc tên/số phòng đứng sau từ “phòng” mà không nhầm số nhà hoặc diện tích."""
+    raw_text = re.sub(r"\s+", " ", str(message_text or "").strip())
+    if not raw_text:
+        return ""
+
+    room_match = re.search(
+        r"\b(?:phòng|phong)(?:\s+(?:số|so))?\s*[:#-]?\s*"
+        r"([a-z]{1,4}[\s._-]*\d{1,6}[a-z]?|\d{1,6}[a-z]?)"
+        r"(?=\s*(?:[,;.]|\b(?:ở|o|tại|tai|địa\s+chỉ|dia\s+chi|giá|gia)\b))",
+        raw_text,
+        flags=re.IGNORECASE,
+    )
+    if not room_match:
+        return ""
+
+    # Chuẩn hóa “p 401”, “P.401” và “p-401” về cùng một tên P401.
+    return re.sub(r"[\s._-]+", "", room_match.group(1)).upper()
+
+
 def apply_direct_room_listing_fallbacks(data: dict, message_text: str) -> dict:
     """Bổ sung các trường rõ ràng trong tin đăng nếu AI phân loại/trích xuất thiếu."""
     extracted = dict(data or {})
     raw_text = re.sub(r"\s+", " ", str(message_text or "").strip())
+
+    direct_room_name = extract_listing_room_name(raw_text)
+    if direct_room_name and not has_room_update_value(extracted.get("room_name")):
+        extracted["room_name"] = direct_room_name
 
     address_match = re.search(
         r"\b(?:ở|tại)\s+(.+?)(?=\s+(?:phòng\s+)?\d+(?:[.,]\d+)?\s*m(?:2|²)\b|\s+giá\b|$)",

@@ -545,6 +545,11 @@ def test_landlord_listing_intent_has_priority_over_room_search():
     assert "direct_price = extract_listing_price_from_text(raw_text)" in services_source
     assert 'extracted["price"] = direct_price' in services_source
     assert 'extracted["room_size"]' in services_source
+    assert "def extract_listing_room_name(message_text: str)" in services_source
+    assert "direct_room_name = extract_listing_room_name(raw_text)" in services_source
+    assert 'extracted["room_name"] = direct_room_name' in services_source
+    assert "normalize_location_search(message_text)" in services_source
+    assert "normalized_keywords = tuple(normalize_location_search(keyword) for keyword in keywords)" in services_source
     assert '"wardrobe": ("tủ quần áo", "tủ áo", "giường tủ")' in services_source
     assert 'r"^(?:(?:toi|minh|em|anh|chi)\\s+)?cho thue' in services_source
 
