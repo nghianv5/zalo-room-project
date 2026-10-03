@@ -18,9 +18,9 @@ Không chạy nhiều worker có scheduler riêng. Khóa Redis đã hạn chế 
 
 ## Nhập ảnh từ Google Drive và OneDrive công khai
 
-Trên form phòng Admin có thể nhập link file Google Drive công khai hoặc link file/folder OneDrive công khai. Backend tải ảnh/video về, lưu lại trên Cloudinary (khuyến nghị bắt buộc trên Render) và chỉ ghi URL media trực tiếp vào `media_urls`, vì vậy Web và Zalo đều hiển thị được. Không cần Google Drive API key, Microsoft Graph access token hoặc client credentials.
+Trên form phòng Admin có thể nhập link file/folder Google Drive công khai hoặc link file/folder OneDrive công khai. Backend tải ảnh/video về, lưu lại trên Cloudinary (khuyến nghị bắt buộc trên Render) và chỉ ghi URL media trực tiếp vào `media_urls`, vì vậy Web và Zalo đều hiển thị được. Không cần Google Drive API key, Microsoft Graph access token hoặc client credentials.
 
-Google Drive phải dùng link file dạng `https://drive.google.com/file/d/FILE_ID/view`, đặt quyền “Bất kỳ ai có liên kết” và cho phép tải xuống. Do không dùng Google Drive API, link thư mục Google Drive không được hỗ trợ; hãy nhập từng link file. OneDrive hỗ trợ cả file và folder công khai, trong đó folder phải cho tải dạng ZIP. Số file và dung lượng được giới hạn bởi `MEDIA_FOLDER_MAX_FILES` và `MEDIA_FOLDER_MAX_ARCHIVE_MB`. Dropbox vẫn bị từ chối rõ ràng để tránh lưu nhầm URL trang chia sẻ.
+Google Drive hỗ trợ link file dạng `https://drive.google.com/file/d/FILE_ID/view` và link folder dạng `https://drive.google.com/drive/folders/FOLDER_ID`. Thư mục, các thư mục con và file bên trong phải đặt quyền “Bất kỳ ai có liên kết” và cho phép tải xuống. Vì không dùng Google Drive API, việc đọc folder dựa trên trang folder công khai của Google và có thể cần cập nhật nếu Google thay đổi cấu trúc trang. Hệ thống đọc tối đa 3 cấp thư mục con và chỉ lưu tối đa `MEDIA_FOLDER_MAX_FILES` ảnh/video. OneDrive hỗ trợ cả file và folder công khai, trong đó folder phải cho tải dạng ZIP. Dropbox vẫn bị từ chối rõ ràng để tránh lưu nhầm URL trang chia sẻ.
 
 ## Tối ưu chi phí Gemini
 

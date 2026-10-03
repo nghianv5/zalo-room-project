@@ -891,10 +891,13 @@ def test_admin_imports_public_google_drive_and_onedrive_without_api_credentials(
     assert "def detect_media_folder_provider" in services_source
     assert "def _extract_google_drive_file_id" in services_source
     assert "def _import_google_drive_file" in services_source
+    assert "def _extract_google_drive_folder_id" in services_source
+    assert "def _list_google_drive_public_folder" in services_source
+    assert "def _import_google_drive_folder" in services_source
     assert "def _import_onedrive_folder" in services_source
     assert "def expand_media_source_urls" in services_source
     assert 'room_dict["media_urls"] = expand_media_source_urls' in main_source
-    assert "file Google Drive công khai" in html
+    assert "file/folder Google Drive" in html
     assert "GOOGLE_DRIVE_API_KEY=" not in env_source
     assert "MICROSOFT_GRAPH_ACCESS_TOKEN=" not in env_source
     assert "MICROSOFT_CLIENT_ID=" not in env_source

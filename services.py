@@ -2003,10 +2003,7 @@ def _extract_google_drive_file_id(shared_url: str) -> str:
     """Lấy file ID từ các dạng link chia sẻ file Google Drive phổ biến."""
     parsed = urlparse(str(shared_url or "").strip())
     if re.search(r"/(?:drive/)?folders/", parsed.path, re.I):
-        raise ValueError(
-            "Google Drive công khai hiện chỉ hỗ trợ link từng file ảnh/video; "
-            "không hỗ trợ link thư mục nếu không dùng Google Drive API."
-        )
+        raise ValueError("Đây là link thư mục Google Drive, không phải link file.")
     path_match = re.search(r"/file/d/([a-zA-Z0-9_-]+)", parsed.path)
     if path_match:
         return path_match.group(1)
@@ -2020,9 +2017,21 @@ def _extract_google_drive_file_id(shared_url: str) -> str:
     )
 
 
-def _import_google_drive_file(shared_url: str) -> List[str]:
-    """Nhập file Google Drive công khai mà không dùng API key hoặc access token."""
-    file_id = _extract_google_drive_file_id(shared_url)
+def _extract_google_drive_folder_id(shared_url: str) -> str:
+    """Lấy folder ID từ link thư mục Google Drive công khai."""
+    parsed = urlparse(str(shared_url or "").strip())
+    path_match = re.search(r"/(?:drive/)?folders/([a-zA-Z0-9_-]+)", parsed.path, re.I)
+    if path_match:
+        return path_match.group(1)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    folder_id = str(query.get("id") or "").strip()
+    if re.fullmatch(r"[a-zA-Z0-9_-]{10,}", folder_id):
+        return folder_id
+    raise ValueError("Link thư mục Google Drive không đúng định dạng.")
+
+
+def _download_google_drive_file(file_id: str, strict: bool = True) -> List[str]:
+    """Tải một file Drive công khai rồi lưu lại thành URL media trực tiếp."""
     response = requests.get(
         "https://drive.usercontent.google.com/download",
         params={"id": file_id, "export": "download", "confirm": "t"},
@@ -2048,10 +2057,89 @@ def _import_google_drive_file(shared_url: str) -> List[str]:
     stored_url = _store_media_bytes(bytes(payload), content_type, filename)
     if stored_url:
         return [stored_url]
-    raise ValueError(
-        "Google Drive không trả về ảnh/video hợp lệ. Hãy đặt quyền chia sẻ "
-        "“Bất kỳ ai có liên kết” và bảo đảm file cho phép tải xuống."
+    if strict:
+        raise ValueError(
+            "Google Drive không trả về ảnh/video hợp lệ. Hãy đặt quyền chia sẻ "
+            "“Bất kỳ ai có liên kết” và bảo đảm file cho phép tải xuống."
+        )
+    return []
+
+
+def _import_google_drive_file(shared_url: str) -> List[str]:
+    """Nhập file Google Drive công khai mà không dùng API key hoặc access token."""
+    return _download_google_drive_file(_extract_google_drive_file_id(shared_url), strict=True)
+
+
+def _list_google_drive_public_folder(folder_id: str) -> tuple[List[str], List[str]]:
+    """Đọc danh sách file/thư mục con từ trang folder công khai, không dùng API."""
+    response = requests.get(
+        "https://drive.google.com/embeddedfolderview",
+        params={"id": folder_id},
+        headers={"User-Agent": "Mozilla/5.0 ZaloRoomApp/1.0"},
+        timeout=(10, 45),
+        allow_redirects=True,
     )
+    response.raise_for_status()
+    html = str(response.text or "").replace(r"\/", "/").replace("&amp;", "&")
+    if len(html.encode("utf-8")) > 10 * 1024 * 1024:
+        raise ValueError("Thư mục Google Drive có dữ liệu danh sách quá lớn.")
+
+    file_ids = list(dict.fromkeys(re.findall(
+        r"(?:https?://drive\.google\.com)?/file/d/([a-zA-Z0-9_-]{10,})",
+        html,
+        re.I,
+    )))
+    folder_ids = list(dict.fromkeys(re.findall(
+        r"(?:https?://drive\.google\.com)?/(?:drive/)?folders/([a-zA-Z0-9_-]{10,})",
+        html,
+        re.I,
+    )))
+    return file_ids, folder_ids
+
+
+def _import_google_drive_folder(folder_url: str) -> List[str]:
+    """Nhập media trong folder Drive công khai bằng giao diện web, không dùng API."""
+    root_id = _extract_google_drive_folder_id(folder_url)
+    folder_queue = [(root_id, 0)]
+    visited_folders = set()
+    discovered_files = []
+
+    while folder_queue and len(discovered_files) < MEDIA_FOLDER_MAX_FILES * 4:
+        current_id, depth = folder_queue.pop(0)
+        if current_id in visited_folders or depth > 3:
+            continue
+        visited_folders.add(current_id)
+        file_ids, child_folder_ids = _list_google_drive_public_folder(current_id)
+        for file_id in file_ids:
+            if file_id not in discovered_files:
+                discovered_files.append(file_id)
+        if depth < 3:
+            for child_id in child_folder_ids:
+                if child_id not in visited_folders:
+                    folder_queue.append((child_id, depth + 1))
+
+    if not discovered_files:
+        raise ValueError(
+            "Không đọc được file trong thư mục Google Drive. Hãy đặt thư mục và file bên trong "
+            "ở quyền “Bất kỳ ai có liên kết” và cho phép tải xuống."
+        )
+
+    imported = []
+    for file_id in discovered_files:
+        try:
+            imported.extend(_download_google_drive_file(file_id, strict=False))
+        except Exception as exc:
+            report_error(
+                f"Bỏ qua file Google Drive không tải được: {file_id}",
+                exc,
+                "_import_google_drive_folder",
+                notify=False,
+            )
+        if len(imported) >= MEDIA_FOLDER_MAX_FILES:
+            break
+    if not imported:
+        raise ValueError("Thư mục Google Drive không có ảnh/video hợp lệ hoặc không cho phép tải xuống.")
+    return imported[:MEDIA_FOLDER_MAX_FILES]
 
 
 def expand_media_source_urls(values) -> List[str]:
@@ -2065,9 +2153,12 @@ def expand_media_source_urls(values) -> List[str]:
             continue
         try:
             if provider == "unsupported_dropbox":
-                raise ValueError("Ứng dụng hỗ trợ OneDrive và file Google Drive công khai; không hỗ trợ Dropbox.")
+                raise ValueError("Ứng dụng hỗ trợ OneDrive và Google Drive công khai; không hỗ trợ Dropbox.")
             if provider == "google_drive":
-                imported = _import_google_drive_file(source_url)
+                if re.search(r"/(?:drive/)?folders/", urlparse(source_url).path, re.I):
+                    imported = _import_google_drive_folder(source_url)
+                else:
+                    imported = _import_google_drive_file(source_url)
             else:
                 imported = _import_onedrive_folder(source_url)
         except ValueError:
