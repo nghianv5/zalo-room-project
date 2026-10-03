@@ -425,23 +425,23 @@ def test_room_view_and_report_are_on_zalo_while_admin_manages_reports():
     assert "process_room_booking(tenant_zalo_id=str(sender_id)" in main_source
 
 
-def test_zalo_room_media_is_sent_before_room_text():
+def test_zalo_room_text_is_sent_before_room_media():
     services_source = (ROOT / "services.py").read_text(encoding="utf-8")
     search_start = services_source.index("def send_zalo_search_results")
     search_end = services_source.index("def _refresh_zalo_token_after_invalid", search_start)
     search_source = services_source[search_start:search_end]
     assert "format_room_search_message(room, position, include_action_instructions=False)" in search_source
     assert "media_urls=room_media" in search_source
-    assert "media_first=True" in search_source
+    assert "media_first=False" in search_source
     assert "combine_first_media=True" not in search_source
     message_start = services_source.index("def send_zalo_message")
     message_end = services_source.index("def write_audit_log", message_start)
     message_source = services_source[message_start:message_end]
     assert "media_first: bool = False" in message_source
     assert "def send_media_items(items: list)" in message_source
-    assert message_source.index("if media_first and unique_media:") < message_source.index(
-        "for idx, chunk in enumerate(text_chunks):"
-    )
+    text_send = message_source.index("for idx, chunk in enumerate(text_chunks):")
+    trailing_media_send = message_source.index("media_to_send = unique_media[1:]")
+    assert text_send < trailing_media_send
     assert "def send_zalo_room_action_buttons" in services_source
     assert '"template_type": "button"' in services_source
     assert '"type": "oa.query.show"' in services_source
@@ -848,7 +848,7 @@ def test_zalo_search_filters_blocks_then_sorts_prices_ascending():
     send_start = services_source.index("def send_zalo_search_results")
     send_end = services_source.index("def _refresh_zalo_token_after_invalid", send_start)
     send_source = services_source[send_start:send_end]
-    media_send = send_source.index("media_first=True")
+    media_send = send_source.index("media_first=False")
     action_send = send_source.index("send_zalo_room_action_buttons")
     assert media_send < action_send
 

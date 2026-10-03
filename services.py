@@ -1633,7 +1633,7 @@ def exclude_blocked_rooms_from_search(rooms: List[dict]) -> List[dict]:
 
 
 def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
-    """Gửi mỗi phòng thành một cụm riêng và hiển thị toàn bộ media của phòng."""
+    """Gửi thông tin rồi toàn bộ media của từng phòng thành một cụm riêng."""
     candidate_rooms = list(search_results or [])
     # Phòng/chủ nhà bị chặn không được hiển thị trên Zalo. Đây là lớp bảo vệ
     # cuối cùng phòng trường hợp kết quả đến từ nguồn khác ngoài hàm tìm kiếm.
@@ -1663,7 +1663,7 @@ def send_zalo_search_results(user_id: str, search_results: List[dict]) -> bool:
                 user_id,
                 room_message,
                 media_urls=room_media,
-                media_first=True,
+                media_first=False,
             ):
                 return False
         else:
