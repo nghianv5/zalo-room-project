@@ -880,3 +880,22 @@ def test_postgresql_url_is_normalized_to_installed_psycopg2_driver():
     assert 'return "postgresql+psycopg2://"' in services_source
     assert 'os.environ.get("SQLALCHEMY_DATABASE_URL") or os.environ.get("DATABASE_URL")' in services_source
     assert "psycopg2-binary" in requirements_source
+
+
+def test_admin_imports_public_google_drive_and_onedrive_without_api_credentials():
+    services_source = (ROOT / "services.py").read_text(encoding="utf-8")
+    main_source = (ROOT / "main.py").read_text(encoding="utf-8")
+    html = (ROOT / "templates" / "admin.html").read_text(encoding="utf-8")
+    env_source = (ROOT / ".env.example").read_text(encoding="utf-8")
+
+    assert "def detect_media_folder_provider" in services_source
+    assert "def _extract_google_drive_file_id" in services_source
+    assert "def _import_google_drive_file" in services_source
+    assert "def _import_onedrive_folder" in services_source
+    assert "def expand_media_source_urls" in services_source
+    assert 'room_dict["media_urls"] = expand_media_source_urls' in main_source
+    assert "file Google Drive công khai" in html
+    assert "GOOGLE_DRIVE_API_KEY=" not in env_source
+    assert "MICROSOFT_GRAPH_ACCESS_TOKEN=" not in env_source
+    assert "MICROSOFT_CLIENT_ID=" not in env_source
+    assert "MEDIA_FOLDER_MAX_FILES=" in env_source

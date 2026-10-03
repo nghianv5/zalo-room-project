@@ -552,6 +552,13 @@ async def save_or_update_room(
         if not room_dict.get("room_code"):
             room_dict["room_code"] = generate_unique_room_code()
 
+        # Link file/folder OneDrive công khai phải được tải về
+        # kho media bền vững trước khi lưu; không lưu URL trang chia sẻ vào DB.
+        try:
+            room_dict["media_urls"] = expand_media_source_urls(room_dict.get("media_urls", []))
+        except ValueError as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
         # Gọi hàm upsert dữ liệu vào Qdrant DB
         success = upsert_room_to_db(
             data=room_dict, 

@@ -9,7 +9,9 @@ import random
 import hashlib
 import ipaddress
 import unicodedata
-from urllib.parse import urlparse
+import mimetypes
+import zipfile
+from urllib.parse import parse_qsl, urlencode, urlparse, urlunparse
 from typing import Dict, List, Optional
 from datetime import datetime, timedelta, timezone
 import pytz
@@ -145,6 +147,11 @@ MAX_SEARCH_ROOMS = min(20, max(1, int(os.getenv("MAX_SEARCH_ROOMS", "20"))))
 MAX_SEARCH_MEDIA_PER_ROOM = max(0, int(os.getenv("MAX_SEARCH_MEDIA_PER_ROOM", "0")))
 MAX_IMAGE_UPLOAD_BYTES = max(1, int(os.getenv("MAX_IMAGE_UPLOAD_MB", "15"))) * 1024 * 1024
 MAX_VIDEO_UPLOAD_BYTES = max(1, int(os.getenv("MAX_VIDEO_UPLOAD_MB", "80"))) * 1024 * 1024
+MEDIA_FOLDER_MAX_FILES = max(1, min(int(os.getenv("MEDIA_FOLDER_MAX_FILES", "50")), 200))
+MEDIA_FOLDER_MAX_ARCHIVE_BYTES = max(
+    10,
+    int(os.getenv("MEDIA_FOLDER_MAX_ARCHIVE_MB", "250")),
+) * 1024 * 1024
 
 
 def get_public_server_domain(fallback_url: str = "") -> str:
@@ -1831,6 +1838,248 @@ def write_audit_log(actor: str, action: str, target_id: str = None, details: dic
         report_error("Ghi audit log thất bại", exc, "write_audit_log")
     finally:
         audit_db.close()
+
+def detect_media_folder_provider(value: str) -> str:
+    """Nhận dạng link file/folder chia sẻ được hỗ trợ từ giao diện Admin."""
+    try:
+        parsed = urlparse(str(value or "").strip())
+        host = (parsed.hostname or "").lower()
+        if host in {"drive.google.com", "docs.google.com"}:
+            return "google_drive"
+        if host.endswith("dropbox.com"):
+            return "unsupported_dropbox"
+        if host in {"1drv.ms", "onedrive.live.com"} or host.endswith("sharepoint.com"):
+            return "onedrive"
+    except Exception:
+        pass
+    return ""
+
+
+def _detect_media_type_from_bytes(media_bytes: bytes) -> tuple[str, str]:
+    """Nhận dạng một số định dạng media phổ biến khi dịch vụ trả MIME chung."""
+    header = bytes(media_bytes[:32])
+    if header.startswith(b"\xff\xd8\xff"):
+        return "image/jpeg", ".jpg"
+    if header.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "image/png", ".png"
+    if header.startswith((b"GIF87a", b"GIF89a")):
+        return "image/gif", ".gif"
+    if header.startswith(b"RIFF") and header[8:12] == b"WEBP":
+        return "image/webp", ".webp"
+    if len(header) >= 12 and header[4:8] == b"ftyp":
+        return "video/mp4", ".mp4"
+    return "", ""
+
+
+def _store_media_bytes(
+    media_bytes: bytes,
+    content_type: str = "",
+    filename: str = "",
+) -> str:
+    """Lưu bytes ảnh/video thành URL HTTPS bền vững dùng được cho Web và Zalo."""
+    clean_type = str(content_type or "").split(";", 1)[0].strip().lower()
+    guessed_type = (mimetypes.guess_type(filename or "")[0] or "").lower()
+    media_type = clean_type if clean_type.startswith(("image/", "video/")) else guessed_type
+    detected_type, detected_extension = _detect_media_type_from_bytes(media_bytes)
+    if not media_type.startswith(("image/", "video/")):
+        media_type = detected_type
+    if not media_type.startswith(("image/", "video/")):
+        return ""
+    is_video = media_type.startswith("video/")
+    max_bytes = MAX_VIDEO_UPLOAD_BYTES if is_video else MAX_IMAGE_UPLOAD_BYTES
+    if not media_bytes or len(media_bytes) > max_bytes:
+        return ""
+
+    resource_type = "video" if is_video else "image"
+    if CLOUDINARY_URL:
+        try:
+            result = cloudinary.uploader.upload(
+                io.BytesIO(media_bytes),
+                resource_type=resource_type,
+                folder="zalo_room_media/folder_imports",
+            )
+            secure_url = str(result.get("secure_url") or "").strip()
+            if secure_url:
+                return secure_url
+        except Exception as exc:
+            report_error(
+                "Cloudinary upload media từ folder thất bại",
+                exc,
+                "_store_media_bytes",
+                notify=False,
+            )
+
+    extension = os.path.splitext(filename or "")[1].lower()
+    if not re.fullmatch(r"\.[a-z0-9]{1,6}", extension):
+        extension = detected_extension or mimetypes.guess_extension(media_type) or (".mp4" if is_video else ".jpg")
+    try:
+        generated_name = f"{uuid.uuid4().hex}{extension}"
+        filepath = os.path.join(MEDIA_DIR, generated_name)
+        with open(filepath, "wb") as media_file:
+            media_file.write(media_bytes)
+        server_domain = get_public_server_domain()
+        return f"{server_domain}/static/media/{generated_name}" if server_domain else ""
+    except Exception as exc:
+        report_error("Lưu media folder xuống local thất bại", exc, "_store_media_bytes", notify=False)
+        return ""
+
+
+def _download_public_share_payload(shared_url: str) -> tuple[bytes, str, str]:
+    """Tải nội dung link OneDrive công khai và trả bytes, MIME, tên file."""
+    parsed = urlparse(shared_url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query.pop("raw", None)
+    query["download"] = "1"
+    download_url = urlunparse(parsed._replace(query=urlencode(query)))
+    response = requests.get(
+        download_url,
+        headers={"User-Agent": "ZaloRoomApp/1.0"},
+        timeout=(10, 90),
+        stream=True,
+        allow_redirects=True,
+    )
+    response.raise_for_status()
+    payload = bytearray()
+    for chunk in response.iter_content(chunk_size=128 * 1024):
+        if not chunk:
+            continue
+        payload.extend(chunk)
+        if len(payload) > MEDIA_FOLDER_MAX_ARCHIVE_BYTES:
+            raise ValueError("File/folder media vượt giới hạn dung lượng cho phép.")
+    content_type = str(response.headers.get("Content-Type") or "").split(";", 1)[0].lower()
+    disposition = str(response.headers.get("Content-Disposition") or "")
+    filename_match = re.search(r"filename\*?=(?:UTF-8''|\")?([^\";]+)", disposition, re.I)
+    filename = filename_match.group(1).strip() if filename_match else os.path.basename(urlparse(response.url).path)
+    return bytes(payload), content_type, filename
+
+
+def _import_zip_media(archive_bytes: bytes, provider_name: str) -> List[str]:
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(archive_bytes))
+    except zipfile.BadZipFile as exc:
+        raise ValueError(
+            f"{provider_name} không trả về file ZIP của folder. Hãy kiểm tra quyền chia sẻ công khai của thư mục."
+        ) from exc
+
+    imported = []
+    total_uncompressed = 0
+    with archive:
+        for entry in archive.infolist():
+            if entry.is_dir() or entry.filename.startswith("__MACOSX/"):
+                continue
+            total_uncompressed += max(0, int(entry.file_size))
+            if total_uncompressed > MEDIA_FOLDER_MAX_ARCHIVE_BYTES:
+                raise ValueError("Dữ liệu giải nén của folder vượt giới hạn cho phép.")
+            content_type = mimetypes.guess_type(entry.filename)[0] or ""
+            if not content_type.startswith(("image/", "video/")):
+                continue
+            max_bytes = MAX_VIDEO_UPLOAD_BYTES if content_type.startswith("video/") else MAX_IMAGE_UPLOAD_BYTES
+            if entry.file_size <= 0 or entry.file_size > max_bytes:
+                continue
+            with archive.open(entry, "r") as source:
+                media_bytes = source.read(max_bytes + 1)
+            stored_url = _store_media_bytes(media_bytes, content_type, entry.filename)
+            if stored_url:
+                imported.append(stored_url)
+            if len(imported) >= MEDIA_FOLDER_MAX_FILES:
+                break
+    return imported
+
+
+def _import_onedrive_folder(folder_url: str) -> List[str]:
+    """Nhập file hoặc folder OneDrive công khai, không dùng token/API credentials."""
+    payload, content_type, filename = _download_public_share_payload(folder_url)
+    if content_type in {"application/zip", "application/x-zip-compressed"} or zipfile.is_zipfile(io.BytesIO(payload)):
+        return _import_zip_media(payload, "OneDrive")
+    stored_url = _store_media_bytes(payload, content_type, filename)
+    if stored_url:
+        return [stored_url]
+    raise ValueError(
+        "OneDrive không trả về ảnh/video hoặc ZIP. Hãy đặt quyền chia sẻ “Bất kỳ ai có liên kết” và cho phép tải xuống."
+    )
+
+
+def _extract_google_drive_file_id(shared_url: str) -> str:
+    """Lấy file ID từ các dạng link chia sẻ file Google Drive phổ biến."""
+    parsed = urlparse(str(shared_url or "").strip())
+    if re.search(r"/(?:drive/)?folders/", parsed.path, re.I):
+        raise ValueError(
+            "Google Drive công khai hiện chỉ hỗ trợ link từng file ảnh/video; "
+            "không hỗ trợ link thư mục nếu không dùng Google Drive API."
+        )
+    path_match = re.search(r"/file/d/([a-zA-Z0-9_-]+)", parsed.path)
+    if path_match:
+        return path_match.group(1)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    file_id = str(query.get("id") or "").strip()
+    if re.fullmatch(r"[a-zA-Z0-9_-]{10,}", file_id):
+        return file_id
+    raise ValueError(
+        "Link Google Drive không đúng định dạng file chia sẻ. "
+        "Hãy dùng link dạng https://drive.google.com/file/d/FILE_ID/view."
+    )
+
+
+def _import_google_drive_file(shared_url: str) -> List[str]:
+    """Nhập file Google Drive công khai mà không dùng API key hoặc access token."""
+    file_id = _extract_google_drive_file_id(shared_url)
+    response = requests.get(
+        "https://drive.usercontent.google.com/download",
+        params={"id": file_id, "export": "download", "confirm": "t"},
+        headers={"User-Agent": "ZaloRoomApp/1.0"},
+        timeout=(10, 90),
+        stream=True,
+        allow_redirects=True,
+    )
+    response.raise_for_status()
+    payload = bytearray()
+    max_download_bytes = max(MAX_IMAGE_UPLOAD_BYTES, MAX_VIDEO_UPLOAD_BYTES)
+    for chunk in response.iter_content(chunk_size=128 * 1024):
+        if not chunk:
+            continue
+        payload.extend(chunk)
+        if len(payload) > max_download_bytes:
+            raise ValueError("File Google Drive vượt giới hạn dung lượng cho phép.")
+
+    content_type = str(response.headers.get("Content-Type") or "").split(";", 1)[0].lower()
+    disposition = str(response.headers.get("Content-Disposition") or "")
+    filename_match = re.search(r"filename\*?=(?:UTF-8''|\")?([^\";]+)", disposition, re.I)
+    filename = filename_match.group(1).strip() if filename_match else file_id
+    stored_url = _store_media_bytes(bytes(payload), content_type, filename)
+    if stored_url:
+        return [stored_url]
+    raise ValueError(
+        "Google Drive không trả về ảnh/video hợp lệ. Hãy đặt quyền chia sẻ "
+        "“Bất kỳ ai có liên kết” và bảo đảm file cho phép tải xuống."
+    )
+
+
+def expand_media_source_urls(values) -> List[str]:
+    """Đổi link cloud công khai thành URL media trực tiếp đã lưu bền vững."""
+    sources = normalize_room_media_urls(values)
+    expanded = []
+    for source_url in sources:
+        provider = detect_media_folder_provider(source_url)
+        if not provider:
+            expanded.append(source_url)
+            continue
+        try:
+            if provider == "unsupported_dropbox":
+                raise ValueError("Ứng dụng hỗ trợ OneDrive và file Google Drive công khai; không hỗ trợ Dropbox.")
+            if provider == "google_drive":
+                imported = _import_google_drive_file(source_url)
+            else:
+                imported = _import_onedrive_folder(source_url)
+        except ValueError:
+            raise
+        except Exception as exc:
+            report_error("Nhập folder media thất bại", exc, f"provider:{provider}")
+            raise ValueError(f"Không thể đọc folder {provider}. Vui lòng kiểm tra link và quyền chia sẻ.") from exc
+        if not imported:
+            raise ValueError("Folder không có ảnh/video hợp lệ hoặc các file vượt giới hạn dung lượng.")
+        expanded.extend(imported)
+    return apply_media_limit(list(dict.fromkeys(expanded)))
+
 
 def save_media_file(zalo_media_url: str, is_video: bool = False) -> str:
     if not zalo_media_url:
