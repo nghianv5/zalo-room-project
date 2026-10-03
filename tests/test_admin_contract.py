@@ -439,6 +439,10 @@ def test_zalo_room_text_is_sent_before_room_media():
     message_source = services_source[message_start:message_end]
     assert "media_first: bool = False" in message_source
     assert "def send_media_items(items: list)" in message_source
+    assert "def is_video_media_url" in services_source
+    assert "def build_cloudinary_video_thumbnail" in services_source
+    assert '"text": f"🎬 Xem video phòng: {media_url}"' in message_source
+    assert '"media_type": "video"' not in message_source
     text_send = message_source.index("for idx, chunk in enumerate(text_chunks):")
     trailing_media_send = message_source.index("media_to_send = unique_media[1:]")
     assert text_send < trailing_media_send

@@ -1727,6 +1727,31 @@ def _post_zalo_with_token_retry(url: str, payload: dict, access_token: str) -> t
     retry_response = requests.post(url, headers=retry_headers, json=payload, timeout=10)
     return retry_response.json(), refreshed_token
 
+
+def is_video_media_url(media_url: str) -> bool:
+    """Nhận dạng URL video trực tiếp hoặc video đã lưu trên Cloudinary."""
+    value = str(media_url or "").strip()
+    return bool(
+        re.search(r"\.(mp4|mov|webm)(?:\?|$)", value, re.I)
+        or "/video/upload/" in value.lower()
+    )
+
+
+def build_cloudinary_video_thumbnail(media_url: str) -> str:
+    """Tạo ảnh đại diện video để Zalo hiển thị trước link mở video."""
+    value = str(media_url or "").strip()
+    marker = "/video/upload/"
+    if marker not in value.lower():
+        return ""
+    marker_index = value.lower().index(marker)
+    prefix = value[:marker_index]
+    suffix = value[marker_index + len(marker):]
+    suffix = re.sub(r"\.(mp4|mov|webm)(?=\?|$)", ".jpg", suffix, flags=re.I)
+    if not re.search(r"\.jpg(?:\?|$)", suffix, re.I):
+        suffix = f"{suffix}.jpg"
+    return f"{prefix}{marker}so_0,w_1200,c_limit,q_auto,f_jpg/{suffix}"
+
+
 def send_zalo_message(
     user_id: str,
     ai_reply: str,
@@ -1753,10 +1778,50 @@ def send_zalo_message(
     ])
 
     def send_media_items(items: list) -> bool:
-        """Gửi media tuần tự để giữ đúng thứ tự hiển thị trên Zalo."""
+        """Gửi ảnh; video được gửi bằng thumbnail và link vì CS API không nhận video."""
         nonlocal access_token
         for media_url in items:
-            media_type = "video" if re.search(r"\.(mp4|mov|webm)(\?|$)", media_url, re.I) else "image"
+            if is_video_media_url(media_url):
+                thumbnail_url = build_cloudinary_video_thumbnail(media_url)
+                if thumbnail_url:
+                    thumbnail_payload = {
+                        "recipient": {"user_id": user_id},
+                        "message": {
+                            "attachment": {
+                                "type": "template",
+                                "payload": {
+                                    "template_type": "media",
+                                    "elements": [{"media_type": "image", "url": thumbnail_url}],
+                                },
+                            }
+                        },
+                    }
+                    thumbnail_res, access_token = _post_zalo_with_token_retry(
+                        url,
+                        thumbnail_payload,
+                        access_token,
+                    )
+                    if thumbnail_res.get("error") != 0:
+                        report_error(
+                            f"Zalo không nhận thumbnail video: {thumbnail_url}",
+                            context="send_zalo_message",
+                            notify=False,
+                        )
+
+                video_link_payload = {
+                    "recipient": {"user_id": user_id},
+                    "message": {"text": f"🎬 Xem video phòng: {media_url}"},
+                }
+                video_res, access_token = _post_zalo_with_token_retry(
+                    url,
+                    video_link_payload,
+                    access_token,
+                )
+                if video_res.get("error") != 0:
+                    return False
+                time.sleep(0.3)
+                continue
+
             payload = {
                 "recipient": {"user_id": user_id},
                 "message": {
@@ -1764,7 +1829,7 @@ def send_zalo_message(
                         "type": "template",
                         "payload": {
                             "template_type": "media",
-                            "elements": [{"media_type": media_type, "url": media_url}],
+                            "elements": [{"media_type": "image", "url": media_url}],
                         },
                     }
                 },
@@ -1793,16 +1858,13 @@ def send_zalo_message(
         for idx, chunk in enumerate(text_chunks):
             message_payload = {"text": chunk}
             # Kết quả tìm phòng: ghép nội dung và ảnh đầu tiên trong cùng request Zalo.
-            if combine_first_media and idx == 0 and unique_media:
+            if combine_first_media and idx == 0 and unique_media and not is_video_media_url(unique_media[0]):
                 first_media = unique_media[0]
-                first_media_type = "video" if re.search(
-                    r"\.(mp4|mov|webm)(\?|$)", first_media, re.I
-                ) else "image"
                 message_payload["attachment"] = {
                     "type": "template",
                     "payload": {
                         "template_type": "media",
-                        "elements": [{"media_type": first_media_type, "url": first_media}],
+                        "elements": [{"media_type": "image", "url": first_media}],
                     },
                 }
             payload = {"recipient": {"user_id": user_id}, "message": message_payload}
@@ -1819,7 +1881,12 @@ def send_zalo_message(
             if len(text_chunks) > 1:
                 time.sleep(0.3)
 
-        media_to_send = unique_media[1:] if combine_first_media and unique_media else unique_media
+        first_was_combined = bool(
+            combine_first_media
+            and unique_media
+            and not is_video_media_url(unique_media[0])
+        )
+        media_to_send = unique_media[1:] if first_was_combined else unique_media
         if media_to_send and not send_media_items(media_to_send):
             return False
         return True

@@ -22,6 +22,8 @@ Trên form phòng Admin có thể nhập link file/folder Google Drive công kha
 
 Google Drive hỗ trợ link file dạng `https://drive.google.com/file/d/FILE_ID/view` và link folder dạng `https://drive.google.com/drive/folders/FOLDER_ID`. Thư mục, các thư mục con và file bên trong phải đặt quyền “Bất kỳ ai có liên kết” và cho phép tải xuống. Vì không dùng Google Drive API, việc đọc folder dựa trên trang folder công khai của Google và có thể cần cập nhật nếu Google thay đổi cấu trúc trang. Hệ thống đọc tối đa 3 cấp thư mục con và chỉ lưu tối đa `MEDIA_FOLDER_MAX_FILES` ảnh/video. OneDrive hỗ trợ cả file và folder công khai, trong đó folder phải cho tải dạng ZIP. Dropbox vẫn bị từ chối rõ ràng để tránh lưu nhầm URL trang chia sẻ.
 
+Zalo OA CS media template hiện chỉ nhận ảnh/GIF, không nhận MP4 bằng `media_type=video`. Vì vậy với video phòng, hệ thống gửi ảnh đại diện được tạo từ video Cloudinary rồi gửi dòng `🎬 Xem video phòng` kèm URL HTTPS để người dùng bấm mở. Cách này tránh lỗi media `-201` nhưng vẫn giữ video đúng với từng phòng.
+
 ## Tối ưu chi phí Gemini
 
 Ứng dụng mặc định chỉ dùng `gemini-2.5-flash`, retry tối đa 2 lần, cache embedding trong Redis 7 ngày và giữ 8 tin nhắn lịch sử gần nhất. Kết quả tìm phòng được định dạng bằng code nên không gọi Gemini lần hai. Có thể điều chỉnh bằng `GEMINI_TEXT_MODEL`, `GEMINI_TEXT_RETRIES`, `GEMINI_EMBED_RETRIES`, `GEMINI_EMBED_CACHE_TTL`, `GEMINI_MAX_OUTPUT_TOKENS` và `GEMINI_EXCEL_MAX_OUTPUT_TOKENS`. Log `GEMINI USAGE` cho biết token đầu vào, đầu ra và tổng token theo từng tác vụ.
